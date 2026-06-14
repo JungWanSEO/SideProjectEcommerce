@@ -211,6 +211,19 @@ class SettlementServiceTest {
     }
 
     @Test
+    @DisplayName("입금 확인 실패 - 지급 묶음에 포함된 항목이면 409(묶음으로 지급)")
+    void payout_inBatch() {
+        SettlementEntry entry = SettlementEntry.scheduled(
+                1L, 11L, "MOCK-tx-1", "TOSS", 1L, 10000L, 250L, 0.025, 1000L, 0.10, LocalDate.now().plusDays(2));
+        entry.assignPayout(7L);   // 이미 지급 묶음에 편입됨
+        given(settlementRepository.findById(1L)).willReturn(Optional.of(entry));
+
+        assertThatThrownBy(() -> settlementService.payout(1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("지급 묶음에 포함된 항목");
+    }
+
+    @Test
     @DisplayName("입금 확인 - 없는 정산 항목이면 404")
     void payout_notFound() {
         given(settlementRepository.findById(99L)).willReturn(Optional.empty());

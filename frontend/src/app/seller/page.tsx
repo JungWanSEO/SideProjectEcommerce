@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiGet } from "@/lib/api";
-import { PageResponse, Seller, SellerSettlementSummary, Settlement, SettlementStatus } from "@/lib/types";
+import { PageResponse, Payout, Seller, SellerSettlementSummary, Settlement, SettlementStatus } from "@/lib/types";
 import { SETTLEMENT_STATUS_BADGE, SETTLEMENT_STATUS_LABEL } from "@/lib/settlementStatus";
 import { PROVIDER_BADGE, formatRate, providerLabel } from "@/lib/provider";
 import StatCard from "@/components/admin/StatCard";
@@ -16,6 +16,7 @@ export default function SellerConsolePage() {
   const [seller, setSeller] = useState<Seller | null>(null);
   const [summary, setSummary] = useState<SellerSettlementSummary | null>(null);
   const [items, setItems] = useState<Settlement[]>([]);
+  const [payouts, setPayouts] = useState<Payout[]>([]);
   const [statusFilter, setStatusFilter] = useState<SettlementStatus | "">("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -31,11 +32,13 @@ export default function SellerConsolePage() {
       apiGet<Seller>("/api/seller/me"),
       apiGet<SellerSettlementSummary[]>(`/api/seller/me/summary?${qs.toString()}`),
       apiGet<PageResponse<Settlement>>(`/api/seller/me/settlements?${listQs.toString()}`),
+      apiGet<PageResponse<Payout>>("/api/seller/me/payouts?size=50"),
     ])
-      .then(([me, sum, page]) => {
+      .then(([me, sum, page, payoutPage]) => {
         setSeller(me);
         setSummary(sum[0] ?? null); // 셀러 본인 1건(정산 없으면 없음)
         setItems(page.content);
+        setPayouts(payoutPage.content);
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
@@ -141,6 +144,55 @@ export default function SellerConsolePage() {
             )}
           </tbody>
         </table>
+      </div>
+
+      {/* 내 지급 내역 (Payout) */}
+      <div className="mt-8">
+        <h2 className="mb-3 text-lg font-semibold">내 지급 내역</h2>
+        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
+              <tr>
+                <th className="px-4 py-3">ID</th>
+                <th className="px-4 py-3">기간</th>
+                <th className="px-4 py-3 text-right">건수</th>
+                <th className="px-4 py-3 text-right">실지급액</th>
+                <th className="px-4 py-3">상태</th>
+                <th className="px-4 py-3">지급일시</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {payouts.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-6 text-center text-gray-400">
+                    지급 내역이 없습니다.
+                  </td>
+                </tr>
+              ) : (
+                payouts.map((p) => (
+                  <tr key={p.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-gray-400">#{p.id}</td>
+                    <td className="px-4 py-3 text-gray-500">
+                      {p.periodFrom} ~ {p.periodTo}
+                    </td>
+                    <td className="px-4 py-3 text-right text-gray-500">{p.entryCount}</td>
+                    <td className="px-4 py-3 text-right font-medium text-green-700">{p.totalNet.toLocaleString()}</td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`rounded px-2 py-0.5 text-xs ${
+                          p.status === "PAID" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
+                        }`}
+                      >
+                        {p.status === "PAID" ? "지급완료" : "지급대기"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-500">{p.paidAt ? p.paidAt.slice(0, 10) : "—"}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

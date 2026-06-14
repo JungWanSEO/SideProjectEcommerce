@@ -9,12 +9,15 @@ import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.member.entity.Member;
 import com.commerce.api.member.entity.Role;
 import com.commerce.api.member.repository.MemberRepository;
+import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.seller.dto.SellerResponse;
 import com.commerce.api.seller.entity.SellerStatus;
 import com.commerce.api.settlement.dto.SettlementSearchCondition;
+import com.commerce.api.settlement.service.PayoutService;
 import com.commerce.api.settlement.service.SettlementService;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.PageRequest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -36,6 +39,8 @@ class SellerConsoleServiceTest {
     private SellerService sellerService;
     @Mock
     private SettlementService settlementService;
+    @Mock
+    private PayoutService payoutService;
     @InjectMocks
     private SellerConsoleService sellerConsoleService;
 
@@ -84,6 +89,20 @@ class SellerConsoleServiceTest {
                 ArgumentCaptor.forClass(SettlementSearchCondition.class);
         verify(settlementService).getSellerSummary(captor.capture());
         assertThat(captor.getValue().sellerId()).isEqualTo(5L);   // 남의 정산은 구조적으로 못 봄
+    }
+
+    @Test
+    @DisplayName("내 지급 내역 - 내 sellerId로 스코핑해 위임")
+    void getMyPayouts_scoped() {
+        given(memberRepository.findById(1L)).willReturn(Optional.of(memberWithSeller(1L, 5L)));
+        given(payoutService.getPayouts(org.mockito.ArgumentMatchers.eq(5L),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .willReturn(new PageResponse<>(List.of(), 0, 20, 0, 0, false));
+
+        sellerConsoleService.getMyPayouts(1L, null, PageRequest.of(0, 20));
+
+        verify(payoutService).getPayouts(org.mockito.ArgumentMatchers.eq(5L),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test

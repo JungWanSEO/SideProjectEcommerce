@@ -87,6 +87,7 @@ public class SecurityConfig {
                         // 셀러 관리·정산·대사는 운영 업무 → 전 경로 ADMIN 전용
                         .requestMatchers("/api/sellers/**").hasRole("ADMIN")
                         .requestMatchers("/api/settlements/**").hasRole("ADMIN")
+                        .requestMatchers("/api/payouts/**").hasRole("ADMIN")
                         .requestMatchers("/api/reconciliations/**").hasRole("ADMIN")
                         // 셀러 콘솔(본인 정산 조회)은 SELLER 전용 — 자기 sellerId로만 스코핑
                         .requestMatchers("/api/seller/**").hasRole("SELLER")

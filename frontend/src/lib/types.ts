@@ -240,6 +240,27 @@ export interface SellerSettlementSummary {
   netAmount: number;
 }
 
+// ───────── 지급 묶음(Payout) ─────────
+
+export type PayoutStatus = "PENDING" | "PAID";
+
+/** 지급 묶음 (PayoutResponse) — 셀러에게 기간별로 한 번에 지급하는 단위 */
+export interface Payout {
+  id: number;
+  sellerId: number;
+  sellerName: string | null;
+  periodFrom: string; // YYYY-MM-DD
+  periodTo: string;
+  totalGross: number;
+  totalFee: number;
+  totalPlatformFee: number;
+  totalNet: number; // 실지급액
+  entryCount: number;
+  status: PayoutStatus;
+  paidAt: string | null;
+  createdAt: string;
+}
+
 // ───────── 대사(Reconciliation) — ADMIN 운영 ─────────
 
 // 불일치 유형 (백엔드 MismatchType)

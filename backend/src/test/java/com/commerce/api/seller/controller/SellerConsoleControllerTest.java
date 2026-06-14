@@ -11,7 +11,10 @@ import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.seller.dto.SellerResponse;
 import com.commerce.api.seller.entity.SellerStatus;
 import com.commerce.api.seller.service.SellerConsoleService;
+import com.commerce.api.settlement.dto.PayoutResponse;
 import com.commerce.api.settlement.dto.SellerSettlementSummary;
+import com.commerce.api.settlement.entity.PayoutStatus;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -84,5 +87,19 @@ class SellerConsoleControllerTest {
         mockMvc.perform(get("/api/seller/me/settlements"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true));
+    }
+
+    @Test
+    @DisplayName("GET /api/seller/me/payouts - 내 지급 내역 200")
+    void getMyPayouts() throws Exception {
+        given(sellerConsoleService.getMyPayouts(eq(1L), any(), any())).willReturn(
+                new PageResponse<>(
+                        List.of(new PayoutResponse(1L, 5L, "UrbanSelect", LocalDate.now(), LocalDate.now(),
+                                30000, 750, 3000, 26250, 2, PayoutStatus.PENDING, null, LocalDateTime.now())),
+                        0, 20, 1, 1, false));
+
+        mockMvc.perform(get("/api/seller/me/payouts"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].totalNet").value(26250));
     }
 }

@@ -15,6 +15,7 @@ import { useAuth } from "@/lib/auth";
  */
 const NAV = [
   { href: "/admin/settlements", label: "정산" },
+  { href: "/admin/payouts", label: "지급" },
   { href: "/admin/reconciliations", label: "대사" },
 ];
 

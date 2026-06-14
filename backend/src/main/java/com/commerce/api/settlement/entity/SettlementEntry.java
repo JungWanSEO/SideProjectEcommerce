@@ -77,6 +77,9 @@ public class SettlementEntry extends BaseEntity {
     @Column(nullable = false, length = 20)
     private SettlementStatus status;
 
+    @Column(name = "payout_id")
+    private Long payoutId;           // 묶인 지급(Payout) ID(ID 참조, nullable). 묶음에 들어가면 설정됨.
+
     @Column(nullable = false)
     private LocalDate settledDate;   // 입금(정산) 예정/완료일 (T+N)
 
@@ -105,6 +108,11 @@ public class SettlementEntry extends BaseEntity {
                                             long platformFee, double platformFeeRate, LocalDate settledDate) {
         return new SettlementEntry(paymentId, orderId, pgTransactionId, provider, sellerId,
                 grossAmount, fee, feeRate, platformFee, platformFeeRate, settledDate);
+    }
+
+    /** 지급 묶음(Payout)에 편입. */
+    public void assignPayout(Long payoutId) {
+        this.payoutId = payoutId;
     }
 
     /** 입금 확인 → PAID_OUT. (SCHEDULED 상태에서만 가능) */

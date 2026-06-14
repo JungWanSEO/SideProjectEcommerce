@@ -5,8 +5,10 @@ import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.security.SecurityUtil;
 import com.commerce.api.seller.dto.SellerResponse;
 import com.commerce.api.seller.service.SellerConsoleService;
+import com.commerce.api.settlement.dto.PayoutResponse;
 import com.commerce.api.settlement.dto.SellerSettlementSummary;
 import com.commerce.api.settlement.dto.SettlementResponse;
+import com.commerce.api.settlement.entity.PayoutStatus;
 import com.commerce.api.settlement.entity.SettlementStatus;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -67,5 +69,14 @@ public class SellerConsoleController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
         return ResponseEntity.ok(ApiResponse.success(
                 sellerConsoleService.getMySummary(SecurityUtil.getCurrentMemberId(), status, from, to)));
+    }
+
+    @Operation(summary = "내 지급 내역", description = "본인 셀러의 지급 묶음(Payout) 목록. 상태 필터(선택).")
+    @GetMapping("/me/payouts")
+    public ResponseEntity<ApiResponse<PageResponse<PayoutResponse>>> getMyPayouts(
+            @RequestParam(required = false) PayoutStatus status,
+            @ParameterObject @PageableDefault(size = 20, sort = "id", direction = Direction.DESC) Pageable pageable) {
+        return ResponseEntity.ok(ApiResponse.success(
+                sellerConsoleService.getMyPayouts(SecurityUtil.getCurrentMemberId(), status, pageable)));
     }
 }

@@ -235,11 +235,17 @@ public class SettlementService {
                 .toList();
     }
 
-    /** 입금 확인 처리 → PAID_OUT. (실무라면 은행 입금 대사 후 호출. 여기선 수동 트리거.) */
+    /**
+     * per-entry 입금 확인 처리 → PAID_OUT. (실무라면 은행 입금 대사 후 호출. 여기선 수동 트리거.)
+     * 지급 묶음(Payout)에 편입된 항목은 묶음으로 지급해야 하므로 거부한다(중복 지급 방지).
+     */
     @Transactional
     public SettlementResponse payout(Long id) {
         SettlementEntry entry = settlementRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "정산 항목을 찾을 수 없습니다."));
+        if (entry.getPayoutId() != null) {
+            throw new BusinessException(HttpStatus.CONFLICT, "지급 묶음에 포함된 항목입니다. 묶음으로 지급하세요.");
+        }
         entry.markPaidOut();   // 상태머신 가드 — 이미 PAID_OUT이면 409. 변경은 더티 체킹으로 반영.
         return SettlementResponse.from(entry);
     }

@@ -5,10 +5,13 @@ import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.member.entity.Member;
 import com.commerce.api.member.repository.MemberRepository;
 import com.commerce.api.seller.dto.SellerResponse;
+import com.commerce.api.settlement.dto.PayoutResponse;
 import com.commerce.api.settlement.dto.SellerSettlementSummary;
 import com.commerce.api.settlement.dto.SettlementResponse;
 import com.commerce.api.settlement.dto.SettlementSearchCondition;
+import com.commerce.api.settlement.entity.PayoutStatus;
 import com.commerce.api.settlement.entity.SettlementStatus;
+import com.commerce.api.settlement.service.PayoutService;
 import com.commerce.api.settlement.service.SettlementService;
 import java.time.LocalDate;
 import java.util.List;
@@ -32,6 +35,7 @@ public class SellerConsoleService {
     private final MemberRepository memberRepository;
     private final SellerService sellerService;
     private final SettlementService settlementService;
+    private final PayoutService payoutService;
 
     /** 내 셀러 정보. */
     public SellerResponse getMySeller(Long memberId) {
@@ -52,6 +56,12 @@ public class SellerConsoleService {
         Long sellerId = requireSellerId(memberId);
         return settlementService.getSellerSummary(
                 new SettlementSearchCondition(sellerId, status, from, to));
+    }
+
+    /** 내 지급 묶음 목록(상태 필터). */
+    public PageResponse<PayoutResponse> getMyPayouts(Long memberId, PayoutStatus status, Pageable pageable) {
+        Long sellerId = requireSellerId(memberId);
+        return payoutService.getPayouts(sellerId, status, pageable);
     }
 
     /** 로그인 회원의 셀러 ID — 셀러 계정(sellerId 보유)이 아니면 403. */
