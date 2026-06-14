@@ -53,6 +53,13 @@ public class Member extends BaseEntity {
     /** 소셜 제공자의 고유 ID(예: 구글 sub). LOCAL은 null. */
     private String providerId;
 
+    /**
+     * 셀러(입점사) 운영자일 때 운영하는 셀러 ID(ID 참조, nullable). SELLER 역할에만 의미가 있다.
+     * 셀러 콘솔은 이 값으로 "내 정산만" 스코핑한다(다른 애그리거트라 객체 연관이 아닌 ID 참조).
+     */
+    @Column(name = "seller_id")
+    private Long sellerId;
+
     @Builder
     private Member(String email, String password, String nickname, Role role,
                    AuthProvider provider, String providerId) {
@@ -62,5 +69,11 @@ public class Member extends BaseEntity {
         this.role = role;
         this.provider = provider != null ? provider : AuthProvider.LOCAL;   // 미지정 시 LOCAL
         this.providerId = providerId;
+    }
+
+    /** ADMIN이 이 회원을 셀러 운영자로 지정 — 역할을 SELLER로 올리고 셀러에 연결한다. */
+    public void assignAsSeller(Long sellerId) {
+        this.role = Role.SELLER;
+        this.sellerId = sellerId;
     }
 }

@@ -49,4 +49,20 @@ public class MemberService {
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "회원을 찾을 수 없습니다."));
         return MemberResponse.from(member);
     }
+
+    /**
+     * 회원을 셀러 운영자로 지정(ADMIN) — 역할을 SELLER로 올리고 셀러에 연결한다.
+     * 관리자는 셀러로 강등하지 않는다(409). 없는 회원은 404.
+     * (역할은 JWT에 박히므로 지정된 회원은 다음 로그인부터 SELLER 권한이 적용된다.)
+     */
+    @Transactional
+    public MemberResponse assignAsSeller(Long memberId, Long sellerId) {
+        Member member = memberRepository.findById(memberId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "회원을 찾을 수 없습니다."));
+        if (member.getRole() == Role.ADMIN) {
+            throw new BusinessException(HttpStatus.CONFLICT, "관리자는 셀러로 지정할 수 없습니다.");
+        }
+        member.assignAsSeller(sellerId);   // 영속 엔티티 → dirty checking flush
+        return MemberResponse.from(member);
+    }
 }

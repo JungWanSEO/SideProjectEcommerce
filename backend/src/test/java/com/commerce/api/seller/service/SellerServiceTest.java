@@ -8,6 +8,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import com.commerce.api.global.exception.BusinessException;
+import com.commerce.api.member.dto.MemberResponse;
+import com.commerce.api.member.entity.Role;
+import com.commerce.api.member.service.MemberService;
 import com.commerce.api.seller.dto.SellerCreateRequest;
 import com.commerce.api.seller.dto.SellerResponse;
 import com.commerce.api.seller.dto.SellerUpdateRequest;
@@ -34,6 +37,8 @@ class SellerServiceTest {
 
     @Mock
     private SellerRepository sellerRepository;
+    @Mock
+    private MemberService memberService;
     @InjectMocks
     private SellerService sellerService;
 
@@ -181,5 +186,30 @@ class SellerServiceTest {
         assertThatThrownBy(() -> sellerService.activate(1L))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("이미 활성");
+    }
+
+    @Test
+    @DisplayName("운영자 지정 - 셀러 존재하면 member 도메인에 위임")
+    void assignOwner_success() {
+        given(sellerRepository.existsById(5L)).willReturn(true);
+        MemberResponse promoted = new MemberResponse(9L, "s@c.com", "운영자", Role.SELLER, 5L, null);
+        given(memberService.assignAsSeller(9L, 5L)).willReturn(promoted);
+
+        MemberResponse response = sellerService.assignOwner(5L, 9L);
+
+        assertThat(response.role()).isEqualTo(Role.SELLER);
+        assertThat(response.sellerId()).isEqualTo(5L);
+        verify(memberService).assignAsSeller(9L, 5L);
+    }
+
+    @Test
+    @DisplayName("운영자 지정 실패 - 없는 셀러면 404, member는 건드리지 않음")
+    void assignOwner_sellerNotFound() {
+        given(sellerRepository.existsById(99L)).willReturn(false);
+
+        assertThatThrownBy(() -> sellerService.assignOwner(99L, 9L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("셀러를 찾을 수 없습니다");
+        verify(memberService, never()).assignAsSeller(any(), any());
     }
 }

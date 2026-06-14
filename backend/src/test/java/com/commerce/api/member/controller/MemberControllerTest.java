@@ -40,7 +40,7 @@ class MemberControllerTest {
     @DisplayName("POST /api/members - 회원가입 성공 시 201, password는 응답에 없음")
     void signup_success() throws Exception {
         given(memberService.signup(any())).willReturn(
-                new MemberResponse(1L, "alice@commerce.com", "alice", Role.USER, LocalDateTime.now()));
+                new MemberResponse(1L, "alice@commerce.com", "alice", Role.USER, null, LocalDateTime.now()));
 
         mockMvc.perform(post("/api/members")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -70,7 +70,7 @@ class MemberControllerTest {
     @DisplayName("GET /api/members/{id} - 조회 성공 시 200")
     void getMember_success() throws Exception {
         given(memberService.getMember(1L)).willReturn(
-                new MemberResponse(1L, "alice@commerce.com", "alice", Role.USER, LocalDateTime.now()));
+                new MemberResponse(1L, "alice@commerce.com", "alice", Role.USER, null, LocalDateTime.now()));
 
         mockMvc.perform(get("/api/members/1"))
                 .andExpect(status().isOk())

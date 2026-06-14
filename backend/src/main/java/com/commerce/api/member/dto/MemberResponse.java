@@ -14,6 +14,7 @@ public record MemberResponse(
         String email,
         String nickname,
         Role role,
+        Long sellerId,   // SELLER 역할이면 운영하는 셀러 ID (그 외 null) — FE 로그인 라우팅·셀러 콘솔용
         LocalDateTime createdAt
 ) {
     public static MemberResponse from(Member member) {
@@ -22,6 +23,7 @@ public record MemberResponse(
                 member.getEmail(),
                 member.getNickname(),
                 member.getRole(),
+                member.getSellerId(),
                 member.getCreatedAt()
         );
     }

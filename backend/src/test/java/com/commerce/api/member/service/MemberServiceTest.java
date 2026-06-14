@@ -115,4 +115,41 @@ class MemberServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("회원을 찾을 수 없습니다");
     }
+
+    @Test
+    @DisplayName("셀러 지정 - USER 회원을 SELLER로 올리고 셀러에 연결")
+    void assignAsSeller_success() {
+        Member member = memberWithId(1L, "seller@commerce.com", "셀러운영자");
+        given(memberRepository.findById(1L)).willReturn(Optional.of(member));
+
+        MemberResponse response = memberService.assignAsSeller(1L, 5L);
+
+        assertThat(response.role()).isEqualTo(Role.SELLER);
+        assertThat(response.sellerId()).isEqualTo(5L);
+        assertThat(member.getRole()).isEqualTo(Role.SELLER);
+        assertThat(member.getSellerId()).isEqualTo(5L);
+    }
+
+    @Test
+    @DisplayName("셀러 지정 실패 - 관리자는 셀러로 지정할 수 없다(409)")
+    void assignAsSeller_admin() {
+        Member admin = Member.builder()
+                .email("admin@commerce.com").password("ENCODED").nickname("admin").role(Role.ADMIN).build();
+        ReflectionTestUtils.setField(admin, "id", 1L);
+        given(memberRepository.findById(1L)).willReturn(Optional.of(admin));
+
+        assertThatThrownBy(() -> memberService.assignAsSeller(1L, 5L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("관리자는 셀러로 지정할 수 없습니다");
+    }
+
+    @Test
+    @DisplayName("셀러 지정 실패 - 없는 회원이면 404")
+    void assignAsSeller_notFound() {
+        given(memberRepository.findById(99L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> memberService.assignAsSeller(99L, 5L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("회원을 찾을 수 없습니다");
+    }
 }

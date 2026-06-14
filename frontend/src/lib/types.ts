@@ -160,6 +160,19 @@ export interface OrderSummary {
   itemCount: number;
 }
 
+// ───────── 셀러(Seller) ─────────
+
+/** 셀러(입점사) — SellerResponse */
+export interface Seller {
+  id: number;
+  name: string;
+  commissionRate: number; // 플랫폼 판매수수료율 (예: 0.10)
+  status: "ACTIVE" | "SUSPENDED";
+  payoutAccount: string | null;
+  businessNumber: string | null;
+  createdAt: string;
+}
+
 // ───────── 정산(Settlement) — ADMIN 운영 ─────────
 
 // 정산 항목 상태 (백엔드 SettlementStatus). 정산예정 → 입금완료
