@@ -2,22 +2,29 @@ package com.commerce.api.settlement.controller;
 
 import com.commerce.api.global.common.ApiResponse;
 import com.commerce.api.global.common.PageResponse;
+import com.commerce.api.settlement.dto.SellerSettlementSummary;
 import com.commerce.api.settlement.dto.SettlementResponse;
 import com.commerce.api.settlement.dto.SettlementRunResponse;
+import com.commerce.api.settlement.dto.SettlementSearchCondition;
+import com.commerce.api.settlement.entity.SettlementStatus;
 import com.commerce.api.settlement.service.SettlementService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import java.time.LocalDate;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort.Direction;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -47,14 +54,31 @@ public class SettlementController {
     }
 
     @Operation(summary = "정산 항목 목록 조회",
-            description = "정산 항목을 페이지로 조회한다. 기본 정렬은 최신순(id desc), 기본 페이지 크기는 20.")
+            description = "정산 항목을 페이지로 조회한다. 셀러/상태/기간(정산일) 필터(선택). 기본 정렬 최신순(id desc), 기본 크기 20.")
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<SettlementResponse>>> getSettlements(
+            @RequestParam(required = false) Long sellerId,
+            @RequestParam(required = false) SettlementStatus status,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @ParameterObject
             @PageableDefault(size = 20, sort = "id", direction = Direction.DESC)
             Pageable pageable) {
-        PageResponse<SettlementResponse> response = settlementService.getSettlements(pageable);
+        SettlementSearchCondition condition = new SettlementSearchCondition(sellerId, status, from, to);
+        PageResponse<SettlementResponse> response = settlementService.getSettlements(condition, pageable);
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @Operation(summary = "셀러 정산서(셀러별 집계)",
+            description = "조건(셀러/상태/기간) 범위에서 셀러별 매출·PG수수료·플랫폼수수료·실수령을 집계한다.")
+    @GetMapping("/summary")
+    public ResponseEntity<ApiResponse<List<SellerSettlementSummary>>> sellerSummary(
+            @RequestParam(required = false) Long sellerId,
+            @RequestParam(required = false) SettlementStatus status,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        SettlementSearchCondition condition = new SettlementSearchCondition(sellerId, status, from, to);
+        return ResponseEntity.ok(ApiResponse.success(settlementService.getSellerSummary(condition)));
     }
 
     @Operation(summary = "입금 확인",

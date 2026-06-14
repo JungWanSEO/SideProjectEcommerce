@@ -165,17 +165,20 @@ export interface OrderSummary {
 // 정산 항목 상태 (백엔드 SettlementStatus). 정산예정 → 입금완료
 export type SettlementStatus = "SCHEDULED" | "PAID_OUT";
 
-/** 정산 항목 (SettlementResponse) — 매출 ≠ 결제액: gross/fee/net 분리 */
+/** 정산 항목 (SettlementResponse) — 셀러별 정산: 매출 ≠ 셀러 실수령 */
 export interface Settlement {
   id: number;
   paymentId: number;
   orderId: number;
   pgTransactionId: string; // 대사 조인 키
   provider: string; // 정산 대상 결제를 처리한 PG (MPG-2)
-  grossAmount: number; // 결제액
-  fee: number; // 수수료
-  feeRate: number; // 적용 수수료율 스냅샷 (예: 0.025) — MPG-3
-  netAmount: number; // 실입금 (= gross - fee)
+  sellerId: number | null; // 셀러(입점사) — null이면 플랫폼 직매입(미귀속)
+  grossAmount: number; // 셀러 매출
+  fee: number; // PG 수수료(안분)
+  feeRate: number; // 적용 PG 수수료율 스냅샷 (예: 0.025) — MPG-3
+  platformFee: number; // 플랫폼 판매수수료
+  platformFeeRate: number; // 적용 플랫폼 수수료율 스냅샷 (예: 0.10)
+  netAmount: number; // 셀러 실수령 (= gross - fee - platformFee)
   status: SettlementStatus;
   settledDate: string; // 입금 예정/완료일 (LocalDate "YYYY-MM-DD")
   createdAt: string;
@@ -188,6 +191,17 @@ export interface SettlementProviderBreakdown {
   count: number;
   grossAmount: number;
   fee: number;
+  platformFee: number;
+  netAmount: number;
+}
+
+/** 정산 배치 결과의 셀러별 분해 (SettlementRunResponse.SellerBreakdown) — Phase 2 */
+export interface SettlementSellerBreakdown {
+  sellerId: number | null;
+  count: number;
+  grossAmount: number;
+  fee: number;
+  platformFee: number;
   netAmount: number;
 }
 
@@ -196,8 +210,21 @@ export interface SettlementRunResult {
   createdCount: number;
   totalGrossAmount: number;
   totalFee: number;
+  totalPlatformFee: number;
   totalNetAmount: number;
   byProvider: SettlementProviderBreakdown[]; // PG별 분해 — MPG-3
+  bySeller: SettlementSellerBreakdown[]; // 셀러별 분해 — Phase 2
+}
+
+/** 셀러 정산서 — 셀러별 집계 (SellerSettlementSummary). sellerName 포함(서버 enrich) */
+export interface SellerSettlementSummary {
+  sellerId: number | null;
+  sellerName: string | null; // 미귀속이면 null
+  count: number;
+  grossAmount: number;
+  fee: number;
+  platformFee: number;
+  netAmount: number;
 }
 
 // ───────── 대사(Reconciliation) — ADMIN 운영 ─────────

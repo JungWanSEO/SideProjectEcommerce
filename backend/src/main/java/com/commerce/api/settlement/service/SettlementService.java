@@ -9,10 +9,12 @@ import com.commerce.api.payment.gateway.PaymentGatewayRouter;
 import com.commerce.api.payment.service.PaymentService;
 import com.commerce.api.seller.entity.Seller;
 import com.commerce.api.seller.repository.SellerRepository;
+import com.commerce.api.settlement.dto.SellerSettlementSummary;
 import com.commerce.api.settlement.dto.SettlementResponse;
 import com.commerce.api.settlement.dto.SettlementRunResponse;
 import com.commerce.api.settlement.dto.SettlementRunResponse.ProviderBreakdown;
 import com.commerce.api.settlement.dto.SettlementRunResponse.SellerBreakdown;
+import com.commerce.api.settlement.dto.SettlementSearchCondition;
 import com.commerce.api.settlement.entity.SettlementEntry;
 import com.commerce.api.settlement.repository.SettlementRepository;
 import java.time.LocalDate;
@@ -21,6 +23,8 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
@@ -205,11 +209,30 @@ public class SettlementService {
         }
     }
 
-    /** 정산 항목 목록(페이지). 최신순은 컨트롤러의 기본 정렬로 처리. */
+    /** 정산 항목 목록(페이지) — 셀러·상태·기간 필터(없으면 전체). 최신순(id desc). */
     @Transactional(readOnly = true)
-    public PageResponse<SettlementResponse> getSettlements(Pageable pageable) {
+    public PageResponse<SettlementResponse> getSettlements(SettlementSearchCondition condition, Pageable pageable) {
         return PageResponse.from(
-                settlementRepository.findAll(pageable).map(SettlementResponse::from));
+                settlementRepository.search(condition, pageable).map(SettlementResponse::from));
+    }
+
+    /**
+     * 셀러 정산서 — 조건 범위 안에서 셀러별로 매출/수수료/실수령을 집계한다.
+     * 집계(QueryDSL group-by)는 sellerId만 알므로, sellerName은 여기서 enrich한다(ID 참조 원칙).
+     */
+    @Transactional(readOnly = true)
+    public List<SellerSettlementSummary> getSellerSummary(SettlementSearchCondition condition) {
+        List<SellerSettlementSummary> rows = settlementRepository.summarizeBySeller(condition);
+        List<Long> sellerIds = rows.stream()
+                .map(SellerSettlementSummary::sellerId).filter(Objects::nonNull).toList();
+        Map<Long, String> names = sellerRepository.findAllById(sellerIds).stream()
+                .collect(Collectors.toMap(Seller::getId, Seller::getName));
+        return rows.stream()
+                .map(r -> new SellerSettlementSummary(
+                        r.sellerId(),
+                        r.sellerId() == null ? null : names.get(r.sellerId()),
+                        r.count(), r.grossAmount(), r.fee(), r.platformFee(), r.netAmount()))
+                .toList();
     }
 
     /** 입금 확인 처리 → PAID_OUT. (실무라면 은행 입금 대사 후 호출. 여기선 수동 트리거.) */
