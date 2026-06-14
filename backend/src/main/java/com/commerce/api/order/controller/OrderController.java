@@ -99,4 +99,15 @@ public class OrderController {
                 SecurityUtil.getCurrentMemberId(), id, SecurityUtil.isAdmin());
         return ResponseEntity.ok(ApiResponse.success("주문이 취소되었습니다.", response));
     }
+
+    @Operation(summary = "주문 항목 부분 취소(환불)",
+            description = "주문의 특정 항목(라인)만 취소·환불한다. PAID 주문이면 그 항목 재고 복원 + 금액만큼 부분 환불. "
+                    + "본인 주문 또는 ADMIN만(아니면 403). 이미 취소된 항목이면 409.")
+    @PostMapping("/{orderId}/items/{itemId}/cancel")
+    public ResponseEntity<ApiResponse<OrderResponse>> cancelItem(
+            @PathVariable Long orderId, @PathVariable Long itemId) {
+        OrderResponse response = paymentService.cancelOrderItem(
+                SecurityUtil.getCurrentMemberId(), orderId, itemId, SecurityUtil.isAdmin());
+        return ResponseEntity.ok(ApiResponse.success("주문 항목이 취소(환불)되었습니다.", response));
+    }
 }

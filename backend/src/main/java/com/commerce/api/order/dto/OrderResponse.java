@@ -2,6 +2,7 @@ package com.commerce.api.order.dto;
 
 import com.commerce.api.order.entity.Order;
 import com.commerce.api.order.entity.OrderItem;
+import com.commerce.api.order.entity.OrderItemStatus;
 import com.commerce.api.order.entity.OrderStatus;
 import com.commerce.api.order.entity.ShippingInfo;
 import java.time.LocalDateTime;
@@ -54,8 +55,9 @@ public record OrderResponse(
         }
     }
 
-    /** 주문 항목 응답 (스냅샷된 상품명·사이즈·가격·셀러귀속 + 소계) */
+    /** 주문 항목 응답 (스냅샷된 상품명·사이즈·가격·셀러귀속 + 소계 + 상태) */
     public record OrderItemResponse(
+            Long id,          // 주문 항목 ID (부분취소 대상 지정·정산 상계 식별용)
             Long productId,
             Long optionId,
             Long brandId,     // 주문 시점 스냅샷 (미지정이면 null)
@@ -64,10 +66,12 @@ public record OrderResponse(
             String size,
             long orderPrice,
             int quantity,
-            long subtotal
+            long subtotal,
+            OrderItemStatus status   // ACTIVE / CANCELLED(부분환불)
     ) {
         public static OrderItemResponse from(OrderItem item) {
             return new OrderItemResponse(
+                    item.getId(),
                     item.getProductId(),
                     item.getOptionId(),
                     item.getBrandId(),
@@ -76,7 +80,8 @@ public record OrderResponse(
                     item.getSize(),
                     item.getOrderPrice(),
                     item.getQuantity(),
-                    item.getSubtotal()
+                    item.getSubtotal(),
+                    item.getStatus()
             );
         }
     }

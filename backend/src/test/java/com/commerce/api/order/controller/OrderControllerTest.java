@@ -15,6 +15,7 @@ import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.order.dto.OrderResponse;
 import com.commerce.api.order.dto.OrderResponse.OrderItemResponse;
 import com.commerce.api.order.dto.OrderSummaryResponse;
+import com.commerce.api.order.entity.OrderItemStatus;
 import com.commerce.api.order.entity.OrderStatus;
 import com.commerce.api.order.service.OrderService;
 import com.commerce.api.payment.service.PaymentService;
@@ -69,7 +70,8 @@ class OrderControllerTest {
 
     private OrderResponse sampleOrder(OrderStatus status) {
         return new OrderResponse(1L, 1L, status, 30000L,
-                List.of(new OrderItemResponse(1L, 10L, 7L, 3L, "반팔티셔츠", "M", 10000L, 3, 30000L)),
+                List.of(new OrderItemResponse(
+                        100L, 1L, 10L, 7L, 3L, "반팔티셔츠", "M", 10000L, 3, 30000L, OrderItemStatus.ACTIVE)),
                 null,   // shipping (배송지 없음 — 컨트롤러 슬라이스 테스트엔 불필요)
                 LocalDateTime.now());
     }
@@ -151,6 +153,17 @@ class OrderControllerTest {
         mockMvc.perform(post("/api/orders/1/cancel"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("CANCELLED"));
+    }
+
+    @Test
+    @DisplayName("POST /api/orders/{orderId}/items/{itemId}/cancel - 항목 부분취소 200")
+    void cancelItem_success() throws Exception {
+        given(paymentService.cancelOrderItem(eq(1L), eq(1L), eq(100L), eq(false)))
+                .willReturn(sampleOrder(OrderStatus.PAID));   // 부분취소라 주문은 PAID 유지
+
+        mockMvc.perform(post("/api/orders/1/items/100/cancel"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
     }
 
     @Test

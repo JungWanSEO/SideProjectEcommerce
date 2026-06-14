@@ -49,6 +49,21 @@ export default function OrderDetailPage() {
     }
   };
 
+  // 항목 부분취소(환불) — 그 항목만 취소·환불(PAID 주문)
+  const cancelItem = async (itemId: number) => {
+    if (!confirm("이 항목을 취소하고 환불하시겠어요?")) return;
+    setCancelling(true);
+    setError(null);
+    try {
+      const updated = await apiPost<Order>(`/api/orders/${id}/items/${itemId}/cancel`);
+      setOrder(updated);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   if (authLoading || (user && loading)) return <p className="p-12 text-center text-muted">불러오는 중…</p>;
   if (!user) return null;
 
@@ -81,16 +96,35 @@ export default function OrderDetailPage() {
       <ul className="mt-6 overflow-hidden rounded-2xl border border-line bg-paper">
         {order.items.map((it, i) => (
           <li
-            key={it.optionId}
-            className={`flex items-center justify-between px-5 py-4 ${i > 0 ? "border-t border-line" : ""}`}
+            key={it.id}
+            className={`flex items-center justify-between px-5 py-4 ${i > 0 ? "border-t border-line" : ""} ${
+              it.status === "CANCELLED" ? "opacity-50" : ""
+            }`}
           >
             <div>
-              <p className="font-serif text-lg text-ink">{it.productName}</p>
+              <p className="font-serif text-lg text-ink">
+                {it.productName}
+                {it.status === "CANCELLED" && (
+                  <span className="ml-2 rounded bg-line px-1.5 py-0.5 text-xs text-muted">취소됨</span>
+                )}
+              </p>
               <p className="mt-0.5 text-sm text-muted">
                 사이즈 {it.size} · {it.quantity}개 · {it.orderPrice.toLocaleString()}원
               </p>
             </div>
-            <span className="font-medium text-ink">{it.subtotal.toLocaleString()}원</span>
+            <div className="flex items-center gap-3">
+              <span className="font-medium text-ink">{it.subtotal.toLocaleString()}원</span>
+              {/* PAID 주문의 활성 항목만 부분취소 가능 */}
+              {order.status === "PAID" && it.status === "ACTIVE" && (
+                <button
+                  onClick={() => cancelItem(it.id)}
+                  disabled={cancelling}
+                  className="rounded-full border border-line px-3 py-1 text-xs text-muted transition hover:border-danger hover:text-danger disabled:opacity-50"
+                >
+                  취소
+                </button>
+              )}
+            </div>
           </li>
         ))}
       </ul>

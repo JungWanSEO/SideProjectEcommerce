@@ -120,13 +120,17 @@ export interface Payment {
 
 /** 주문 항목 (OrderItemResponse) — 주문 시점 스냅샷(상품명·사이즈·가격) */
 export interface OrderItem {
+  id: number;
   productId: number;
   optionId: number;
+  brandId: number | null;
+  sellerId: number | null;
   productName: string;
   size: string;
   orderPrice: number;
   quantity: number;
   subtotal: number;
+  status: "ACTIVE" | "CANCELLED"; // 부분환불 시 CANCELLED
 }
 
 /** 주문 배송지 스냅샷 (OrderResponse.shipping) — 주문 시점에 주소록에서 복사. 없으면 null. */

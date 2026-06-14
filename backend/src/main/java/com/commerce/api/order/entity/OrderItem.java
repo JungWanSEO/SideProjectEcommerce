@@ -1,8 +1,11 @@
 package com.commerce.api.order.entity;
 
 import com.commerce.api.global.common.BaseEntity;
+import com.commerce.api.global.exception.BusinessException;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -14,6 +17,7 @@ import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.springframework.http.HttpStatus;
 
 /**
  * 주문 항목 (Order 애그리거트 내부).
@@ -59,6 +63,10 @@ public class OrderItem extends BaseEntity {
     @Column(nullable = false)
     private int quantity;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private OrderItemStatus status;   // 부분환불(항목 단위 취소) 지원 — 기본 ACTIVE
+
     @Builder
     private OrderItem(Long productId, Long optionId, Long brandId, Long sellerId, String productName,
                       String size, long orderPrice, int quantity) {
@@ -70,6 +78,19 @@ public class OrderItem extends BaseEntity {
         this.size = size;
         this.orderPrice = orderPrice;
         this.quantity = quantity;
+        this.status = OrderItemStatus.ACTIVE;
+    }
+
+    /** 항목 취소(부분환불). 이미 취소면 409. */
+    public void cancel() {
+        if (this.status == OrderItemStatus.CANCELLED) {
+            throw new BusinessException(HttpStatus.CONFLICT, "이미 취소된 주문 항목입니다.");
+        }
+        this.status = OrderItemStatus.CANCELLED;
+    }
+
+    public boolean isActive() {
+        return this.status == OrderItemStatus.ACTIVE;
     }
 
     /** 양방향 연관 설정 (Order.addItem에서 호출) */

@@ -21,4 +21,7 @@ public interface SettlementRepository extends JpaRepository<SettlementEntry, Lon
 
     /** 지급 묶음에 묶인 항목들(지급 처리 시 PAID_OUT 전이용). */
     List<SettlementEntry> findByPayoutId(Long payoutId);
+
+    /** 한 결제의 모든 정산 항목(역분개 상계 diff 계산용 — 정방향 + 기존 역분개 합산). */
+    List<SettlementEntry> findByPaymentId(Long paymentId);
 }

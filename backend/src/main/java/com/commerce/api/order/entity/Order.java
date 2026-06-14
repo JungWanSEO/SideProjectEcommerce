@@ -85,6 +85,22 @@ public class Order extends BaseEntity {
         this.status = OrderStatus.CANCELLED;
     }
 
+    /**
+     * 항목 단위 취소(부분환불). 해당 항목을 CANCELLED로 만들고, 남은 활성 항목이 없으면 주문도 CANCELLED.
+     * 취소된 항목을 반환한다(환불 금액·셀러 식별용). 없는 항목이면 404, 이미 취소면 409.
+     */
+    public OrderItem cancelItem(Long orderItemId) {
+        OrderItem target = orderItems.stream()
+                .filter(i -> orderItemId.equals(i.getId()))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "주문 항목을 찾을 수 없습니다."));
+        target.cancel();
+        if (orderItems.stream().noneMatch(OrderItem::isActive)) {
+            this.status = OrderStatus.CANCELLED;   // 모든 항목 취소 → 주문도 취소
+        }
+        return target;
+    }
+
     /** 결제 완료 처리 (PENDING → PAID). 결제 대기 상태가 아니면 예외. */
     public void markPaid() {
         if (this.status != OrderStatus.PENDING) {

@@ -126,6 +126,37 @@ public class PaymentService {
     }
 
     /**
+     * 주문 항목 단위 취소(+부분 환불) 오케스트레이터.
+     *
+     * <p>흐름: 항목 취소 위임(OrderService.cancelItem — 소유권·상태 검증 + PAID였으면 그 항목 재고 복원) →
+     * 결제 완료(PAID) 건이 있으면 그 항목 금액만큼 PG 부분 환불 + Payment.refundedAmount 누적(전액 환불 시 CANCELLED).
+     * cancelOrder와 같이 @Transactional로 원자성 보장(환불 실패 시 항목 취소·재고 복원까지 롤백).
+     * 정산 상계(역분개)는 settlement 도메인의 reverseRefunds 배치가 사후 처리한다(settlement → order/payment 단방향).
+     */
+    @Transactional
+    public OrderResponse cancelOrderItem(Long memberId, Long orderId, Long orderItemId, boolean admin) {
+        OrderResponse order = orderService.cancelItem(orderId, orderItemId, memberId, admin);
+        OrderResponse.OrderItemResponse cancelledItem = order.items().stream()
+                .filter(i -> orderItemId.equals(i.id()))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "주문 항목을 찾을 수 없습니다."));
+        long refundAmount = cancelledItem.subtotal();
+
+        paymentRepository.findByOrderIdAndStatus(orderId, PaymentStatus.PAID)
+                .ifPresent(payment -> {
+                    PaymentRefund refund = paymentGatewayRouter.resolve(payment.getProvider())
+                            .refund(new PaymentRefundCommand(orderId, refundAmount, payment.getPgTransactionId()));
+                    if (!refund.refunded()) {
+                        throw new BusinessException(HttpStatus.BAD_GATEWAY,
+                                "환불에 실패했습니다. (" + refund.failureReason() + ")");
+                    }
+                    payment.partialRefund(refundAmount);   // 누적, 전액 도달 시 CANCELLED
+                    paymentRepository.save(payment);
+                });
+        return order;
+    }
+
+    /**
      * 결제 완료(PAID) 건 전체를 DTO로 반환한다 — 정산 도메인이 정산 대상 결제를 가져갈 때 쓴다.
      *
      * <p>settlement → payment 의존을 서비스 계층 + DTO로만 노출해(엔티티·리포지토리를 직접 안 넘김)
