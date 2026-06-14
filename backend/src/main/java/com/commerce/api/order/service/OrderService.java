@@ -118,6 +118,23 @@ public class OrderService {
         return OrderResponse.from(order);
     }
 
+    /**
+     * 주문 항목 단위 취소(부분환불의 주문/재고 부분). 본인 주문이거나 ADMIN만.
+     * 항목을 CANCELLED로 만들고, 결제 완료(PAID)였던 주문이면 그 항목 수량만큼 재고를 복원한다.
+     * (PG 부분 환불은 호출자=PaymentService가 이어서 처리. 순환 의존 회피.)
+     */
+    @Transactional
+    public OrderResponse cancelItem(Long orderId, Long orderItemId, Long requesterId, boolean admin) {
+        Order order = findOwnedOrder(orderId, requesterId, admin);
+        boolean wasPaid = order.isPaid();
+        OrderItem cancelled = order.cancelItem(orderItemId);   // 항목 CANCELLED(+전부 취소면 주문도 CANCELLED)
+        if (wasPaid) {
+            productRepository.findByOptionId(cancelled.getOptionId())
+                    .ifPresent(product -> product.increaseStock(cancelled.getOptionId(), cancelled.getQuantity()));
+        }
+        return OrderResponse.from(order);
+    }
+
     private Order findOrder(Long id) {
         return orderRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "주문을 찾을 수 없습니다."));

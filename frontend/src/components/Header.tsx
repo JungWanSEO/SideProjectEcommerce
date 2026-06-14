@@ -9,8 +9,8 @@ export default function Header() {
   const { user, loading, logout } = useAuth();
   const pathname = usePathname();
 
-  // 어드민 경로는 자체 사이드바 레이아웃을 쓰므로 스토어 헤더는 숨긴다.
-  if (pathname?.startsWith("/admin")) return null;
+  // 어드민·셀러 콘솔은 자체 사이드바 레이아웃을 쓰므로 스토어 헤더는 숨긴다.
+  if (pathname?.startsWith("/admin") || pathname?.startsWith("/seller")) return null;
 
   const navLink = "text-sm text-ink/70 transition hover:text-clay";
 
@@ -38,6 +38,11 @@ export default function Header() {
               {user.role === "ADMIN" && (
                 <Link href="/admin/settlements" className="text-sm font-medium text-clay hover:text-clay-600">
                   관리자
+                </Link>
+              )}
+              {user.role === "SELLER" && (
+                <Link href="/seller" className="text-sm font-medium text-clay hover:text-clay-600">
+                  셀러 콘솔
                 </Link>
               )}
               <span className="hidden text-sm text-muted sm:inline">{user.nickname}님</span>

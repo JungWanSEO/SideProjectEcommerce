@@ -120,13 +120,17 @@ export interface Payment {
 
 /** 주문 항목 (OrderItemResponse) — 주문 시점 스냅샷(상품명·사이즈·가격) */
 export interface OrderItem {
+  id: number;
   productId: number;
   optionId: number;
+  brandId: number | null;
+  sellerId: number | null;
   productName: string;
   size: string;
   orderPrice: number;
   quantity: number;
   subtotal: number;
+  status: "ACTIVE" | "CANCELLED"; // 부분환불 시 CANCELLED
 }
 
 /** 주문 배송지 스냅샷 (OrderResponse.shipping) — 주문 시점에 주소록에서 복사. 없으면 null. */
@@ -158,6 +162,19 @@ export interface OrderSummary {
   createdAt: string;
   representativeProductName: string;
   itemCount: number;
+}
+
+// ───────── 셀러(Seller) ─────────
+
+/** 셀러(입점사) — SellerResponse */
+export interface Seller {
+  id: number;
+  name: string;
+  commissionRate: number; // 플랫폼 판매수수료율 (예: 0.10)
+  status: "ACTIVE" | "SUSPENDED";
+  payoutAccount: string | null;
+  businessNumber: string | null;
+  createdAt: string;
 }
 
 // ───────── 정산(Settlement) — ADMIN 운영 ─────────
@@ -225,6 +242,27 @@ export interface SellerSettlementSummary {
   fee: number;
   platformFee: number;
   netAmount: number;
+}
+
+// ───────── 지급 묶음(Payout) ─────────
+
+export type PayoutStatus = "PENDING" | "PAID";
+
+/** 지급 묶음 (PayoutResponse) — 셀러에게 기간별로 한 번에 지급하는 단위 */
+export interface Payout {
+  id: number;
+  sellerId: number;
+  sellerName: string | null;
+  periodFrom: string; // YYYY-MM-DD
+  periodTo: string;
+  totalGross: number;
+  totalFee: number;
+  totalPlatformFee: number;
+  totalNet: number; // 실지급액
+  entryCount: number;
+  status: PayoutStatus;
+  paidAt: string | null;
+  createdAt: string;
 }
 
 // ───────── 대사(Reconciliation) — ADMIN 운영 ─────────

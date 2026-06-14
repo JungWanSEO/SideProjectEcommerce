@@ -8,7 +8,8 @@ export interface User {
   id: number;
   email: string;
   nickname: string;
-  role: "USER" | "ADMIN";
+  role: "USER" | "ADMIN" | "SELLER";
+  sellerId: number | null; // SELLER면 운영하는 셀러 ID (그 외 null)
   createdAt: string;
 }
 

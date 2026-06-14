@@ -19,8 +19,10 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       const u = await login(email, password);
-      // 관리자는 운영 콘솔로 바로(한 번 더 클릭 없이), 일반 사용자는 상품 목록으로
-      router.push(u.role === "ADMIN" ? "/admin/settlements" : "/products");
+      // 역할별 랜딩: 관리자=운영 콘솔, 셀러=셀러 콘솔, 일반 사용자=상품 목록
+      router.push(
+        u.role === "ADMIN" ? "/admin/settlements" : u.role === "SELLER" ? "/seller" : "/products",
+      );
     } catch (err) {
       setError((err as Error).message);
     } finally {

@@ -20,6 +20,7 @@ export default function AdminSettlementsPage() {
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState<SettlementRunResult | null>(null);
+  const [reverseInfo, setReverseInfo] = useState<string | null>(null);
   const [payoutId, setPayoutId] = useState<number | null>(null);
 
   // 필터
@@ -59,6 +60,25 @@ export default function AdminSettlementsPage() {
     try {
       const r = await apiPost<SettlementRunResult>("/api/settlements/run");
       setRunResult(r);
+      load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  // 환불 상계(역분개) — 부분환불로 취소된 항목의 정산을 음수 항목으로 상계
+  const reverseRefunds = async () => {
+    setRunning(true);
+    setError(null);
+    try {
+      const r = await apiPost<{ reversedCount: number; totalReversedNet: number }>(
+        "/api/settlements/reverse-refunds",
+      );
+      setReverseInfo(
+        `환불 상계 완료 — 역분개 ${r.reversedCount}건 · 실수령 조정 ${r.totalReversedNet.toLocaleString()}원`,
+      );
       load();
     } catch (e) {
       setError((e as Error).message);
@@ -109,14 +129,26 @@ export default function AdminSettlementsPage() {
             결제를 셀러별로 분해해 PG수수료·플랫폼수수료를 떼고 셀러 실수령(지급액)까지 집계합니다.
           </p>
         </div>
-        <button
-          onClick={runBatch}
-          disabled={running}
-          className="rounded bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50"
-        >
-          {running ? "실행 중…" : "정산 배치 실행"}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={reverseRefunds}
+            disabled={running}
+            className="rounded border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+          >
+            환불 상계
+          </button>
+          <button
+            onClick={runBatch}
+            disabled={running}
+            className="rounded bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50"
+          >
+            {running ? "실행 중…" : "정산 배치 실행"}
+          </button>
+        </div>
       </div>
+      {reverseInfo && (
+        <div className="mb-4 rounded border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">{reverseInfo}</div>
+      )}
 
       {runResult && (
         <div className="mb-4 rounded border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">

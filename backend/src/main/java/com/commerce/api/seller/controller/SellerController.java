@@ -1,7 +1,9 @@
 package com.commerce.api.seller.controller;
 
 import com.commerce.api.global.common.ApiResponse;
+import com.commerce.api.member.dto.MemberResponse;
 import com.commerce.api.seller.dto.SellerCreateRequest;
+import com.commerce.api.seller.dto.SellerOwnerAssignRequest;
 import com.commerce.api.seller.dto.SellerResponse;
 import com.commerce.api.seller.dto.SellerUpdateRequest;
 import com.commerce.api.seller.service.SellerService;
@@ -78,5 +80,14 @@ public class SellerController {
     public ResponseEntity<ApiResponse<SellerResponse>> activate(@PathVariable Long id) {
         return ResponseEntity.ok(
                 ApiResponse.success("셀러가 활성화되었습니다.", sellerService.activate(id)));
+    }
+
+    @Operation(summary = "셀러 운영자 지정(ADMIN)",
+            description = "회원을 이 셀러의 SELLER 운영자로 지정한다. 셀러 없으면 404, 회원 없으면 404, 관리자면 409.")
+    @PutMapping("/{id}/owner")
+    public ResponseEntity<ApiResponse<MemberResponse>> assignOwner(
+            @PathVariable Long id, @Valid @RequestBody SellerOwnerAssignRequest request) {
+        return ResponseEntity.ok(
+                ApiResponse.success("셀러 운영자를 지정했습니다.", sellerService.assignOwner(id, request.memberId())));
     }
 }

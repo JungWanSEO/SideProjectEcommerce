@@ -54,6 +54,9 @@ public class Payment extends BaseEntity {
     @Column(nullable = false, unique = true, length = 80)
     private String idempotencyKey;  // 중복 결제 방지용 멱등키
 
+    @Column(name = "refunded_amount", nullable = false)
+    private long refundedAmount;    // 누적 환불액(부분환불). amount에 도달하면 전액 환불 → CANCELLED.
+
     private Payment(Long orderId, long amount, String method, String provider, String idempotencyKey) {
         this.orderId = orderId;
         this.amount = amount;
@@ -85,6 +88,21 @@ public class Payment extends BaseEntity {
     public void cancel() {
         requireStatus(PaymentStatus.PAID);
         this.status = PaymentStatus.CANCELLED;
+    }
+
+    /**
+     * 부분 환불 — 환불액을 누적한다(PAID 상태에서만). 누적이 결제액에 도달하면 전액 환불로 CANCELLED.
+     * 금액이 0 이하거나 남은 환불 가능액을 넘으면 400.
+     */
+    public void partialRefund(long refundAmount) {
+        requireStatus(PaymentStatus.PAID);
+        if (refundAmount <= 0 || this.refundedAmount + refundAmount > this.amount) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "환불 금액이 올바르지 않습니다.");
+        }
+        this.refundedAmount += refundAmount;
+        if (this.refundedAmount == this.amount) {
+            this.status = PaymentStatus.CANCELLED;   // 전액 환불 완료
+        }
     }
 
     /** 현재 상태가 기대 상태가 아니면 409. (상태머신 가드) */

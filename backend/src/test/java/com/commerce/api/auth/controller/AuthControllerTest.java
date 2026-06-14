@@ -49,7 +49,7 @@ class AuthControllerTest {
     private AuthCookieManager cookieManager;
 
     private MemberResponse user() {
-        return new MemberResponse(1L, "alice@commerce.com", "alice", Role.USER, null);
+        return new MemberResponse(1L, "alice@commerce.com", "alice", Role.USER, null, null);
     }
 
     @AfterEach

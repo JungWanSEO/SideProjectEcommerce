@@ -3,6 +3,7 @@ package com.commerce.api.settlement.service;
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.order.dto.OrderResponse.OrderItemResponse;
+import com.commerce.api.order.entity.OrderItemStatus;
 import com.commerce.api.order.service.OrderService;
 import com.commerce.api.payment.dto.PaymentResponse;
 import com.commerce.api.payment.gateway.PaymentGatewayRouter;
@@ -11,6 +12,7 @@ import com.commerce.api.seller.entity.Seller;
 import com.commerce.api.seller.repository.SellerRepository;
 import com.commerce.api.settlement.dto.SellerSettlementSummary;
 import com.commerce.api.settlement.dto.SettlementResponse;
+import com.commerce.api.settlement.dto.SettlementReverseResponse;
 import com.commerce.api.settlement.dto.SettlementRunResponse;
 import com.commerce.api.settlement.dto.SettlementRunResponse.ProviderBreakdown;
 import com.commerce.api.settlement.dto.SettlementRunResponse.SellerBreakdown;
@@ -81,16 +83,19 @@ public class SettlementService {
             }
             String provider = payment.provider();
             double feeRate = paymentGatewayRouter.feeRateOf(provider);   // PG 요율(단일 출처)
-            long pgFeeTotal = SettlementPolicy.calculateFee(feeRate, payment.amount());
 
             // 1) 주문 항목을 셀러별 매출로 묶는다(sellerId=null이면 미귀속 버킷). 등장 순서 보존.
+            //    부분환불로 취소(CANCELLED)된 항목은 제외 — 환불분은 정산하지 않는다.
             Map<Long, Long> grossBySeller = new LinkedHashMap<>();
             for (OrderItemResponse item : orderService.getOrderItems(payment.orderId())) {
+                if (item.status() != OrderItemStatus.ACTIVE) {
+                    continue;
+                }
                 grossBySeller.merge(item.sellerId(), item.subtotal(), Long::sum);
             }
             long orderGross = grossBySeller.values().stream().mapToLong(Long::longValue).sum();
-
-            // 2) PG 수수료를 셀러 매출 비례로 안분 + 반올림 잔차를 매출 최대 셀러에 몰아 합을 보존.
+            // PG 수수료는 활성 매출 기준(취소분 제외)으로 떼고 셀러 매출 비례로 안분(잔차는 최대 셀러).
+            long pgFeeTotal = SettlementPolicy.calculateFee(feeRate, orderGross);
             Map<Long, Long> pgFeeBySeller = allocatePgFee(grossBySeller, orderGross, pgFeeTotal);
 
             // 3) 셀러마다 정산 항목 생성.
@@ -126,6 +131,74 @@ public class SettlementService {
         }
         return new SettlementRunResponse(created, totalGross, totalFee, totalPlatformFee, totalNet,
                 providerBreakdown, sellerBreakdown);
+    }
+
+    /**
+     * 환불 상계(역분개) 배치 — 이미 정산된 결제에서 항목이 부분환불(CANCELLED)됐으면, 줄어든 만큼
+     * <b>음수 정산 항목</b>을 만들어 셀러 정산을 상계한다(원장 일관·감사 추적).
+     *
+     * <p>방식(멱등): 정산된 각 결제에 대해 현재 <b>활성 항목 기준 목표(target)</b>를 다시 계산하고,
+     * 기존 정산 합계(셀러별)와의 차이(target − 기존)를 역분개 항목으로 남긴다. 차이가 0이면 만들지 않으므로
+     * 여러 번 돌려도 안전하다(상계 후 합계 = target → 다음 실행은 차이 0).
+     */
+    @Transactional
+    public SettlementReverseResponse reverseRefunds() {
+        LocalDate settledDate = LocalDate.now().plusDays(SettlementPolicy.PAYOUT_DELAY_DAYS);
+        int reversed = 0;
+        long totalReversedNet = 0;
+
+        for (PaymentResponse payment : paymentService.getPaidPayments()) {
+            List<SettlementEntry> existing = settlementRepository.findByPaymentId(payment.id());
+            if (existing.isEmpty()) {
+                continue;   // 아직 정산 안 된 결제는 run()의 몫
+            }
+            String provider = payment.provider();
+            double feeRate = paymentGatewayRouter.feeRateOf(provider);
+
+            // 현재 활성 항목 기준 목표(셀러별 gross·PG수수료 안분)
+            Map<Long, Long> grossBySeller = new LinkedHashMap<>();
+            for (OrderItemResponse item : orderService.getOrderItems(payment.orderId())) {
+                if (item.status() != OrderItemStatus.ACTIVE) {
+                    continue;
+                }
+                grossBySeller.merge(item.sellerId(), item.subtotal(), Long::sum);
+            }
+            long orderGross = grossBySeller.values().stream().mapToLong(Long::longValue).sum();
+            long pgFeeTotal = SettlementPolicy.calculateFee(feeRate, orderGross);
+            Map<Long, Long> pgFeeBySeller = allocatePgFee(grossBySeller, orderGross, pgFeeTotal);
+
+            // 기존 정산 합계(셀러별) + 적용된 플랫폼 요율(역분개에 그대로 사용 — 그때 요율 보존)
+            Map<Long, long[]> settledBySeller = new LinkedHashMap<>();   // [gross, fee, platformFee]
+            Map<Long, Double> platformRateBySeller = new HashMap<>();
+            for (SettlementEntry e : existing) {
+                long[] agg = settledBySeller.computeIfAbsent(e.getSellerId(), k -> new long[3]);
+                agg[0] += e.getGrossAmount();
+                agg[1] += e.getFee();
+                agg[2] += e.getPlatformFee();
+                platformRateBySeller.putIfAbsent(e.getSellerId(), e.getPlatformFeeRate());
+            }
+
+            // 셀러별 차이 → 역분개. (취소로 줄었으면 음수 항목)
+            for (Map.Entry<Long, long[]> se : settledBySeller.entrySet()) {
+                Long sellerId = se.getKey();
+                long[] settled = se.getValue();
+                long targetGross = grossBySeller.getOrDefault(sellerId, 0L);
+                double platformRate = platformRateBySeller.getOrDefault(sellerId, 0.0);
+                long dGross = targetGross - settled[0];
+                long dFee = pgFeeBySeller.getOrDefault(sellerId, 0L) - settled[1];
+                long dPlatformFee = Math.round(targetGross * platformRate) - settled[2];
+                if (dGross == 0 && dFee == 0 && dPlatformFee == 0) {
+                    continue;   // 변화 없음
+                }
+                SettlementEntry rev = SettlementEntry.scheduled(
+                        payment.id(), payment.orderId(), payment.pgTransactionId(), provider,
+                        sellerId, dGross, dFee, feeRate, dPlatformFee, platformRate, settledDate);
+                settlementRepository.save(rev);
+                reversed++;
+                totalReversedNet += rev.getNetAmount();
+            }
+        }
+        return new SettlementReverseResponse(reversed, totalReversedNet);
     }
 
     /**
@@ -235,11 +308,17 @@ public class SettlementService {
                 .toList();
     }
 
-    /** 입금 확인 처리 → PAID_OUT. (실무라면 은행 입금 대사 후 호출. 여기선 수동 트리거.) */
+    /**
+     * per-entry 입금 확인 처리 → PAID_OUT. (실무라면 은행 입금 대사 후 호출. 여기선 수동 트리거.)
+     * 지급 묶음(Payout)에 편입된 항목은 묶음으로 지급해야 하므로 거부한다(중복 지급 방지).
+     */
     @Transactional
     public SettlementResponse payout(Long id) {
         SettlementEntry entry = settlementRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "정산 항목을 찾을 수 없습니다."));
+        if (entry.getPayoutId() != null) {
+            throw new BusinessException(HttpStatus.CONFLICT, "지급 묶음에 포함된 항목입니다. 묶음으로 지급하세요.");
+        }
         entry.markPaidOut();   // 상태머신 가드 — 이미 PAID_OUT이면 409. 변경은 더티 체킹으로 반영.
         return SettlementResponse.from(entry);
     }

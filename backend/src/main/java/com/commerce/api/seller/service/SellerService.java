@@ -1,6 +1,8 @@
 package com.commerce.api.seller.service;
 
 import com.commerce.api.global.exception.BusinessException;
+import com.commerce.api.member.dto.MemberResponse;
+import com.commerce.api.member.service.MemberService;
 import com.commerce.api.seller.dto.SellerCreateRequest;
 import com.commerce.api.seller.dto.SellerResponse;
 import com.commerce.api.seller.dto.SellerUpdateRequest;
@@ -24,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class SellerService {
 
     private final SellerRepository sellerRepository;
+    private final MemberService memberService;   // 운영자 지정 시 회원 역할/연결 변경 위임(seller → member)
 
     /** 전체 셀러 목록. */
     public List<SellerResponse> getSellers() {
@@ -72,6 +75,18 @@ public class SellerService {
         Seller seller = findById(id);
         seller.activate();
         return SellerResponse.from(seller);
+    }
+
+    /**
+     * 셀러 운영자 지정(ADMIN) — 해당 회원을 이 셀러의 SELLER 운영자로 만든다.
+     * 셀러 없으면 404. 회원 검증·역할 변경은 member 도메인에 위임(경계 유지).
+     */
+    @Transactional
+    public MemberResponse assignOwner(Long sellerId, Long memberId) {
+        if (!sellerRepository.existsById(sellerId)) {
+            throw new BusinessException(HttpStatus.NOT_FOUND, "셀러를 찾을 수 없습니다.");
+        }
+        return memberService.assignAsSeller(memberId, sellerId);
     }
 
     private Seller findById(Long id) {

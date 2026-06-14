@@ -4,6 +4,7 @@ import com.commerce.api.global.common.ApiResponse;
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.settlement.dto.SellerSettlementSummary;
 import com.commerce.api.settlement.dto.SettlementResponse;
+import com.commerce.api.settlement.dto.SettlementReverseResponse;
 import com.commerce.api.settlement.dto.SettlementRunResponse;
 import com.commerce.api.settlement.dto.SettlementSearchCondition;
 import com.commerce.api.settlement.entity.SettlementStatus;
@@ -67,6 +68,14 @@ public class SettlementController {
         SettlementSearchCondition condition = new SettlementSearchCondition(sellerId, status, from, to);
         PageResponse<SettlementResponse> response = settlementService.getSettlements(condition, pageable);
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @Operation(summary = "환불 상계(역분개) 배치",
+            description = "부분환불로 취소된 항목의 정산을 음수(역분개) 항목으로 상계한다. 멱등(여러 번 실행해도 안전).")
+    @PostMapping("/reverse-refunds")
+    public ResponseEntity<ApiResponse<SettlementReverseResponse>> reverseRefunds() {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success("환불 상계를 실행했습니다.", settlementService.reverseRefunds()));
     }
 
     @Operation(summary = "셀러 정산서(셀러별 집계)",

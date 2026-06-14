@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.order.dto.OrderResponse.OrderItemResponse;
+import com.commerce.api.order.entity.OrderItemStatus;
 import com.commerce.api.order.service.OrderService;
 import com.commerce.api.payment.dto.PaymentResponse;
 import com.commerce.api.payment.entity.PaymentStatus;
@@ -18,6 +19,7 @@ import com.commerce.api.payment.service.PaymentService;
 import com.commerce.api.seller.entity.Seller;
 import com.commerce.api.seller.repository.SellerRepository;
 import com.commerce.api.settlement.dto.SettlementResponse;
+import com.commerce.api.settlement.dto.SettlementReverseResponse;
 import com.commerce.api.settlement.dto.SettlementRunResponse;
 import com.commerce.api.settlement.entity.SettlementEntry;
 import com.commerce.api.settlement.entity.SettlementStatus;
@@ -60,9 +62,19 @@ class SettlementServiceTest {
                 "MOCK_CARD", provider, "MOCK-tx-" + id, LocalDateTime.now());
     }
 
-    /** 주문 항목 — 정산은 sellerId·subtotal만 본다(나머지는 적당히 채움). */
+    /** 주문 항목 — 정산은 sellerId·subtotal·status만 본다(나머지는 적당히 채움). 기본 ACTIVE. */
     private OrderItemResponse item(Long sellerId, long subtotal) {
-        return new OrderItemResponse(1L, 1L, null, sellerId, "P", "M", subtotal, 1, subtotal);
+        return item(sellerId, subtotal, OrderItemStatus.ACTIVE);
+    }
+
+    private OrderItemResponse item(Long sellerId, long subtotal, OrderItemStatus status) {
+        return new OrderItemResponse(1L, 1L, 1L, null, sellerId, "P", "M", subtotal, 1, subtotal, status);
+    }
+
+    /** 이미 정산된 항목(역분개 테스트용) — platformFeeRate 0.10 스냅샷. */
+    private SettlementEntry settled(Long sellerId, long gross, long fee, long platformFee) {
+        return SettlementEntry.scheduled(
+                1L, 11L, "tx", "TOSS", sellerId, gross, fee, 0.025, platformFee, 0.10, LocalDate.now().plusDays(2));
     }
 
     private Seller sellerWithRate(Long id, double rate) {
@@ -199,6 +211,49 @@ class SettlementServiceTest {
     }
 
     @Test
+    @DisplayName("정산 - 취소(부분환불)된 항목은 제외하고 활성 항목만 정산")
+    void run_excludesCancelledItems() {
+        given(paymentService.getPaidPayments()).willReturn(List.of(paidPayment(1L, 11L, 30000L, "TOSS")));
+        given(settlementRepository.existsByPaymentId(anyLong())).willReturn(false);
+        given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
+        given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);
+        // 같은 셀러 두 항목: 하나는 취소(부분환불)
+        given(orderService.getOrderItems(11L)).willReturn(List.of(
+                item(1L, 10000L, OrderItemStatus.ACTIVE), item(1L, 20000L, OrderItemStatus.CANCELLED)));
+        given(sellerRepository.findById(1L)).willReturn(Optional.of(sellerWithRate(1L, 0.10)));
+
+        settlementService.run();
+
+        SettlementEntry entry = captureSaved(1).get(0);
+        assertThat(entry.getGrossAmount()).isEqualTo(10000L);   // 취소분 20000 제외
+        assertThat(entry.getFee()).isEqualTo(250L);             // 활성 매출 기준 PG수수료
+    }
+
+    @Test
+    @DisplayName("환불 상계 - 정산 후 항목 취소되면 음수 역분개 항목 생성")
+    void reverseRefunds_offsetsCancelledSeller() {
+        given(paymentService.getPaidPayments()).willReturn(List.of(paidPayment(1L, 11L, 30000L, "TOSS")));
+        // 기존 정산: 셀러1(10000) + 셀러2(20000)
+        given(settlementRepository.findByPaymentId(1L)).willReturn(List.of(
+                settled(1L, 10000L, 250L, 1000L), settled(2L, 20000L, 500L, 2000L)));
+        given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);
+        // 현재 활성: 셀러1만(셀러2 항목 취소됨)
+        given(orderService.getOrderItems(11L)).willReturn(List.of(
+                item(1L, 10000L, OrderItemStatus.ACTIVE), item(2L, 20000L, OrderItemStatus.CANCELLED)));
+        given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
+
+        SettlementReverseResponse result = settlementService.reverseRefunds();
+
+        assertThat(result.reversedCount()).isEqualTo(1);   // 셀러2만 상계(셀러1은 변화 없음)
+        SettlementEntry rev = captureSaved(1).get(0);
+        assertThat(rev.getSellerId()).isEqualTo(2L);
+        assertThat(rev.getGrossAmount()).isEqualTo(-20000L);   // 음수 역분개
+        assertThat(rev.getFee()).isEqualTo(-500L);
+        assertThat(rev.getPlatformFee()).isEqualTo(-2000L);
+        assertThat(rev.getNetAmount()).isEqualTo(-17500L);
+    }
+
+    @Test
     @DisplayName("입금 확인 - SCHEDULED → PAID_OUT")
     void payout_marksPaidOut() {
         SettlementEntry entry = SettlementEntry.scheduled(
@@ -208,6 +263,19 @@ class SettlementServiceTest {
         SettlementResponse response = settlementService.payout(1L);
 
         assertThat(response.status()).isEqualTo(SettlementStatus.PAID_OUT);
+    }
+
+    @Test
+    @DisplayName("입금 확인 실패 - 지급 묶음에 포함된 항목이면 409(묶음으로 지급)")
+    void payout_inBatch() {
+        SettlementEntry entry = SettlementEntry.scheduled(
+                1L, 11L, "MOCK-tx-1", "TOSS", 1L, 10000L, 250L, 0.025, 1000L, 0.10, LocalDate.now().plusDays(2));
+        entry.assignPayout(7L);   // 이미 지급 묶음에 편입됨
+        given(settlementRepository.findById(1L)).willReturn(Optional.of(entry));
+
+        assertThatThrownBy(() -> settlementService.payout(1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("지급 묶음에 포함된 항목");
     }
 
     @Test

@@ -9,6 +9,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.commerce.api.member.dto.MemberResponse;
+import com.commerce.api.member.entity.Role;
 import com.commerce.api.seller.dto.SellerResponse;
 import com.commerce.api.seller.entity.SellerStatus;
 import com.commerce.api.seller.service.SellerService;
@@ -128,5 +130,19 @@ class SellerControllerTest {
         mockMvc.perform(put("/api/sellers/1/activate"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("ACTIVE"));
+    }
+
+    @Test
+    @DisplayName("PUT /api/sellers/{id}/owner - 운영자 지정 200 (회원이 SELLER가 됨)")
+    void assignOwner_success() throws Exception {
+        given(sellerService.assignOwner(eq(1L), eq(7L)))
+                .willReturn(new MemberResponse(7L, "s@c.com", "운영자", Role.SELLER, 1L, LocalDateTime.now()));
+
+        mockMvc.perform(put("/api/sellers/1/owner")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"memberId\":7}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.role").value("SELLER"))
+                .andExpect(jsonPath("$.data.sellerId").value(1));
     }
 }
