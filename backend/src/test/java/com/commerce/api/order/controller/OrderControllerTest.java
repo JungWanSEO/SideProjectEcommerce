@@ -69,7 +69,7 @@ class OrderControllerTest {
 
     private OrderResponse sampleOrder(OrderStatus status) {
         return new OrderResponse(1L, 1L, status, 30000L,
-                List.of(new OrderItemResponse(1L, 10L, "반팔티셔츠", "M", 10000L, 3, 30000L)),
+                List.of(new OrderItemResponse(1L, 10L, 7L, 3L, "반팔티셔츠", "M", 10000L, 3, 30000L)),
                 null,   // shipping (배송지 없음 — 컨트롤러 슬라이스 테스트엔 불필요)
                 LocalDateTime.now());
     }

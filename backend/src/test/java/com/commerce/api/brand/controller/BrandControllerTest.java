@@ -1,9 +1,11 @@
 package com.commerce.api.brand.controller;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -35,7 +37,7 @@ class BrandControllerTest {
     @DisplayName("GET /api/brands - 목록 200")
     void getBrands_success() throws Exception {
         given(brandService.getBrands())
-                .willReturn(List.of(new BrandResponse(1L, "Nike"), new BrandResponse(2L, "Adidas")));
+                .willReturn(List.of(new BrandResponse(1L, "Nike", 5L), new BrandResponse(2L, "Adidas", null)));
 
         mockMvc.perform(get("/api/brands"))
                 .andExpect(status().isOk())
@@ -47,7 +49,7 @@ class BrandControllerTest {
     @Test
     @DisplayName("POST /api/brands - 등록 성공 201")
     void create_success() throws Exception {
-        given(brandService.create(any())).willReturn(new BrandResponse(1L, "Nike"));
+        given(brandService.create(any())).willReturn(new BrandResponse(1L, "Nike", null));
 
         mockMvc.perform(post("/api/brands")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -65,5 +67,19 @@ class BrandControllerTest {
                         .content("{\"name\":\"\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    @DisplayName("PUT /api/brands/{id}/seller - 셀러 귀속 200")
+    void assignSeller_success() throws Exception {
+        given(brandService.assignSeller(eq(1L), eq(7L)))
+                .willReturn(new BrandResponse(1L, "Nike", 7L));
+
+        mockMvc.perform(put("/api/brands/1/seller")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sellerId\":7}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.sellerId").value(7));
     }
 }

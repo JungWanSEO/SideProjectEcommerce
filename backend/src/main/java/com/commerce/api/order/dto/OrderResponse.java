@@ -54,10 +54,12 @@ public record OrderResponse(
         }
     }
 
-    /** 주문 항목 응답 (스냅샷된 상품명·사이즈·가격 + 소계) */
+    /** 주문 항목 응답 (스냅샷된 상품명·사이즈·가격·셀러귀속 + 소계) */
     public record OrderItemResponse(
             Long productId,
             Long optionId,
+            Long brandId,     // 주문 시점 스냅샷 (미지정이면 null)
+            Long sellerId,    // 주문 시점 스냅샷 (셀러별 정산 귀속, 미귀속이면 null)
             String productName,
             String size,
             long orderPrice,
@@ -68,6 +70,8 @@ public record OrderResponse(
             return new OrderItemResponse(
                     item.getProductId(),
                     item.getOptionId(),
+                    item.getBrandId(),
+                    item.getSellerId(),
                     item.getProductName(),
                     item.getSize(),
                     item.getOrderPrice(),

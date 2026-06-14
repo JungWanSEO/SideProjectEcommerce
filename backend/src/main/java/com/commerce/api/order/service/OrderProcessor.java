@@ -2,6 +2,8 @@ package com.commerce.api.order.service;
 
 import com.commerce.api.address.dto.AddressResponse;
 import com.commerce.api.address.service.AddressService;
+import com.commerce.api.brand.entity.Brand;
+import com.commerce.api.brand.repository.BrandRepository;
 import com.commerce.api.cart.entity.Cart;
 import com.commerce.api.cart.repository.CartRepository;
 import com.commerce.api.global.exception.BusinessException;
@@ -36,6 +38,7 @@ public class OrderProcessor {
     private final ProductRepository productRepository;
     private final CartRepository cartRepository;
     private final AddressService addressService;   // 배송지 스냅샷(주소록에서) — 도메인 경계는 서비스+DTO로
+    private final BrandRepository brandRepository;  // 주문 시점 셀러 귀속 스냅샷용(brandId→sellerId 조회)
 
     /** 명시적 항목 목록으로 주문 생성 (POST /api/orders). 배송지는 없다(null). */
     @Transactional
@@ -88,9 +91,17 @@ public class OrderProcessor {
                             HttpStatus.NOT_FOUND,
                             "옵션을 찾을 수 없습니다. (id: " + itemRequest.optionId() + ")"));
 
+            // 주문 시점 셀러 귀속 스냅샷: 상품→브랜드(brandId)→셀러(sellerId).
+            // 브랜드 미지정(null) 또는 셀러 미귀속 브랜드면 sellerId는 null(미귀속 버킷).
+            Long brandId = product.getBrandId();
+            Long sellerId = (brandId == null) ? null
+                    : brandRepository.findById(brandId).map(Brand::getSellerId).orElse(null);
+
             OrderItem orderItem = OrderItem.builder()
                     .productId(product.getId())
                     .optionId(itemRequest.optionId())
+                    .brandId(brandId)                                     // 스냅샷
+                    .sellerId(sellerId)                                   // 스냅샷(셀러별 정산 귀속)
                     .productName(product.getName())                       // 스냅샷
                     .size(product.optionSize(itemRequest.optionId()))     // 사이즈 스냅샷
                     .orderPrice(product.getPrice())                       // 스냅샷

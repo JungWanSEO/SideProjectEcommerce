@@ -2,31 +2,52 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPost } from "@/lib/api";
-import { PageResponse, Settlement, SettlementRunResult } from "@/lib/types";
+import { PageResponse, SellerSettlementSummary, Settlement, SettlementRunResult } from "@/lib/types";
 import { SETTLEMENT_STATUS_BADGE, SETTLEMENT_STATUS_LABEL } from "@/lib/settlementStatus";
 import { PROVIDER_BADGE, formatRate, providerLabel } from "@/lib/provider";
 import StatCard from "@/components/admin/StatCard";
 
 /**
- * 정산(Settlement) 운영 화면 (/admin/settlements, ADMIN).
- * - 정산 배치 실행(PAID 결제 → 정산 항목) · 입금 처리(SCHEDULED → PAID_OUT)
- * - "매출 ≠ 결제액": gross / fee / net 분리 표시
+ * 정산(Settlement) 운영 화면 (/admin/settlements, ADMIN) — 셀러별 정산(Phase 2).
+ * - 정산 배치 실행 · 입금 처리(SCHEDULED → PAID_OUT)
+ * - 셀러 정산서: 셀러별 매출/PG수수료/플랫폼수수료/실수령 집계 + 셀러·기간 필터
+ * - "매출 ≠ 셀러 실수령": gross − PG수수료 − 플랫폼수수료 = net
  */
 export default function AdminSettlementsPage() {
   const [items, setItems] = useState<Settlement[]>([]);
+  const [summary, setSummary] = useState<SellerSettlementSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState<SettlementRunResult | null>(null);
   const [payoutId, setPayoutId] = useState<number | null>(null);
 
+  // 필터
+  const [sellerFilter, setSellerFilter] = useState<number | null>(null);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+
   const load = useCallback(() => {
     setLoading(true);
-    apiGet<PageResponse<Settlement>>("/api/settlements?size=50")
-      .then((p) => setItems(p.content))
+    const dateQs = new URLSearchParams();
+    if (from) dateQs.set("from", from);
+    if (to) dateQs.set("to", to);
+
+    const listQs = new URLSearchParams(dateQs);
+    if (sellerFilter != null) listQs.set("sellerId", String(sellerFilter));
+    listQs.set("size", "100");
+
+    Promise.all([
+      apiGet<PageResponse<Settlement>>(`/api/settlements?${listQs.toString()}`),
+      apiGet<SellerSettlementSummary[]>(`/api/settlements/summary?${dateQs.toString()}`),
+    ])
+      .then(([page, sum]) => {
+        setItems(page.content);
+        setSummary(sum);
+      })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [from, to, sellerFilter]);
 
   useEffect(() => {
     load();
@@ -59,18 +80,34 @@ export default function AdminSettlementsPage() {
     }
   };
 
-  // 현재 로드된 정산 합계 (KPI 카드)
-  const totals = items.reduce(
-    (acc, s) => ({ gross: acc.gross + s.grossAmount, fee: acc.fee + s.fee, net: acc.net + s.netAmount }),
-    { gross: 0, fee: 0, net: 0 },
+  // 셀러 이름 맵 (요약에서) + 표시 헬퍼
+  const sellerName = (id: number | null) => {
+    if (id == null) return "미귀속(플랫폼)";
+    return summary.find((s) => s.sellerId === id)?.sellerName ?? `셀러 #${id}`;
+  };
+
+  // 요약 합계 (KPI 카드) — 전체 셀러 기준(필터 무관, 기간만)
+  const totals = summary.reduce(
+    (acc, s) => ({
+      count: acc.count + s.count,
+      gross: acc.gross + s.grossAmount,
+      fee: acc.fee + s.fee,
+      platformFee: acc.platformFee + s.platformFee,
+      net: acc.net + s.netAmount,
+    }),
+    { count: 0, gross: 0, fee: 0, platformFee: 0, net: 0 },
   );
+
+  const sellerOptions = summary.filter((s) => s.sellerId != null);
 
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold">정산</h1>
-          <p className="text-sm text-gray-500">PAID 결제를 정산 항목으로 만들고 입금까지 추적합니다.</p>
+          <h1 className="text-xl font-bold">셀러별 정산</h1>
+          <p className="text-sm text-gray-500">
+            결제를 셀러별로 분해해 PG수수료·플랫폼수수료를 떼고 셀러 실수령(지급액)까지 집계합니다.
+          </p>
         </div>
         <button
           onClick={runBatch}
@@ -83,16 +120,17 @@ export default function AdminSettlementsPage() {
 
       {runResult && (
         <div className="mb-4 rounded border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
-          정산 배치 완료 — 신규 <b>{runResult.createdCount}</b>건 · 결제액{" "}
-          {runResult.totalGrossAmount.toLocaleString()}원 · 수수료 {runResult.totalFee.toLocaleString()}원 · 실입금{" "}
-          {runResult.totalNetAmount.toLocaleString()}원
-          {/* PG별 분해 — 같은 금액도 PG 요율에 따라 수수료가 갈린다(MPG-3) */}
-          {runResult.byProvider.length > 0 && (
+          정산 배치 완료 — 신규 <b>{runResult.createdCount}</b>건 · 매출 {runResult.totalGrossAmount.toLocaleString()}원 ·
+          PG수수료 {runResult.totalFee.toLocaleString()}원 · 플랫폼수수료 {runResult.totalPlatformFee.toLocaleString()}원
+          · 실수령 {runResult.totalNetAmount.toLocaleString()}원
+          {runResult.bySeller.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-2">
-              {runResult.byProvider.map((b) => (
-                <span key={b.provider} className="rounded border border-green-200 bg-white px-2 py-1 text-xs text-gray-600">
-                  <span className={`rounded px-1.5 py-0.5 ${PROVIDER_BADGE}`}>{providerLabel(b.provider)}</span>{" "}
-                  {formatRate(b.feeRate)} · {b.count}건 · 수수료 {b.fee.toLocaleString()}원 · 실입금{" "}
+              {runResult.bySeller.map((b) => (
+                <span
+                  key={String(b.sellerId)}
+                  className="rounded border border-green-200 bg-white px-2 py-1 text-xs text-gray-600"
+                >
+                  <b>{sellerName(b.sellerId)}</b> · {b.count}건 · 매출 {b.grossAmount.toLocaleString()} · 실수령{" "}
                   {b.netAmount.toLocaleString()}원
                 </span>
               ))}
@@ -104,26 +142,117 @@ export default function AdminSettlementsPage() {
         <div className="mb-4 rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       )}
 
-      {/* KPI 카드 — 매출 ≠ 결제액을 한눈에 */}
-      <div className="mb-6 grid grid-cols-4 gap-4">
-        <StatCard label="정산 건수" value={`${items.length}건`} />
-        <StatCard label="결제액 (gross)" value={`${totals.gross.toLocaleString()}원`} />
-        <StatCard label="수수료 (fee)" value={`−${totals.fee.toLocaleString()}원`} accent="text-amber-600" />
-        <StatCard label="실입금 (net)" value={`${totals.net.toLocaleString()}원`} accent="text-green-700" />
+      {/* KPI 카드 — 매출 ≠ 셀러 실수령 */}
+      <div className="mb-6 grid grid-cols-5 gap-4">
+        <StatCard label="정산 건수" value={`${totals.count}건`} />
+        <StatCard label="매출 (gross)" value={`${totals.gross.toLocaleString()}원`} />
+        <StatCard label="PG 수수료" value={`−${totals.fee.toLocaleString()}원`} accent="text-amber-600" />
+        <StatCard label="플랫폼 수수료" value={`−${totals.platformFee.toLocaleString()}원`} accent="text-amber-600" />
+        <StatCard label="셀러 실수령 (net)" value={`${totals.net.toLocaleString()}원`} accent="text-green-700" />
       </div>
 
-      {/* 정산 테이블 */}
+      {/* 셀러별 정산서 (요약) */}
+      <div className="mb-6 overflow-hidden rounded-lg border border-gray-200 bg-white">
+        <div className="border-b border-gray-100 px-4 py-3 text-sm font-semibold text-gray-700">셀러별 정산서</div>
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
+            <tr>
+              <th className="px-4 py-2">셀러</th>
+              <th className="px-4 py-2 text-right">건수</th>
+              <th className="px-4 py-2 text-right">매출</th>
+              <th className="px-4 py-2 text-right">PG수수료</th>
+              <th className="px-4 py-2 text-right">플랫폼수수료</th>
+              <th className="px-4 py-2 text-right">실수령</th>
+              <th className="px-4 py-2 text-right">액션</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {summary.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-4 py-6 text-center text-gray-400">
+                  정산 데이터가 없습니다.
+                </td>
+              </tr>
+            ) : (
+              summary.map((s) => (
+                <tr key={String(s.sellerId)} className="hover:bg-gray-50">
+                  <td className="px-4 py-2 font-medium">{sellerName(s.sellerId)}</td>
+                  <td className="px-4 py-2 text-right text-gray-500">{s.count}</td>
+                  <td className="px-4 py-2 text-right">{s.grossAmount.toLocaleString()}</td>
+                  <td className="px-4 py-2 text-right text-amber-600">−{s.fee.toLocaleString()}</td>
+                  <td className="px-4 py-2 text-right text-amber-600">−{s.platformFee.toLocaleString()}</td>
+                  <td className="px-4 py-2 text-right font-medium text-green-700">{s.netAmount.toLocaleString()}</td>
+                  <td className="px-4 py-2 text-right">
+                    {s.sellerId != null && (
+                      <button
+                        onClick={() => setSellerFilter(s.sellerId)}
+                        className="rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-100"
+                      >
+                        항목 보기
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* 필터 툴바 */}
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+        <select
+          value={sellerFilter ?? ""}
+          onChange={(e) => setSellerFilter(e.target.value ? Number(e.target.value) : null)}
+          className="rounded border border-gray-300 px-2 py-1"
+        >
+          <option value="">전체 셀러</option>
+          {sellerOptions.map((s) => (
+            <option key={String(s.sellerId)} value={String(s.sellerId)}>
+              {s.sellerName ?? `셀러 #${s.sellerId}`}
+            </option>
+          ))}
+        </select>
+        <label className="text-gray-500">정산일</label>
+        <input
+          type="date"
+          value={from}
+          onChange={(e) => setFrom(e.target.value)}
+          className="rounded border border-gray-300 px-2 py-1"
+        />
+        <span className="text-gray-400">~</span>
+        <input
+          type="date"
+          value={to}
+          onChange={(e) => setTo(e.target.value)}
+          className="rounded border border-gray-300 px-2 py-1"
+        />
+        {(sellerFilter != null || from || to) && (
+          <button
+            onClick={() => {
+              setSellerFilter(null);
+              setFrom("");
+              setTo("");
+            }}
+            className="rounded px-2 py-1 text-xs text-gray-500 underline hover:text-gray-700"
+          >
+            필터 초기화
+          </button>
+        )}
+      </div>
+
+      {/* 정산 항목 테이블 */}
       <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
             <tr>
               <th className="px-4 py-3">ID</th>
+              <th className="px-4 py-3">셀러</th>
               <th className="px-4 py-3">PG</th>
-              <th className="px-4 py-3">거래 ID</th>
-              <th className="px-4 py-3 text-right">결제액</th>
-              <th className="px-4 py-3 text-right">수수료</th>
-              <th className="px-4 py-3 text-right">요율</th>
-              <th className="px-4 py-3 text-right">실입금</th>
+              <th className="px-4 py-3 text-right">매출</th>
+              <th className="px-4 py-3 text-right">PG수수료</th>
+              <th className="px-4 py-3 text-right">플랫폼수수료</th>
+              <th className="px-4 py-3 text-right">실수령</th>
               <th className="px-4 py-3">상태</th>
               <th className="px-4 py-3">입금예정일</th>
               <th className="px-4 py-3 text-right">액션</th>
@@ -146,13 +275,19 @@ export default function AdminSettlementsPage() {
               items.map((s) => (
                 <tr key={s.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3 text-gray-400">#{s.id}</td>
+                  <td className="px-4 py-3 font-medium">{sellerName(s.sellerId)}</td>
                   <td className="px-4 py-3">
                     <span className={`rounded px-2 py-0.5 text-xs ${PROVIDER_BADGE}`}>{providerLabel(s.provider)}</span>
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-gray-500">{s.pgTransactionId.slice(0, 16)}…</td>
                   <td className="px-4 py-3 text-right">{s.grossAmount.toLocaleString()}</td>
-                  <td className="px-4 py-3 text-right text-amber-600">−{s.fee.toLocaleString()}</td>
-                  <td className="px-4 py-3 text-right text-gray-500">{formatRate(s.feeRate)}</td>
+                  <td className="px-4 py-3 text-right text-amber-600">
+                    −{s.fee.toLocaleString()}
+                    <span className="ml-1 text-xs text-gray-400">{formatRate(s.feeRate)}</span>
+                  </td>
+                  <td className="px-4 py-3 text-right text-amber-600">
+                    −{s.platformFee.toLocaleString()}
+                    <span className="ml-1 text-xs text-gray-400">{formatRate(s.platformFeeRate)}</span>
+                  </td>
                   <td className="px-4 py-3 text-right font-medium">{s.netAmount.toLocaleString()}</td>
                   <td className="px-4 py-3">
                     <span className={`rounded px-2 py-0.5 text-xs ${SETTLEMENT_STATUS_BADGE[s.status]}`}>

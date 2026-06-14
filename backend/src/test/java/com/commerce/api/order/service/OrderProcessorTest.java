@@ -9,6 +9,8 @@ import static org.mockito.Mockito.verify;
 
 import com.commerce.api.address.dto.AddressResponse;
 import com.commerce.api.address.service.AddressService;
+import com.commerce.api.brand.entity.Brand;
+import com.commerce.api.brand.repository.BrandRepository;
 import com.commerce.api.cart.entity.Cart;
 import com.commerce.api.cart.repository.CartRepository;
 import com.commerce.api.global.exception.BusinessException;
@@ -49,6 +51,8 @@ class OrderProcessorTest {
     private CartRepository cartRepository;
     @Mock
     private AddressService addressService;
+    @Mock
+    private BrandRepository brandRepository;
 
     @InjectMocks
     private OrderProcessor orderProcessor;
@@ -92,6 +96,39 @@ class OrderProcessorTest {
         assertThat(response.items().get(0).subtotal()).isEqualTo(30000L);
         assertThat(product.getOptions().get(0).getStock()).isEqualTo(10);   // 재고 미차감(결제 시 차감)
         verify(orderRepository).save(any(Order.class));
+    }
+
+    @Test
+    @DisplayName("주문 생성 - 셀러 귀속 스냅샷(상품→brandId→sellerId)")
+    void place_snapshotsSeller() {
+        Product product = productWithOption(1L, 10L, "반팔티셔츠", 10000L, 10);
+        ReflectionTestUtils.setField(product, "brandId", 7L);   // 상품에 브랜드 귀속
+        given(productRepository.findByOptionId(10L)).willReturn(Optional.of(product));
+        Brand brand = Brand.create("Nike");
+        brand.assignSeller(3L);                                  // 브랜드 → 셀러 3
+        given(brandRepository.findById(7L)).willReturn(Optional.of(brand));
+        given(orderRepository.save(any(Order.class))).willAnswer(inv -> inv.getArgument(0));
+
+        OrderResponse response = orderProcessor.place(100L,
+                new OrderCreateRequest(List.of(new OrderItemRequest(10L, 1))));
+
+        assertThat(response.items().get(0).brandId()).isEqualTo(7L);
+        assertThat(response.items().get(0).sellerId()).isEqualTo(3L);   // 주문 시점 셀러 동결
+    }
+
+    @Test
+    @DisplayName("주문 생성 - 브랜드 미지정 상품이면 brandId·sellerId 모두 null(브랜드 조회 안 함)")
+    void place_noBrand_nullSeller() {
+        Product product = productWithOption(1L, 10L, "반팔티셔츠", 10000L, 10);   // brandId null
+        given(productRepository.findByOptionId(10L)).willReturn(Optional.of(product));
+        given(orderRepository.save(any(Order.class))).willAnswer(inv -> inv.getArgument(0));
+
+        OrderResponse response = orderProcessor.place(100L,
+                new OrderCreateRequest(List.of(new OrderItemRequest(10L, 1))));
+
+        assertThat(response.items().get(0).brandId()).isNull();
+        assertThat(response.items().get(0).sellerId()).isNull();
+        verify(brandRepository, never()).findById(any());
     }
 
     @Test

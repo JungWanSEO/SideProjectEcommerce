@@ -82,7 +82,10 @@ public class SecurityConfig {
                         // 관리자
                         .requestMatchers(HttpMethod.POST, "/api/products").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/categories", "/api/brands").hasRole("ADMIN")
-                        // 정산·대사는 운영 업무 → 전 경로 ADMIN 전용
+                        // 브랜드 변경(셀러 귀속 등)은 ADMIN (GET /api/brands/** 는 위에서 공개)
+                        .requestMatchers(HttpMethod.PUT, "/api/brands/**").hasRole("ADMIN")
+                        // 셀러 관리·정산·대사는 운영 업무 → 전 경로 ADMIN 전용
+                        .requestMatchers("/api/sellers/**").hasRole("ADMIN")
                         .requestMatchers("/api/settlements/**").hasRole("ADMIN")
                         .requestMatchers("/api/reconciliations/**").hasRole("ADMIN")
                         // 그 외는 인증 필요

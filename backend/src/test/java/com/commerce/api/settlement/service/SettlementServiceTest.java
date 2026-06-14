@@ -9,10 +9,14 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import com.commerce.api.global.exception.BusinessException;
+import com.commerce.api.order.dto.OrderResponse.OrderItemResponse;
+import com.commerce.api.order.service.OrderService;
 import com.commerce.api.payment.dto.PaymentResponse;
 import com.commerce.api.payment.entity.PaymentStatus;
 import com.commerce.api.payment.gateway.PaymentGatewayRouter;
 import com.commerce.api.payment.service.PaymentService;
+import com.commerce.api.seller.entity.Seller;
+import com.commerce.api.seller.repository.SellerRepository;
 import com.commerce.api.settlement.dto.SettlementResponse;
 import com.commerce.api.settlement.dto.SettlementRunResponse;
 import com.commerce.api.settlement.entity.SettlementEntry;
@@ -29,9 +33,10 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 /**
- * SettlementService 단위 테스트 — 정산 배치(수수료·실입금 계산, 멱등) / 입금 확인(상태머신).
+ * SettlementService 단위 테스트 — 셀러별 정산 배치(매출 분해·PG수수료 안분·플랫폼수수료·실수령) / 입금 확인.
  */
 @ExtendWith(MockitoExtension.class)
 class SettlementServiceTest {
@@ -41,112 +46,151 @@ class SettlementServiceTest {
     @Mock
     private PaymentService paymentService;
     @Mock
-    private PaymentGatewayRouter paymentGatewayRouter;   // 요율 단일 출처(PG) 조회
+    private PaymentGatewayRouter paymentGatewayRouter;
+    @Mock
+    private OrderService orderService;
+    @Mock
+    private SellerRepository sellerRepository;
 
     @InjectMocks
     private SettlementService settlementService;
-
-    private PaymentResponse paidPayment(Long id, Long orderId, long amount) {
-        return paidPayment(id, orderId, amount, "TOSS");
-    }
 
     private PaymentResponse paidPayment(Long id, Long orderId, long amount, String provider) {
         return new PaymentResponse(id, orderId, amount, PaymentStatus.PAID,
                 "MOCK_CARD", provider, "MOCK-tx-" + id, LocalDateTime.now());
     }
 
-    @Test
-    @DisplayName("정산 배치 - PAID 결제마다 수수료(TOSS 2.5%)를 떼고 실입금을 계산해 SCHEDULED 항목 생성")
-    void run_createsEntriesWithFeeAndNet() {
-        given(paymentService.getPaidPayments()).willReturn(List.of(
-                paidPayment(1L, 11L, 30000L),
-                paidPayment(2L, 12L, 10000L)));
-        given(settlementRepository.existsByPaymentId(anyLong())).willReturn(false);
-        given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
-        given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);   // 요율 단일 출처(PG)
+    /** 주문 항목 — 정산은 sellerId·subtotal만 본다(나머지는 적당히 채움). */
+    private OrderItemResponse item(Long sellerId, long subtotal) {
+        return new OrderItemResponse(1L, 1L, null, sellerId, "P", "M", subtotal, 1, subtotal);
+    }
 
-        SettlementRunResponse summary = settlementService.run();
+    private Seller sellerWithRate(Long id, double rate) {
+        Seller s = Seller.create("S" + id, rate, null, null);
+        ReflectionTestUtils.setField(s, "id", id);
+        return s;
+    }
 
-        // 요약: 2건 생성, 합계 = 결제액 40,000 / 수수료 1,000(=750+250) / 실입금 39,000
-        assertThat(summary.createdCount()).isEqualTo(2);
-        assertThat(summary.totalGrossAmount()).isEqualTo(40000L);
-        assertThat(summary.totalFee()).isEqualTo(1000L);
-        assertThat(summary.totalNetAmount()).isEqualTo(39000L);
-
-        // 저장된 항목 검증: 첫 결제 30,000 → 수수료 750, 실입금 29,250, SCHEDULED, 입금일 = T+2
+    private List<SettlementEntry> captureSaved(int times) {
         ArgumentCaptor<SettlementEntry> captor = ArgumentCaptor.forClass(SettlementEntry.class);
-        verify(settlementRepository, org.mockito.Mockito.times(2)).save(captor.capture());
-        SettlementEntry first = captor.getAllValues().get(0);
-        assertThat(first.getPaymentId()).isEqualTo(1L);
-        assertThat(first.getPgTransactionId()).isEqualTo("MOCK-tx-1");   // 대사 조인 키 보존
-        assertThat(first.getProvider()).isEqualTo("TOSS");              // PG 보존(MPG-3)
-        assertThat(first.getGrossAmount()).isEqualTo(30000L);
-        assertThat(first.getFee()).isEqualTo(750L);
-        assertThat(first.getFeeRate()).isEqualTo(0.025);               // 적용 요율 스냅샷
-        assertThat(first.getNetAmount()).isEqualTo(29250L);             // 매출 ≠ 결제액
-        assertThat(first.getStatus()).isEqualTo(SettlementStatus.SCHEDULED);
-        assertThat(first.getSettledDate()).isEqualTo(LocalDate.now().plusDays(2));
+        verify(settlementRepository, org.mockito.Mockito.times(times)).save(captor.capture());
+        return captor.getAllValues();
     }
 
     @Test
-    @DisplayName("정산 배치 - PG마다 요율이 다르다(TOSS 2.5% vs KAKAOPAY 2.8%) → 같은 금액도 수수료가 갈리고 PG별로 집계된다")
-    void run_perProviderFeeRatesAndBreakdown() {
-        given(paymentService.getPaidPayments()).willReturn(List.of(
-                paidPayment(1L, 11L, 10000L, "TOSS"),       // 2.5% → 250
-                paidPayment(2L, 12L, 10000L, "KAKAOPAY"),   // 2.8% → 280 (같은 금액, 다른 수수료)
-                paidPayment(3L, 13L, 20000L, "KAKAOPAY"))); // 2.8% → 560
+    @DisplayName("정산 - 단일 셀러: 매출에서 PG수수료(2.5%)+플랫폼수수료(10%)를 떼고 실수령 계산")
+    void run_singleSeller() {
+        given(paymentService.getPaidPayments()).willReturn(List.of(paidPayment(1L, 11L, 10000L, "TOSS")));
         given(settlementRepository.existsByPaymentId(anyLong())).willReturn(false);
         given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
         given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);
-        given(paymentGatewayRouter.feeRateOf("KAKAOPAY")).willReturn(0.028);
+        given(orderService.getOrderItems(11L)).willReturn(List.of(item(1L, 10000L)));
+        given(sellerRepository.findById(1L)).willReturn(Optional.of(sellerWithRate(1L, 0.10)));
 
         SettlementRunResponse summary = settlementService.run();
 
-        // 합계: gross 40,000 / fee 1,090(=250+280+560) / net 38,910
-        assertThat(summary.createdCount()).isEqualTo(3);
-        assertThat(summary.totalGrossAmount()).isEqualTo(40000L);
-        assertThat(summary.totalFee()).isEqualTo(1090L);
-        assertThat(summary.totalNetAmount()).isEqualTo(38910L);
+        assertThat(summary.createdCount()).isEqualTo(1);
+        assertThat(summary.totalGrossAmount()).isEqualTo(10000L);
+        assertThat(summary.totalFee()).isEqualTo(250L);            // PG 2.5%
+        assertThat(summary.totalPlatformFee()).isEqualTo(1000L);   // 플랫폼 10%
+        assertThat(summary.totalNetAmount()).isEqualTo(8750L);     // 10000 - 250 - 1000
 
-        // PG별 분해 — 삽입 순서(TOSS 먼저, KAKAOPAY 다음)
-        assertThat(summary.byProvider()).hasSize(2);
-        SettlementRunResponse.ProviderBreakdown toss = summary.byProvider().get(0);
-        assertThat(toss.provider()).isEqualTo("TOSS");
-        assertThat(toss.feeRate()).isEqualTo(0.025);
-        assertThat(toss.count()).isEqualTo(1);
-        assertThat(toss.grossAmount()).isEqualTo(10000L);
-        assertThat(toss.fee()).isEqualTo(250L);
-        assertThat(toss.netAmount()).isEqualTo(9750L);
+        SettlementEntry entry = captureSaved(1).get(0);
+        assertThat(entry.getSellerId()).isEqualTo(1L);
+        assertThat(entry.getProvider()).isEqualTo("TOSS");
+        assertThat(entry.getGrossAmount()).isEqualTo(10000L);
+        assertThat(entry.getFee()).isEqualTo(250L);
+        assertThat(entry.getFeeRate()).isEqualTo(0.025);
+        assertThat(entry.getPlatformFee()).isEqualTo(1000L);
+        assertThat(entry.getPlatformFeeRate()).isEqualTo(0.10);
+        assertThat(entry.getNetAmount()).isEqualTo(8750L);
+        assertThat(entry.getStatus()).isEqualTo(SettlementStatus.SCHEDULED);
+        assertThat(entry.getSettledDate()).isEqualTo(LocalDate.now().plusDays(2));
 
-        SettlementRunResponse.ProviderBreakdown kakao = summary.byProvider().get(1);
-        assertThat(kakao.provider()).isEqualTo("KAKAOPAY");
-        assertThat(kakao.feeRate()).isEqualTo(0.028);
-        assertThat(kakao.count()).isEqualTo(2);
-        assertThat(kakao.grossAmount()).isEqualTo(30000L);
-        assertThat(kakao.fee()).isEqualTo(840L);                       // 280 + 560
-        assertThat(kakao.netAmount()).isEqualTo(29160L);
+        assertThat(summary.bySeller()).hasSize(1);
+        assertThat(summary.bySeller().get(0).sellerId()).isEqualTo(1L);
+        assertThat(summary.bySeller().get(0).netAmount()).isEqualTo(8750L);
     }
 
     @Test
-    @DisplayName("정산 배치 - 요율표에 없는 PG는 폴백 요율(3.0%)이 적용된다")
-    void run_unknownProviderUsesFallbackRate() {
-        given(paymentService.getPaidPayments()).willReturn(List.of(
-                paidPayment(1L, 11L, 10000L, "PAYPAL")));   // 미등록 PG → 라우터가 폴백 요율 3.0% 반환
+    @DisplayName("정산 - 멀티 셀러 주문: 매출 비례로 PG수수료 안분, 셀러별 요율로 플랫폼수수료")
+    void run_multiSeller() {
+        given(paymentService.getPaidPayments()).willReturn(List.of(paidPayment(1L, 11L, 10000L, "TOSS")));
         given(settlementRepository.existsByPaymentId(anyLong())).willReturn(false);
         given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
-        given(paymentGatewayRouter.feeRateOf("PAYPAL")).willReturn(0.030);   // 폴백(DEFAULT_FEE_RATE)
+        given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);   // pgFee 총 250
+        given(orderService.getOrderItems(11L)).willReturn(List.of(item(1L, 6000L), item(2L, 4000L)));
+        given(sellerRepository.findById(1L)).willReturn(Optional.of(sellerWithRate(1L, 0.10)));
+        given(sellerRepository.findById(2L)).willReturn(Optional.of(sellerWithRate(2L, 0.05)));
 
         SettlementRunResponse summary = settlementService.run();
 
-        assertThat(summary.totalFee()).isEqualTo(300L);                // 10,000 × 3.0%
-        assertThat(summary.byProvider().get(0).feeRate()).isEqualTo(0.030);
+        // 2 항목, 합계: gross 10000 / pgFee 250(=150+100) / platformFee 800(=600+200) / net 8950
+        assertThat(summary.createdCount()).isEqualTo(2);
+        assertThat(summary.totalGrossAmount()).isEqualTo(10000L);
+        assertThat(summary.totalFee()).isEqualTo(250L);
+        assertThat(summary.totalPlatformFee()).isEqualTo(800L);
+        assertThat(summary.totalNetAmount()).isEqualTo(8950L);
+
+        List<SettlementEntry> saved = captureSaved(2);
+        SettlementEntry s1 = saved.stream().filter(e -> e.getSellerId() == 1L).findFirst().orElseThrow();
+        SettlementEntry s2 = saved.stream().filter(e -> e.getSellerId() == 2L).findFirst().orElseThrow();
+        // 셀러1: gross 6000, pgFee 150(250×0.6), platformFee 600(6000×10%), net 5250
+        assertThat(s1.getFee()).isEqualTo(150L);
+        assertThat(s1.getPlatformFee()).isEqualTo(600L);
+        assertThat(s1.getNetAmount()).isEqualTo(5250L);
+        // 셀러2: gross 4000, pgFee 100(250×0.4), platformFee 200(4000×5%), net 3700
+        assertThat(s2.getFee()).isEqualTo(100L);
+        assertThat(s2.getPlatformFee()).isEqualTo(200L);
+        assertThat(s2.getNetAmount()).isEqualTo(3700L);
     }
 
     @Test
-    @DisplayName("정산 배치 - 이미 정산된 결제는 건너뜀(멱등) — 재실행해도 중복 생성 없음")
-    void run_idempotentSkipsAlreadySettled() {
-        given(paymentService.getPaidPayments()).willReturn(List.of(paidPayment(1L, 11L, 30000L)));
-        given(settlementRepository.existsByPaymentId(1L)).willReturn(true);   // 이미 정산됨
+    @DisplayName("정산 - PG수수료 안분 반올림 잔차는 매출 최대 셀러에 몰아 합을 보존(Σfee=pgFeeTotal)")
+    void run_pgFeeResidualToLargestSeller() {
+        given(paymentService.getPaidPayments()).willReturn(List.of(paidPayment(1L, 11L, 10000L, "TOSS")));
+        given(settlementRepository.existsByPaymentId(anyLong())).willReturn(false);
+        given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
+        given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);   // pgFee 총 250
+        // 3333/3333/3334 → 비례 안분 시 83/83/83=249, 잔차 1을 매출 최대(3334)인 셀러3에 → 84
+        given(orderService.getOrderItems(11L))
+                .willReturn(List.of(item(1L, 3333L), item(2L, 3333L), item(3L, 3334L)));
+        given(sellerRepository.findById(1L)).willReturn(Optional.of(sellerWithRate(1L, 0.0)));
+        given(sellerRepository.findById(2L)).willReturn(Optional.of(sellerWithRate(2L, 0.0)));
+        given(sellerRepository.findById(3L)).willReturn(Optional.of(sellerWithRate(3L, 0.0)));
+
+        SettlementRunResponse summary = settlementService.run();
+
+        assertThat(summary.totalFee()).isEqualTo(250L);   // 잔차 보정으로 합 보존
+        List<SettlementEntry> saved = captureSaved(3);
+        SettlementEntry s3 = saved.stream().filter(e -> e.getSellerId() == 3L).findFirst().orElseThrow();
+        assertThat(s3.getFee()).isEqualTo(84L);           // 83 + 잔차 1
+    }
+
+    @Test
+    @DisplayName("정산 - 미귀속(sellerId=null) 항목: 플랫폼수수료 0, 셀러 조회 안 함")
+    void run_nullSellerNoPlatformFee() {
+        given(paymentService.getPaidPayments()).willReturn(List.of(paidPayment(1L, 11L, 10000L, "TOSS")));
+        given(settlementRepository.existsByPaymentId(anyLong())).willReturn(false);
+        given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
+        given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);
+        given(orderService.getOrderItems(11L)).willReturn(List.of(item(null, 10000L)));
+
+        SettlementRunResponse summary = settlementService.run();
+
+        SettlementEntry entry = captureSaved(1).get(0);
+        assertThat(entry.getSellerId()).isNull();
+        assertThat(entry.getFee()).isEqualTo(250L);
+        assertThat(entry.getPlatformFee()).isZero();
+        assertThat(entry.getNetAmount()).isEqualTo(9750L);   // 10000 - 250 - 0
+        verify(sellerRepository, never()).findById(any());
+    }
+
+    @Test
+    @DisplayName("정산 - 이미 정산된 결제는 건너뜀(멱등)")
+    void run_idempotentSkip() {
+        given(paymentService.getPaidPayments()).willReturn(List.of(paidPayment(1L, 11L, 10000L, "TOSS")));
+        given(settlementRepository.existsByPaymentId(1L)).willReturn(true);
 
         SettlementRunResponse summary = settlementService.run();
 
@@ -158,7 +202,7 @@ class SettlementServiceTest {
     @DisplayName("입금 확인 - SCHEDULED → PAID_OUT")
     void payout_marksPaidOut() {
         SettlementEntry entry = SettlementEntry.scheduled(
-                1L, 11L, "MOCK-tx-1", "TOSS", 30000L, 750L, 0.025, LocalDate.now().plusDays(2));
+                1L, 11L, "MOCK-tx-1", "TOSS", 1L, 10000L, 250L, 0.025, 1000L, 0.10, LocalDate.now().plusDays(2));
         given(settlementRepository.findById(1L)).willReturn(Optional.of(entry));
 
         SettlementResponse response = settlementService.payout(1L);
@@ -180,8 +224,8 @@ class SettlementServiceTest {
     @DisplayName("입금 확인 - 이미 PAID_OUT이면 409(상태머신 가드)")
     void payout_alreadyPaidOut() {
         SettlementEntry entry = SettlementEntry.scheduled(
-                1L, 11L, "MOCK-tx-1", "TOSS", 30000L, 750L, 0.025, LocalDate.now().plusDays(2));
-        entry.markPaidOut();   // 이미 입금 처리됨
+                1L, 11L, "MOCK-tx-1", "TOSS", 1L, 10000L, 250L, 0.025, 1000L, 0.10, LocalDate.now().plusDays(2));
+        entry.markPaidOut();
         given(settlementRepository.findById(1L)).willReturn(Optional.of(entry));
 
         assertThatThrownBy(() -> settlementService.payout(1L))

@@ -20,6 +20,9 @@ import lombok.NoArgsConstructor;
  *
  * - 상품은 ID 참조(productId, 다른 애그리거트).
  * - productName/orderPrice는 **주문 시점 스냅샷**. 이후 상품 정보가 바뀌어도 주문 내역은 보존된다.
+ * - brandId/sellerId도 **주문 시점 스냅샷**(셀러별 정산용). 주문 후 상품의 브랜드가 바뀌거나
+ *   브랜드의 셀러 귀속이 바뀌어도 "그때 누구 매출이었나"가 보존된다(Phase 2 셀러별 정산 Step 1b).
+ *   브랜드 미지정 상품이거나 셀러 미귀속 브랜드면 null(미귀속 = 플랫폼 직매입 버킷).
  */
 @Getter
 @Entity
@@ -41,6 +44,9 @@ public class OrderItem extends BaseEntity {
     @Column(nullable = false)
     private Long optionId;    // 주문한 옵션(사이즈) → ID 참조
 
+    private Long brandId;     // 브랜드 참조(ID, nullable) — 주문 시점 스냅샷
+    private Long sellerId;    // 셀러 참조(ID, nullable) — 주문 시점 스냅샷(셀러별 정산 귀속)
+
     @Column(nullable = false, length = 100)
     private String productName;   // 주문 시점 스냅샷
 
@@ -54,10 +60,12 @@ public class OrderItem extends BaseEntity {
     private int quantity;
 
     @Builder
-    private OrderItem(Long productId, Long optionId, String productName, String size,
-                      long orderPrice, int quantity) {
+    private OrderItem(Long productId, Long optionId, Long brandId, Long sellerId, String productName,
+                      String size, long orderPrice, int quantity) {
         this.productId = productId;
         this.optionId = optionId;
+        this.brandId = brandId;
+        this.sellerId = sellerId;
         this.productName = productName;
         this.size = size;
         this.orderPrice = orderPrice;

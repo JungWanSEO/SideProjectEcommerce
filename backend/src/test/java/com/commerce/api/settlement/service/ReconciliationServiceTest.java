@@ -58,8 +58,14 @@ class ReconciliationServiceTest {
     }
 
     private SettlementEntry our(String pgTx, String provider, long gross) {
-        // 대사는 pgTransactionId·금액으로 매칭 — feeRate는 매칭에 무관해 0으로 채운다. provider는 MPG-2 분류 키.
-        return SettlementEntry.scheduled(1L, 1L, pgTx, provider, gross, 0L, 0.0, LocalDate.now().plusDays(2));
+        // 대사는 pgTransactionId·매출 합으로 매칭 — 수수료는 매칭에 무관해 0. provider는 MPG-2 분류 키.
+        return ourSeller(pgTx, provider, null, gross);
+    }
+
+    /** 셀러 단위 정산 항목(셀러별 정산). 한 pgTx에 여러 셀러 항목이 올 수 있다. */
+    private SettlementEntry ourSeller(String pgTx, String provider, Long sellerId, long gross) {
+        return SettlementEntry.scheduled(1L, 1L, pgTx, provider, sellerId, gross, 0L, 0.0, 0L, 0.0,
+                LocalDate.now().plusDays(2));
     }
 
     private PgSettlementRecord pg(String pgTx, long amount, PgSettlementStatus status) {
@@ -168,6 +174,22 @@ class ReconciliationServiceTest {
         assertThat(r.amountMismatch()).isZero();
         assertThat(r.totalMismatches()).isEqualTo(3);
         verify(mismatchRepository, times(3)).save(any(Mismatch.class));
+    }
+
+    @Test
+    @DisplayName("셀러 분할 - 한 결제(pgTx)에 셀러 항목이 여러 개면 매출을 합산해 PG와 대조(MATCHED)")
+    void multiSeller_sameTx_summedForReconcile() {
+        given(settlementRepository.findAll()).willReturn(List.of(
+                ourSeller("tx1", "TOSS", 1L, 6000),    // 셀러1 매출 6000
+                ourSeller("tx1", "TOSS", 2L, 4000)));  // 셀러2 매출 4000 → 합 10000
+        given(paymentGatewayRouter.fetchAllSettlements())
+                .willReturn(List.of(pg("tx1", 10000, PgSettlementStatus.PAID)));
+
+        ReconciliationResult r = reconciliationService.reconcile();
+
+        assertThat(r.matched()).isEqualTo(1);           // 합산 10000 == PG 10000 → 일치
+        assertThat(r.totalMismatches()).isZero();
+        verify(mismatchRepository, never()).save(any());
     }
 
     // ---------- PG별 분해·표시 (MPG-2) ----------

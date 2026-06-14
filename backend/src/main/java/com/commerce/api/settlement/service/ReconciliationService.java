@@ -14,6 +14,7 @@ import com.commerce.api.settlement.entity.MismatchType;
 import com.commerce.api.settlement.entity.SettlementEntry;
 import com.commerce.api.settlement.repository.MismatchRepository;
 import com.commerce.api.settlement.repository.SettlementRepository;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -58,8 +59,17 @@ public class ReconciliationService {
      */
     @Transactional
     public ReconciliationResult reconcile() {
-        Map<String, SettlementEntry> ours = settlementRepository.findAll().stream()
-                .collect(Collectors.toMap(SettlementEntry::getPgTransactionId, Function.identity(), (a, b) -> a));
+        // 우리 정산은 (결제×셀러)로 쪼개져 한 pgTransactionId에 항목이 여러 개일 수 있다(Phase 2).
+        // 대사는 결제(거래) 단위이므로 pgTransactionId로 묶어 매출(gross)을 합산한 뒤 PG 리포트와 대조한다.
+        Map<String, OursTx> ours = new HashMap<>();
+        for (SettlementEntry e : settlementRepository.findAll()) {
+            OursTx agg = ours.get(e.getPgTransactionId());
+            if (agg == null) {
+                ours.put(e.getPgTransactionId(), new OursTx(e.getProvider(), e.getGrossAmount()));
+            } else {
+                agg.gross += e.getGrossAmount();   // 같은 결제의 셀러 항목들을 합산(provider는 동일)
+            }
+        }
         Map<String, PgSettlementRecord> pg = paymentGatewayRouter.fetchAllSettlements().stream()
                 .collect(Collectors.toMap(PgSettlementRecord::pgTransactionId, Function.identity(), (a, b) -> a));
 
@@ -79,10 +89,10 @@ public class ReconciliationService {
         keys.addAll(pg.keySet());
 
         for (String key : keys) {
-            SettlementEntry o = ours.get(key);
+            OursTx o = ours.get(key);
             PgSettlementRecord p = pg.get(key);
             // 거래의 PG — 우리 정산이 있으면 그 provider(MPG-3), 없으면 PG 리포트가 알려준 provider.
-            String provider = (o != null) ? o.getProvider() : p.provider();
+            String provider = (o != null) ? o.provider : p.provider();
             ProviderAccumulator acc = byProvider.computeIfAbsent(provider, ProviderAccumulator::new);
 
             // 1) 어긋남 분류 (일치면 카운트만 하고 다음으로)
@@ -91,7 +101,7 @@ public class ReconciliationService {
             String detail;
             if (o != null && p == null) {
                 type = MismatchType.MISSING_IN_PG;
-                ourAmount = o.getGrossAmount(); pgAmount = null;
+                ourAmount = o.gross; pgAmount = null;
                 detail = "우리 정산엔 있으나 PG 리포트에 없음(웹훅 유실/PG 누락 의심)";
             } else if (o == null && p != null) {
                 type = MismatchType.MISSING_IN_OURS;
@@ -99,11 +109,11 @@ public class ReconciliationService {
                 detail = "PG 리포트엔 있으나 우리 정산 없음(정산 미실행/누락)";
             } else if (p.status() == PgSettlementStatus.REFUNDED) {
                 type = MismatchType.STATUS_MISMATCH;
-                ourAmount = o.getGrossAmount(); pgAmount = p.amount();
+                ourAmount = o.gross; pgAmount = p.amount();
                 detail = "PG는 환불됨이나 우리 정산은 미반영(상계 필요)";
-            } else if (o.getGrossAmount() != p.amount()) {
+            } else if (o.gross != p.amount()) {
                 type = MismatchType.AMOUNT_MISMATCH;
-                ourAmount = o.getGrossAmount(); pgAmount = p.amount();
+                ourAmount = o.gross; pgAmount = p.amount();
                 detail = "금액 상이(수수료·부분취소 반영 차이)";
             } else {
                 matched++; acc.matched++;
@@ -131,6 +141,17 @@ public class ReconciliationService {
                 .map(ProviderAccumulator::toDto).toList();
         return new ReconciliationResult(matched, missingInPg, missingInOurs, amountMismatch, statusMismatch,
                 total, alreadyHandled, breakdown);
+    }
+
+    /** 우리 정산을 거래(pgTransactionId) 단위로 합산한 값 — 셀러 분할분을 결제 단위로 되묶어 PG와 대조. */
+    private static final class OursTx {
+        private final String provider;   // 거래의 PG(같은 결제의 셀러 항목들은 동일)
+        private long gross;              // 셀러 항목 매출의 합 = 결제 매출
+
+        OursTx(String provider, long gross) {
+            this.provider = provider;
+            this.gross = gross;
+        }
     }
 
     /** PG 한 곳의 대사 누적기 — reconcile() 안에서만 쓰는 가변 집계 도우미. */

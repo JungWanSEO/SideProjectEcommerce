@@ -10,6 +10,7 @@ import com.commerce.api.order.entity.Order;
 import com.commerce.api.order.entity.OrderItem;
 import com.commerce.api.order.repository.OrderRepository;
 import com.commerce.api.product.repository.ProductRepository;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.Pageable;
@@ -73,6 +74,17 @@ public class OrderService {
     @Transactional(readOnly = true)
     public OrderResponse getOrder(Long id, Long requesterId, boolean admin) {
         return OrderResponse.from(findOwnedOrder(id, requesterId, admin));
+    }
+
+    /**
+     * 주문 항목 목록(셀러·소계 포함) — 정산 도메인이 셀러별로 매출을 분해할 때 읽는다.
+     * 소유권 검증 없음(ADMIN 정산 배치 전용). settlement → order 의존은 이 메서드 + DTO로만(경계 유지).
+     */
+    @Transactional(readOnly = true)
+    public List<OrderResponse.OrderItemResponse> getOrderItems(Long orderId) {
+        return findOrder(orderId).getOrderItems().stream()
+                .map(OrderResponse.OrderItemResponse::from)
+                .toList();
     }
 
     /**

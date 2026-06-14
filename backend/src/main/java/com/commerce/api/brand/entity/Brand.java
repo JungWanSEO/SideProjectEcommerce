@@ -30,11 +30,23 @@ public class Brand extends BaseEntity {
     @Column(nullable = false, unique = true, length = 50)
     private String name;
 
+    /**
+     * 셀러(입점사) 참조(ID, nullable). 한 셀러가 여러 브랜드를 운영(seller 1:N brand).
+     * null이면 미귀속(플랫폼 직매입). 별도 애그리거트라 객체 연관이 아닌 ID로 참조한다.
+     */
+    @Column(name = "seller_id")
+    private Long sellerId;
+
     private Brand(String name) {
         this.name = name;
     }
 
     public static Brand create(String name) {
         return new Brand(name);
+    }
+
+    /** 셀러에 귀속(또는 null로 귀속 해제). */
+    public void assignSeller(Long sellerId) {
+        this.sellerId = sellerId;
     }
 }
