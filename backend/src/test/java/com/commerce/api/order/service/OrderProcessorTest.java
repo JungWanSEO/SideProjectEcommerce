@@ -3,6 +3,8 @@ package com.commerce.api.order.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -13,8 +15,12 @@ import com.commerce.api.brand.entity.Brand;
 import com.commerce.api.brand.repository.BrandRepository;
 import com.commerce.api.cart.entity.Cart;
 import com.commerce.api.cart.repository.CartRepository;
+import com.commerce.api.coupon.dto.CouponApplyResult;
+import com.commerce.api.coupon.entity.CouponFundedBy;
+import com.commerce.api.coupon.service.CouponService;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.order.dto.CheckoutRequest;
+import com.commerce.api.order.dto.CouponPreviewResponse;
 import com.commerce.api.order.dto.OrderCreateRequest;
 import com.commerce.api.order.dto.OrderCreateRequest.OrderItemRequest;
 import com.commerce.api.order.dto.OrderResponse;
@@ -53,6 +59,8 @@ class OrderProcessorTest {
     private AddressService addressService;
     @Mock
     private BrandRepository brandRepository;
+    @Mock
+    private CouponService couponService;
 
     @InjectMocks
     private OrderProcessor orderProcessor;
@@ -156,10 +164,12 @@ class OrderProcessorTest {
         given(addressService.getOwnedAddress(100L, 5L)).willReturn(
                 new AddressResponse(5L, "홍길동", "010-1234-5678", "06236", "서울 강남구", "4층", true, null));
 
-        OrderResponse response = orderProcessor.checkout(100L, new CheckoutRequest(5L, "문 앞에 놔주세요"));
+        OrderResponse response = orderProcessor.checkout(100L, new CheckoutRequest(5L, "문 앞에 놔주세요", null));
 
         assertThat(response.status()).isEqualTo(OrderStatus.PENDING);
         assertThat(response.totalPrice()).isEqualTo(20000L);              // 10000 x 2
+        assertThat(response.discountAmount()).isEqualTo(0L);              // 쿠폰 없음
+        assertThat(response.payableAmount()).isEqualTo(20000L);           // 할인 없으면 payable = 총액
         assertThat(response.items()).hasSize(1);
         assertThat(product.getOptions().get(0).getStock()).isEqualTo(10); // 재고 미차감(결제 시 차감)
         assertThat(cart.getCartItems()).isEmpty();                        // 장바구니 비워짐
@@ -171,15 +181,70 @@ class OrderProcessorTest {
     }
 
     @Test
+    @DisplayName("체크아웃 - 쿠폰 코드가 있으면 할인 적용(payable=총액-할인) + 코드 스냅샷, 항목 소계(gross)는 보존")
+    void checkout_appliesCoupon() {
+        Product product = productWithOption(1L, 10L, "반팔티셔츠", 10000L, 10);
+        Cart cart = Cart.create(100L);
+        cart.addItem(1L, 10L, 2);   // 총액 20000
+        given(cartRepository.findByMemberId(100L)).willReturn(Optional.of(cart));
+        given(productRepository.findByOptionId(10L)).willReturn(Optional.of(product));
+        given(orderRepository.save(any(Order.class))).willAnswer(inv -> inv.getArgument(0));
+        given(addressService.getOwnedAddress(100L, 5L)).willReturn(
+                new AddressResponse(5L, "홍길동", "010-1234-5678", "06236", "서울 강남구", "4층", true, null));
+        // 쿠폰 도메인은 적용 대상 금액(주문 총액 20000)을 받아 5000 할인을 돌려준다(플랫폼 부담).
+        given(couponService.applyCoupon(eq("WELCOME5000"), eq(20000L), anyMap()))
+                .willReturn(new CouponApplyResult("WELCOME5000", 5000L, CouponFundedBy.PLATFORM, null));
+
+        OrderResponse response = orderProcessor.checkout(100L,
+                new CheckoutRequest(5L, null, "WELCOME5000"));
+
+        assertThat(response.totalPrice()).isEqualTo(20000L);     // gross(항목 소계 합) 보존
+        assertThat(response.discountAmount()).isEqualTo(5000L);
+        assertThat(response.payableAmount()).isEqualTo(15000L);  // 20000 - 5000 = 실제 결제액
+        assertThat(response.couponCode()).isEqualTo("WELCOME5000");
+        assertThat(response.items().get(0).subtotal()).isEqualTo(20000L);   // 항목 원가는 안 깎임(정산 Step 2 기준)
+    }
+
+    @Test
     @DisplayName("체크아웃 실패 - 빈 장바구니면 400, 저장 안 됨 (주소 조회 전에 막힘)")
     void checkout_emptyCart() {
         Cart cart = Cart.create(100L);   // 항목 없음
         given(cartRepository.findByMemberId(100L)).willReturn(Optional.of(cart));
 
-        assertThatThrownBy(() -> orderProcessor.checkout(100L, new CheckoutRequest(5L, null)))
+        assertThatThrownBy(() -> orderProcessor.checkout(100L, new CheckoutRequest(5L, null, null)))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("장바구니가 비어 있습니다");
         verify(orderRepository, never()).save(any(Order.class));
+    }
+
+    @Test
+    @DisplayName("쿠폰 미리보기 - 장바구니 기준 할인·예상 결제액 계산(주문 생성 없음)")
+    void previewCoupon_success() {
+        Product product = productWithOption(1L, 10L, "반팔티셔츠", 10000L, 10);
+        Cart cart = Cart.create(100L);
+        cart.addItem(1L, 10L, 2);   // 총 20000
+        given(cartRepository.findByMemberId(100L)).willReturn(Optional.of(cart));
+        given(productRepository.findByOptionId(10L)).willReturn(Optional.of(product));
+        given(couponService.applyCoupon(eq("WELCOME5000"), eq(20000L), anyMap()))
+                .willReturn(new CouponApplyResult("WELCOME5000", 5000L, CouponFundedBy.PLATFORM, null));
+
+        CouponPreviewResponse preview = orderProcessor.previewCoupon(100L, "WELCOME5000");
+
+        assertThat(preview.couponCode()).isEqualTo("WELCOME5000");
+        assertThat(preview.totalPrice()).isEqualTo(20000L);
+        assertThat(preview.discountAmount()).isEqualTo(5000L);
+        assertThat(preview.payableAmount()).isEqualTo(15000L);
+        verify(orderRepository, never()).save(any(Order.class));   // 주문 생성 없음
+    }
+
+    @Test
+    @DisplayName("쿠폰 미리보기 실패 - 빈 장바구니면 400")
+    void previewCoupon_emptyCart() {
+        given(cartRepository.findByMemberId(100L)).willReturn(Optional.of(Cart.create(100L)));
+
+        assertThatThrownBy(() -> orderProcessor.previewCoupon(100L, "ANY"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("장바구니가 비어 있습니다");
     }
 
     @Test

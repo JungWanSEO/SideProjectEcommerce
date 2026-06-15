@@ -4,6 +4,8 @@ import com.commerce.api.global.common.ApiResponse;
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.security.SecurityUtil;
 import com.commerce.api.order.dto.CheckoutRequest;
+import com.commerce.api.order.dto.CouponPreviewRequest;
+import com.commerce.api.order.dto.CouponPreviewResponse;
 import com.commerce.api.order.dto.OrderCreateRequest;
 import com.commerce.api.order.dto.OrderResponse;
 import com.commerce.api.order.dto.OrderSummaryResponse;
@@ -65,6 +67,17 @@ public class OrderController {
         return ResponseEntity
                 .status(HttpStatus.CREATED)
                 .body(ApiResponse.success("주문이 접수되었습니다. (결제 대기)", response));
+    }
+
+    @Operation(summary = "쿠폰 미리보기",
+            description = "주문을 만들지 않고 현재 장바구니에 쿠폰 코드를 적용했을 때의 할인·예상 결제액을 계산한다. "
+                    + "적용 불가(코드 없음·기간 외·최소금액 미달·대상 셀러 상품 없음)면 400으로 사유 반환.")
+    @PostMapping("/coupon-preview")
+    public ResponseEntity<ApiResponse<CouponPreviewResponse>> previewCoupon(
+            @Valid @RequestBody CouponPreviewRequest request) {
+        CouponPreviewResponse response =
+                orderService.previewCoupon(SecurityUtil.getCurrentMemberId(), request.couponCode());
+        return ResponseEntity.ok(ApiResponse.success(response));
     }
 
     @Operation(summary = "내 주문 목록 조회 (요약)",

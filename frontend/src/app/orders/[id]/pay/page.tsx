@@ -103,9 +103,25 @@ export default function PaymentPage() {
           </li>
         ))}
       </ul>
-      <div className="mt-4 flex items-center justify-between">
-        <span className="text-muted">결제 금액</span>
-        <span className="text-2xl font-bold text-ink">{order.totalPrice.toLocaleString()}원</span>
+      <div className="mt-4 border-t border-line pt-3">
+        {order.discountAmount > 0 && (
+          <>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted">상품 합계</span>
+              <span className="text-ink">{order.totalPrice.toLocaleString()}원</span>
+            </div>
+            <div className="mt-1 flex justify-between text-sm">
+              <span className="text-sage-600">
+                쿠폰 할인{order.couponCode ? ` (${order.couponCode})` : ""}
+              </span>
+              <span className="font-medium text-sage-600">−{order.discountAmount.toLocaleString()}원</span>
+            </div>
+          </>
+        )}
+        <div className="mt-2 flex items-center justify-between">
+          <span className="text-muted">결제 금액</span>
+          <span className="text-2xl font-bold text-ink">{order.payableAmount.toLocaleString()}원</span>
+        </div>
       </div>
 
       {/* 배송지 요약 (주문 시 스냅샷) */}
@@ -181,7 +197,7 @@ export default function PaymentPage() {
         disabled={paying || !idempotencyKey}
         className="mt-7 w-full rounded-full bg-clay px-4 py-3.5 font-medium text-cream transition hover:bg-clay-600 disabled:opacity-50"
       >
-        {paying ? "결제 처리 중…" : `${order.totalPrice.toLocaleString()}원 결제하기`}
+        {paying ? "결제 처리 중…" : `${order.payableAmount.toLocaleString()}원 결제하기`}
       </button>
       <p className="mt-3 text-center text-xs text-muted">모의 결제 — 실제로 청구되지 않습니다.</p>
     </main>

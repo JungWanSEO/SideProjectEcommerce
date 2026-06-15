@@ -5,9 +5,13 @@ import com.commerce.api.address.service.AddressService;
 import com.commerce.api.brand.entity.Brand;
 import com.commerce.api.brand.repository.BrandRepository;
 import com.commerce.api.cart.entity.Cart;
+import com.commerce.api.cart.entity.CartItem;
 import com.commerce.api.cart.repository.CartRepository;
+import com.commerce.api.coupon.dto.CouponApplyResult;
+import com.commerce.api.coupon.service.CouponService;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.order.dto.CheckoutRequest;
+import com.commerce.api.order.dto.CouponPreviewResponse;
 import com.commerce.api.order.dto.OrderCreateRequest;
 import com.commerce.api.order.dto.OrderCreateRequest.OrderItemRequest;
 import com.commerce.api.order.dto.OrderResponse;
@@ -17,7 +21,9 @@ import com.commerce.api.order.entity.ShippingInfo;
 import com.commerce.api.order.repository.OrderRepository;
 import com.commerce.api.product.entity.Product;
 import com.commerce.api.product.repository.ProductRepository;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -39,11 +45,12 @@ public class OrderProcessor {
     private final CartRepository cartRepository;
     private final AddressService addressService;   // 배송지 스냅샷(주소록에서) — 도메인 경계는 서비스+DTO로
     private final BrandRepository brandRepository;  // 주문 시점 셀러 귀속 스냅샷용(brandId→sellerId 조회)
+    private final CouponService couponService;      // 체크아웃 쿠폰 할인 계산 — 경계는 서비스+DTO(CouponApplyResult)로
 
-    /** 명시적 항목 목록으로 주문 생성 (POST /api/orders). 배송지는 없다(null). */
+    /** 명시적 항목 목록으로 주문 생성 (POST /api/orders). 배송지·쿠폰은 없다(null). */
     @Transactional
     public OrderResponse place(Long memberId, OrderCreateRequest request) {
-        return placeOrder(memberId, request.items(), null);
+        return placeOrder(memberId, request.items(), null, null);
     }
 
     /**
@@ -68,17 +75,51 @@ public class OrderProcessor {
         ShippingInfo shipping = ShippingInfo.of(addr.recipient(), addr.phone(), addr.zipcode(),
                 addr.address1(), addr.address2(), request.deliveryMemo());
 
-        OrderResponse response = placeOrder(memberId, items, shipping);
+        OrderResponse response = placeOrder(memberId, items, shipping, request.couponCode());
         cart.clearItems();   // 주문 성공 후 장바구니 비우기 (orphanRemoval로 DB 삭제, 같은 트랜잭션)
         return response;
     }
 
     /**
+     * 쿠폰 미리보기 — 주문을 만들지 않고, 현재 서버 장바구니 기준으로 할인·예상 결제액만 계산한다.
+     * 체크아웃과 같은 방식으로 총액·셀러별 소계를 만들어 쿠폰 도메인에 넘긴다(읽기 전용).
+     * 적용 불가면 couponService가 400으로 사유를 던진다(체크아웃과 동일 검증).
+     */
+    @Transactional(readOnly = true)
+    public CouponPreviewResponse previewCoupon(Long memberId, String couponCode) {
+        Cart cart = cartRepository.findByMemberId(memberId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.BAD_REQUEST, "장바구니가 비어 있습니다."));
+        if (cart.getCartItems().isEmpty()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "장바구니가 비어 있습니다.");
+        }
+
+        long total = 0;
+        Map<Long, Long> grossBySeller = new HashMap<>();
+        for (CartItem ci : cart.getCartItems()) {
+            Product product = productRepository.findByOptionId(ci.getOptionId())
+                    .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND,
+                            "옵션을 찾을 수 없습니다. (id: " + ci.getOptionId() + ")"));
+            long subtotal = product.getPrice() * ci.getQuantity();
+            total += subtotal;
+            Long brandId = product.getBrandId();
+            Long sellerId = (brandId == null) ? null
+                    : brandRepository.findById(brandId).map(Brand::getSellerId).orElse(null);
+            grossBySeller.merge(sellerId, subtotal, Long::sum);
+        }
+
+        CouponApplyResult applied = couponService.applyCoupon(couponCode, total, grossBySeller);
+        return new CouponPreviewResponse(applied.code(), total, applied.discountAmount(),
+                total - applied.discountAmount());
+    }
+
+    /**
      * 항목마다 상품(옵션)을 조회해 주문 시점 스냅샷(상품명·사이즈·가격)을 남기고 주문에 추가한다.
      * 배송지(shipping)가 있으면 함께 스냅샷한다(체크아웃 경로). 명시적 주문 생성 경로는 null.
+     * 쿠폰 코드(couponCode)가 있으면 항목 합산 후 할인을 적용한다(체크아웃 경로). 없으면 null.
      * 주문은 PENDING(결제 대기)으로 생성되며, <b>재고는 차감하지 않는다</b> — 재고 차감은 결제 승인(pay) 시점.
      */
-    private OrderResponse placeOrder(Long memberId, List<OrderItemRequest> items, ShippingInfo shipping) {
+    private OrderResponse placeOrder(Long memberId, List<OrderItemRequest> items, ShippingInfo shipping,
+            String couponCode) {
         Order order = Order.create(memberId);
         if (shipping != null) {
             order.ship(shipping);
@@ -108,6 +149,19 @@ public class OrderProcessor {
                     .quantity(itemRequest.quantity())
                     .build();
             order.addItem(orderItem);
+        }
+
+        // 쿠폰 적용(선택): 셀러ID별 소계를 모아 쿠폰 도메인에 넘기면, 적용 대상 금액(플랫폼=주문총액 /
+        // 셀러=그 셀러 소계)을 골라 할인액을 계산해 돌려준다(경계는 CouponApplyResult DTO로만).
+        if (couponCode != null && !couponCode.isBlank()) {
+            Map<Long, Long> grossBySeller = new HashMap<>();
+            for (OrderItem item : order.getOrderItems()) {
+                grossBySeller.merge(item.getSellerId(), item.getSubtotal(), Long::sum);
+            }
+            CouponApplyResult applied = couponService.applyCoupon(couponCode, order.getTotalPrice(), grossBySeller);
+            // 분담 주체는 enum 대신 이름(String)으로 스냅샷(order→coupon 결합 회피). 정산 분담(Step 2)이 읽는다.
+            String fundedBy = applied.fundedBy() == null ? null : applied.fundedBy().name();
+            order.applyCoupon(applied.code(), applied.discountAmount(), fundedBy, applied.sellerId());
         }
 
         return OrderResponse.from(orderRepository.save(order));

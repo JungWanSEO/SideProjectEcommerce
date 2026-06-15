@@ -17,6 +17,7 @@ const NAV = [
   { href: "/admin/settlements", label: "정산" },
   { href: "/admin/payouts", label: "지급" },
   { href: "/admin/reconciliations", label: "대사" },
+  { href: "/admin/coupons", label: "쿠폰" },
 ];
 
 export default function AdminLayout({ children }: { children: ReactNode }) {

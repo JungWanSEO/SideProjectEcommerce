@@ -58,7 +58,8 @@ public class PaymentService {
                     "결제할 수 없는 주문 상태입니다. (현재: " + order.status() + ")");
         }
 
-        long amount = order.totalPrice();
+        // 결제액은 쿠폰 할인을 반영한 payable(= 총액 - 할인액). 고객이 실제로 내는 금액이 PG로 간다.
+        long amount = order.payableAmount();
         String method = (request.method() == null || request.method().isBlank()) ? "MOCK_CARD" : request.method();
 
         // 3) PG 승인 요청 — 클라이언트가 고른 PG로 시도하되, 그 PG가 장애·거절이면 다른 PG로 자동 페일오버
@@ -140,7 +141,9 @@ public class PaymentService {
                 .filter(i -> orderItemId.equals(i.id()))
                 .findFirst()
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "주문 항목을 찾을 수 없습니다."));
-        long refundAmount = cancelledItem.subtotal();
+        // 할인 주문이면 항목의 <b>실효가</b>(소계 − 안분 할인)만 환불한다 — 소계(gross)를 환불하면
+        // 고객이 실제 낸 금액(payable)보다 많이 돌려줘 과다환불이 되고 정산/대사도 깨진다. 할인 없으면 share=0이라 소계 그대로.
+        long refundAmount = cancelledItem.subtotal() - cancelledItem.discountShare();
 
         paymentRepository.findByOrderIdAndStatus(orderId, PaymentStatus.PAID)
                 .ifPresent(payment -> {

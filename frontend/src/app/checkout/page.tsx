@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { apiGet, apiPost } from "@/lib/api";
-import { Cart, Address, Order } from "@/lib/types";
+import { Cart, Address, Order, CouponPreview } from "@/lib/types";
 import { useAuth } from "@/lib/auth";
 import Badge from "@/components/ui/Badge";
 
@@ -25,6 +25,12 @@ export default function CheckoutPage() {
   const [error, setError] = useState<string | null>(null);
   const [ordering, setOrdering] = useState(false);
 
+  // 쿠폰: 코드 입력 → "적용"(미리보기) → 할인·결제액 인라인 표시. 적용된 코드만 주문에 보낸다.
+  const [couponCode, setCouponCode] = useState("");
+  const [coupon, setCoupon] = useState<CouponPreview | null>(null);
+  const [couponError, setCouponError] = useState<string | null>(null);
+  const [applyingCoupon, setApplyingCoupon] = useState(false);
+
   useEffect(() => {
     if (!authLoading && !user) router.replace("/login");
   }, [authLoading, user, router]);
@@ -43,6 +49,29 @@ export default function CheckoutPage() {
       .finally(() => setLoading(false));
   }, [user]);
 
+  // 쿠폰 적용(미리보기): 주문을 만들지 않고 현재 장바구니 기준 할인을 받아 표시한다.
+  const applyCoupon = async () => {
+    const code = couponCode.trim();
+    if (!code) return;
+    setApplyingCoupon(true);
+    setCouponError(null);
+    try {
+      const preview = await apiPost<CouponPreview>("/api/orders/coupon-preview", { couponCode: code });
+      setCoupon(preview);
+    } catch (e) {
+      setCoupon(null);
+      setCouponError((e as Error).message); // 코드 없음·기간 외·최소금액 미달 등 400
+    } finally {
+      setApplyingCoupon(false);
+    }
+  };
+
+  const removeCoupon = () => {
+    setCoupon(null);
+    setCouponCode("");
+    setCouponError(null);
+  };
+
   const placeOrder = async () => {
     if (selectedId == null) {
       setError("배송지를 선택해 주세요.");
@@ -54,10 +83,11 @@ export default function CheckoutPage() {
       const order = await apiPost<Order>("/api/orders/checkout", {
         addressId: selectedId,
         deliveryMemo: memo.trim() || null,
+        couponCode: coupon ? coupon.couponCode : null, // "적용"한 쿠폰만 전송
       });
       router.push(`/orders/${order.id}/pay`); // 주문(PENDING) 생성됨 → 결제 화면으로
     } catch (e) {
-      setError((e as Error).message); // 빈 장바구니(400)·재고 등
+      setError((e as Error).message); // 빈 장바구니(400)·재고·쿠폰 등
       setOrdering(false);
     }
   };
@@ -169,9 +199,66 @@ export default function CheckoutPage() {
         </ul>
       </section>
 
-      <div className="flex items-center justify-between border-t border-line pt-5">
-        <span className="text-muted">총 {cart?.totalQuantity ?? 0}개</span>
-        <span className="text-2xl font-bold text-ink">{total.toLocaleString()}원</span>
+      {/* 쿠폰 */}
+      <section className="mb-6">
+        <h2 className="mb-3 font-serif text-xl text-ink">쿠폰</h2>
+        <div className="rounded-2xl border border-line bg-paper p-4">
+          <div className="flex gap-2">
+            <input
+              className="flex-1 rounded-xl border border-line bg-paper px-4 py-2.5 text-ink outline-none transition placeholder:text-muted focus:border-clay disabled:opacity-50"
+              placeholder="쿠폰 코드"
+              maxLength={40}
+              value={couponCode}
+              disabled={!!coupon}
+              onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !coupon) applyCoupon();
+              }}
+            />
+            {coupon ? (
+              <button
+                onClick={removeCoupon}
+                className="rounded-full border border-line bg-paper px-5 py-2.5 text-sm font-medium text-muted transition hover:border-danger hover:text-danger"
+              >
+                제거
+              </button>
+            ) : (
+              <button
+                onClick={applyCoupon}
+                disabled={!couponCode.trim() || applyingCoupon}
+                className="rounded-full bg-ink px-6 py-2.5 text-sm font-medium text-cream transition hover:bg-ink/90 disabled:opacity-50"
+              >
+                {applyingCoupon ? "확인 중…" : "적용"}
+              </button>
+            )}
+          </div>
+          {coupon && (
+            <p className="mt-3 rounded-xl bg-sage-50 px-4 py-2.5 text-sm text-sage-600">
+              <b>{coupon.couponCode}</b> 적용 — {coupon.discountAmount.toLocaleString()}원 할인
+            </p>
+          )}
+          {couponError && <p className="mt-2 text-sm text-danger">{couponError}</p>}
+        </div>
+      </section>
+
+      {/* 결제 금액 */}
+      <div className="border-t border-line pt-5">
+        <div className="flex justify-between text-sm">
+          <span className="text-muted">상품 합계 · 총 {cart?.totalQuantity ?? 0}개</span>
+          <span className="text-ink">{total.toLocaleString()}원</span>
+        </div>
+        {coupon && (
+          <div className="mt-1.5 flex justify-between text-sm">
+            <span className="text-sage-600">쿠폰 할인</span>
+            <span className="font-medium text-sage-600">−{coupon.discountAmount.toLocaleString()}원</span>
+          </div>
+        )}
+        <div className="mt-3 flex items-center justify-between border-t border-line pt-3">
+          <span className="font-medium text-ink">최종 결제 예정</span>
+          <span className="text-2xl font-bold text-ink">
+            {(coupon ? coupon.payableAmount : total).toLocaleString()}원
+          </span>
+        </div>
       </div>
 
       {error && <p className="mt-4 text-sm text-danger">{error}</p>}

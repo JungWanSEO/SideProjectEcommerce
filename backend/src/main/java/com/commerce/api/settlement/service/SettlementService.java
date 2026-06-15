@@ -2,6 +2,7 @@ package com.commerce.api.settlement.service;
 
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.exception.BusinessException;
+import com.commerce.api.order.dto.OrderDiscountInfo;
 import com.commerce.api.order.dto.OrderResponse.OrderItemResponse;
 import com.commerce.api.order.entity.OrderItemStatus;
 import com.commerce.api.order.service.OrderService;
@@ -71,7 +72,7 @@ public class SettlementService {
         LocalDate settledDate = LocalDate.now().plusDays(SettlementPolicy.PAYOUT_DELAY_DAYS);
 
         int created = 0;
-        long totalGross = 0, totalFee = 0, totalPlatformFee = 0, totalNet = 0;
+        long totalGross = 0, totalFee = 0, totalPlatformFee = 0, totalNet = 0, totalDiscount = 0;
         // PG별/셀러별 누적 — 삽입 순서 유지(LinkedHashMap)로 응답 순서가 결제·셀러 등장 순서를 따른다.
         Map<String, ProviderAccumulator> byProvider = new LinkedHashMap<>();
         Map<Long, SellerAccumulator> bySeller = new LinkedHashMap<>();
@@ -84,31 +85,43 @@ public class SettlementService {
             String provider = payment.provider();
             double feeRate = paymentGatewayRouter.feeRateOf(provider);   // PG 요율(단일 출처)
 
-            // 1) 주문 항목을 셀러별 매출로 묶는다(sellerId=null이면 미귀속 버킷). 등장 순서 보존.
-            //    부분환불로 취소(CANCELLED)된 항목은 제외 — 환불분은 정산하지 않는다.
+            // 1) 활성 항목을 셀러별 매출(gross, 할인 전)·항목별 안분 할인(discountShare)으로 묶는다(취소분 제외).
+            //    할인은 주문이 항목별로 안분해 두므로 정산은 활성 항목의 share만 더하면 된다 → 부분환불돼도
+            //    남은 항목의 실효가 합 = 결제액이 되어 대사가 그대로 MATCHED(run/reverseRefunds가 같은 출처를 씀).
             Map<Long, Long> grossBySeller = new LinkedHashMap<>();
+            Map<Long, Long> discountBySeller = new LinkedHashMap<>();
             for (OrderItemResponse item : orderService.getOrderItems(payment.orderId())) {
                 if (item.status() != OrderItemStatus.ACTIVE) {
                     continue;
                 }
                 grossBySeller.merge(item.sellerId(), item.subtotal(), Long::sum);
+                discountBySeller.merge(item.sellerId(), item.discountShare(), Long::sum);
             }
-            long orderGross = grossBySeller.values().stream().mapToLong(Long::longValue).sum();
-            // PG 수수료는 활성 매출 기준(취소분 제외)으로 떼고 셀러 매출 비례로 안분(잔차는 최대 셀러).
-            long pgFeeTotal = SettlementPolicy.calculateFee(feeRate, orderGross);
-            Map<Long, Long> pgFeeBySeller = allocatePgFee(grossBySeller, orderGross, pgFeeTotal);
+            OrderDiscountInfo discount = orderService.getOrderDiscount(payment.orderId());   // 부담 주체(net 환원 판정)
 
-            // 3) 셀러마다 정산 항목 생성.
-            for (Map.Entry<Long, Long> e : grossBySeller.entrySet()) {
+            // 2) 할인 후 셀러 몫(reduced gross). Σreduced = payable(고객 실제 결제액) → 대사 group-by-sum이 그대로 MATCHED.
+            Map<Long, Long> reducedGrossBySeller = new LinkedHashMap<>();
+            grossBySeller.forEach((sid, g) -> reducedGrossBySeller.put(sid, g - discountBySeller.getOrDefault(sid, 0L)));
+            long payable = reducedGrossBySeller.values().stream().mapToLong(Long::longValue).sum();
+
+            // 4) PG 수수료는 실제 처리액(payable=할인 후) 기준으로 떼고 셀러 몫 비례로 안분(잔차는 최대 셀러).
+            long pgFeeTotal = SettlementPolicy.calculateFee(feeRate, payable);
+            Map<Long, Long> pgFeeBySeller = proRate(reducedGrossBySeller, payable, pgFeeTotal);
+
+            // 5) 셀러마다 정산 항목 생성(gross=할인 후 몫, 플랫폼 부담이면 net에 할인 환원).
+            for (Map.Entry<Long, Long> e : reducedGrossBySeller.entrySet()) {
                 Long sellerId = e.getKey();
                 long sellerGross = e.getValue();
                 long pgFee = pgFeeBySeller.get(sellerId);
                 double platformRate = platformRateOf(sellerId, platformRateCache);
                 long platformFee = Math.round(sellerGross * platformRate);
+                long sellerDiscount = discountBySeller.getOrDefault(sellerId, 0L);
+                String fundedBy = sellerDiscount > 0 ? discount.fundedBy() : null;
 
                 SettlementEntry entry = SettlementEntry.scheduled(
                         payment.id(), payment.orderId(), payment.pgTransactionId(), provider,
-                        sellerId, sellerGross, pgFee, feeRate, platformFee, platformRate, settledDate);
+                        sellerId, sellerGross, pgFee, feeRate, platformFee, platformRate,
+                        sellerDiscount, fundedBy, settledDate);
                 settlementRepository.save(entry);
 
                 created++;
@@ -116,6 +129,7 @@ public class SettlementService {
                 totalFee += entry.getFee();
                 totalPlatformFee += entry.getPlatformFee();
                 totalNet += entry.getNetAmount();
+                totalDiscount += entry.getDiscountAmount();
                 byProvider.computeIfAbsent(provider, p -> new ProviderAccumulator(p, feeRate)).add(entry);
                 bySeller.computeIfAbsent(sellerId, SellerAccumulator::new).add(entry);
             }
@@ -129,7 +143,7 @@ public class SettlementService {
         for (SellerAccumulator acc : bySeller.values()) {
             sellerBreakdown.add(acc.toBreakdown());
         }
-        return new SettlementRunResponse(created, totalGross, totalFee, totalPlatformFee, totalNet,
+        return new SettlementRunResponse(created, totalGross, totalFee, totalPlatformFee, totalNet, totalDiscount,
                 providerBreakdown, sellerBreakdown);
     }
 
@@ -154,27 +168,34 @@ public class SettlementService {
             }
             String provider = payment.provider();
             double feeRate = paymentGatewayRouter.feeRateOf(provider);
+            OrderDiscountInfo discount = orderService.getOrderDiscount(payment.orderId());   // 부담 주체(net 환원)
 
-            // 현재 활성 항목 기준 목표(셀러별 gross·PG수수료 안분)
+            // 현재 활성 항목 기준 목표 — gross·항목별 안분 할인. reduced=gross−discount, PG수수료는 payable 기준.
+            // run()과 같은 항목별 출처를 쓰므로 할인 주문도 자연히 일관(미환불이면 target=settled → diff 0).
             Map<Long, Long> grossBySeller = new LinkedHashMap<>();
+            Map<Long, Long> discountBySeller = new LinkedHashMap<>();
             for (OrderItemResponse item : orderService.getOrderItems(payment.orderId())) {
                 if (item.status() != OrderItemStatus.ACTIVE) {
                     continue;
                 }
                 grossBySeller.merge(item.sellerId(), item.subtotal(), Long::sum);
+                discountBySeller.merge(item.sellerId(), item.discountShare(), Long::sum);
             }
-            long orderGross = grossBySeller.values().stream().mapToLong(Long::longValue).sum();
-            long pgFeeTotal = SettlementPolicy.calculateFee(feeRate, orderGross);
-            Map<Long, Long> pgFeeBySeller = allocatePgFee(grossBySeller, orderGross, pgFeeTotal);
+            Map<Long, Long> reducedGrossBySeller = new LinkedHashMap<>();
+            grossBySeller.forEach((sid, g) -> reducedGrossBySeller.put(sid, g - discountBySeller.getOrDefault(sid, 0L)));
+            long payable = reducedGrossBySeller.values().stream().mapToLong(Long::longValue).sum();
+            long pgFeeTotal = SettlementPolicy.calculateFee(feeRate, payable);
+            Map<Long, Long> pgFeeBySeller = proRate(reducedGrossBySeller, payable, pgFeeTotal);
 
-            // 기존 정산 합계(셀러별) + 적용된 플랫폼 요율(역분개에 그대로 사용 — 그때 요율 보존)
-            Map<Long, long[]> settledBySeller = new LinkedHashMap<>();   // [gross, fee, platformFee]
+            // 기존 정산 합계(셀러별) [gross, fee, platformFee, discount] + 적용된 플랫폼 요율 보존
+            Map<Long, long[]> settledBySeller = new LinkedHashMap<>();
             Map<Long, Double> platformRateBySeller = new HashMap<>();
             for (SettlementEntry e : existing) {
-                long[] agg = settledBySeller.computeIfAbsent(e.getSellerId(), k -> new long[3]);
+                long[] agg = settledBySeller.computeIfAbsent(e.getSellerId(), k -> new long[4]);
                 agg[0] += e.getGrossAmount();
                 agg[1] += e.getFee();
                 agg[2] += e.getPlatformFee();
+                agg[3] += e.getDiscountAmount();
                 platformRateBySeller.putIfAbsent(e.getSellerId(), e.getPlatformFeeRate());
             }
 
@@ -182,17 +203,21 @@ public class SettlementService {
             for (Map.Entry<Long, long[]> se : settledBySeller.entrySet()) {
                 Long sellerId = se.getKey();
                 long[] settled = se.getValue();
-                long targetGross = grossBySeller.getOrDefault(sellerId, 0L);
                 double platformRate = platformRateBySeller.getOrDefault(sellerId, 0.0);
+                long targetGross = reducedGrossBySeller.getOrDefault(sellerId, 0L);   // 할인 후 몫
+                long targetDiscount = discountBySeller.getOrDefault(sellerId, 0L);
                 long dGross = targetGross - settled[0];
                 long dFee = pgFeeBySeller.getOrDefault(sellerId, 0L) - settled[1];
                 long dPlatformFee = Math.round(targetGross * platformRate) - settled[2];
-                if (dGross == 0 && dFee == 0 && dPlatformFee == 0) {
+                long dDiscount = targetDiscount - settled[3];
+                if (dGross == 0 && dFee == 0 && dPlatformFee == 0 && dDiscount == 0) {
                     continue;   // 변화 없음
                 }
+                // 역분개의 부담 주체는 원 정산과 동일 → net 환원(subsidy)도 선형으로 상계된다(dNet = targetNet − settledNet).
+                String fundedBy = (targetDiscount != 0 || settled[3] != 0) ? discount.fundedBy() : null;
                 SettlementEntry rev = SettlementEntry.scheduled(
                         payment.id(), payment.orderId(), payment.pgTransactionId(), provider,
-                        sellerId, dGross, dFee, feeRate, dPlatformFee, platformRate, settledDate);
+                        sellerId, dGross, dFee, feeRate, dPlatformFee, platformRate, dDiscount, fundedBy, settledDate);
                 settlementRepository.save(rev);
                 reversed++;
                 totalReversedNet += rev.getNetAmount();
@@ -202,25 +227,25 @@ public class SettlementService {
     }
 
     /**
-     * PG 수수료(총액)를 셀러 매출 비례로 안분한다. 원 단위 반올림으로 생기는 잔차(±몇 원)는
-     * 매출이 가장 큰 셀러에게 몰아 <b>합계가 정확히 pgFeeTotal과 같도록</b> 보존한다.
+     * 총액(total)을 키별 비중(amountsByKey 값 / base) 비례로 안분한다. 원 단위 반올림으로 생기는 잔차(±몇 원)는
+     * 비중이 가장 큰 키에 몰아 <b>합계가 정확히 total과 같도록</b> 보존한다. (PG수수료·플랫폼 와이드 할인 공용)
      */
-    private Map<Long, Long> allocatePgFee(Map<Long, Long> grossBySeller, long orderGross, long pgFeeTotal) {
+    private Map<Long, Long> proRate(Map<Long, Long> amountsByKey, long base, long total) {
         Map<Long, Long> result = new LinkedHashMap<>();
         long allocated = 0;
-        Long maxSeller = null;
-        long maxGross = -1;
-        for (Map.Entry<Long, Long> e : grossBySeller.entrySet()) {
-            long share = (orderGross == 0) ? 0 : Math.round((double) pgFeeTotal * e.getValue() / orderGross);
+        Long maxKey = null;
+        long maxAmount = -1;
+        for (Map.Entry<Long, Long> e : amountsByKey.entrySet()) {
+            long share = (base == 0) ? 0 : Math.round((double) total * e.getValue() / base);
             result.put(e.getKey(), share);
             allocated += share;
-            if (e.getValue() > maxGross) {
-                maxGross = e.getValue();
-                maxSeller = e.getKey();
+            if (e.getValue() > maxAmount) {
+                maxAmount = e.getValue();
+                maxKey = e.getKey();
             }
         }
-        if (maxSeller != null && allocated != pgFeeTotal) {
-            result.merge(maxSeller, pgFeeTotal - allocated, Long::sum);   // 잔차 보정
+        if (maxKey != null && allocated != total) {
+            result.merge(maxKey, total - allocated, Long::sum);   // 잔차 보정
         }
         return result;
     }
@@ -239,7 +264,7 @@ public class SettlementService {
         private final String provider;
         private final double feeRate;
         private int count;
-        private long gross, fee, platformFee, net;
+        private long gross, fee, platformFee, net, discount;
 
         ProviderAccumulator(String provider, double feeRate) {
             this.provider = provider;
@@ -252,10 +277,11 @@ public class SettlementService {
             fee += entry.getFee();
             platformFee += entry.getPlatformFee();
             net += entry.getNetAmount();
+            discount += entry.getDiscountAmount();
         }
 
         ProviderBreakdown toBreakdown() {
-            return new ProviderBreakdown(provider, feeRate, count, gross, fee, platformFee, net);
+            return new ProviderBreakdown(provider, feeRate, count, gross, fee, platformFee, net, discount);
         }
     }
 
@@ -263,7 +289,7 @@ public class SettlementService {
     private static final class SellerAccumulator {
         private final Long sellerId;
         private int count;
-        private long gross, fee, platformFee, net;
+        private long gross, fee, platformFee, net, discount;
 
         SellerAccumulator(Long sellerId) {
             this.sellerId = sellerId;
@@ -275,10 +301,11 @@ public class SettlementService {
             fee += entry.getFee();
             platformFee += entry.getPlatformFee();
             net += entry.getNetAmount();
+            discount += entry.getDiscountAmount();
         }
 
         SellerBreakdown toBreakdown() {
-            return new SellerBreakdown(sellerId, count, gross, fee, platformFee, net);
+            return new SellerBreakdown(sellerId, count, gross, fee, platformFee, net, discount);
         }
     }
 
@@ -304,7 +331,7 @@ public class SettlementService {
                 .map(r -> new SellerSettlementSummary(
                         r.sellerId(),
                         r.sellerId() == null ? null : names.get(r.sellerId()),
-                        r.count(), r.grossAmount(), r.fee(), r.platformFee(), r.netAmount()))
+                        r.count(), r.grossAmount(), r.fee(), r.platformFee(), r.discountAmount(), r.netAmount()))
                 .toList();
     }
 

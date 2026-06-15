@@ -14,7 +14,9 @@ import jakarta.persistence.Id;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -45,7 +47,26 @@ public class Order extends BaseEntity {
     private OrderStatus status;
 
     @Column(nullable = false)
-    private long totalPrice;
+    private long totalPrice;   // 항목 소계 합(할인 전 gross). 항목별 원가 — 셀러별 정산 분해의 기준.
+
+    /** 쿠폰 할인액(원). 쿠폰 미적용이면 0. 결제 대상 금액 = totalPrice - discountAmount. */
+    @Column(name = "discount_amount", nullable = false)
+    private long discountAmount;
+
+    /** 적용된 쿠폰 코드 스냅샷(없으면 null). 쿠폰 행이 바뀌어도 "무엇을 적용했는지" 보존. */
+    @Column(name = "coupon_code", length = 40)
+    private String couponCode;
+
+    /**
+     * 할인 부담 주체 스냅샷("PLATFORM"/"SELLER", 없으면 null). 셀러별 정산 분담(Step 2)이 읽는다.
+     * 쿠폰 도메인 enum 대신 문자열 스냅샷으로 둬 order→coupon 결합을 피한다(productName 같은 원시 스냅샷 패턴).
+     */
+    @Column(name = "coupon_funded_by", length = 20)
+    private String couponFundedBy;
+
+    /** 셀러 한정 쿠폰이면 그 셀러 ID 스냅샷(플랫폼 와이드면 null). 정산이 할인을 그 셀러에 귀속할 때 쓴다. */
+    @Column(name = "coupon_seller_id")
+    private Long couponSellerId;
 
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<OrderItem> orderItems = new ArrayList<>();
@@ -58,6 +79,7 @@ public class Order extends BaseEntity {
         this.memberId = memberId;
         this.status = OrderStatus.PENDING;   // 생성 시점 = 결제 대기
         this.totalPrice = 0L;
+        this.discountAmount = 0L;            // 쿠폰 미적용 기본값
     }
 
     /** 빈 주문 생성 (항목은 addItem으로 추가) */
@@ -75,6 +97,76 @@ public class Order extends BaseEntity {
     /** 배송지 스냅샷 지정 (체크아웃 시). */
     public void ship(ShippingInfo shippingInfo) {
         this.shippingInfo = shippingInfo;
+    }
+
+    /**
+     * 쿠폰 적용 (체크아웃 시 1회). 할인액·코드·분담 메타를 스냅샷하고 결제 대상 금액(payable)을 낮춘다.
+     *
+     * <p><b>항목 소계(gross)는 그대로 둔다</b> — 셀러별 정산 분해(Step 2)가 원가 기준 gross를 읽어
+     * 할인을 셀러/플랫폼으로 안분해야 하기 때문. 할인은 [0, totalPrice] 범위로 가드(음수 결제 방지).
+     * fundedBy("PLATFORM"/"SELLER")·sellerId는 정산 분담을 위한 스냅샷이다(Step 2).
+     */
+    public void applyCoupon(String couponCode, long discountAmount, String fundedBy, Long sellerId) {
+        if (discountAmount < 0 || discountAmount > this.totalPrice) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "할인 금액이 주문 금액을 초과할 수 없습니다.");
+        }
+        this.couponCode = couponCode;
+        this.discountAmount = discountAmount;
+        this.couponFundedBy = fundedBy;
+        this.couponSellerId = sellerId;
+    }
+
+    /** 실제 결제 대상 금액 = 총액(gross) - 쿠폰 할인액. PG 승인·Payment.amount의 기준. */
+    public long getPayableAmount() {
+        return this.totalPrice - this.discountAmount;
+    }
+
+    /**
+     * 쿠폰 할인을 <b>항목별로 안분</b>한다(매출 비례, 잔차는 매출 최대 항목에). 항목의 "실효가"(= 소계 − 안분 할인)는
+     * 부분환불 환불액과 셀러별 정산(활성 항목 실효가 합)의 <b>단일 출처</b>다 — 둘이 같은 값을 써야
+     * 어떤 취소 순서에도 "Σ실효가 = 결제액"이 유지된다(과다환불·대사 불일치 방지).
+     *
+     * <p>적용 범위: 플랫폼 와이드(couponSellerId=null)는 모든 항목, 셀러 한정은 그 셀러 항목만. 범위 밖은 0.
+     * 기준 매출은 <b>주문 시점 전체 항목</b>(취소분 포함) — 항목이 "구매 시 받은 할인"은 다른 항목이 취소돼도 변치 않는다.
+     */
+    public Map<OrderItem, Long> discountShares() {
+        Map<OrderItem, Long> shares = new LinkedHashMap<>();
+        for (OrderItem item : orderItems) {
+            shares.put(item, 0L);
+        }
+        if (discountAmount <= 0) {
+            return shares;
+        }
+
+        // 적용 범위 내 항목 + 기준 매출(전체 항목 기준, 취소분 포함)
+        List<OrderItem> inScope = new ArrayList<>();
+        long basis = 0;
+        for (OrderItem item : orderItems) {
+            if (couponSellerId == null || couponSellerId.equals(item.getSellerId())) {
+                inScope.add(item);
+                basis += item.getSubtotal();
+            }
+        }
+        if (basis <= 0) {
+            return shares;   // 적용 대상 매출 없음(방어)
+        }
+
+        long allocated = 0;
+        OrderItem maxItem = null;
+        long maxSubtotal = -1;
+        for (OrderItem item : inScope) {
+            long share = Math.round((double) discountAmount * item.getSubtotal() / basis);
+            shares.put(item, share);
+            allocated += share;
+            if (item.getSubtotal() > maxSubtotal) {
+                maxSubtotal = item.getSubtotal();
+                maxItem = item;
+            }
+        }
+        if (maxItem != null && allocated != discountAmount) {
+            shares.merge(maxItem, discountAmount - allocated, Long::sum);   // 반올림 잔차 보정(Σ = discountAmount)
+        }
+        return shares;
     }
 
     /** 주문 취소 (이미 취소된 주문은 불가) */

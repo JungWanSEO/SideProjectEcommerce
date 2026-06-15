@@ -13,10 +13,11 @@ import java.util.List;
  */
 public record SettlementRunResponse(
         int createdCount,         // 이번 실행으로 새로 만든 정산 항목 수((결제×셀러) 단위)
-        long totalGrossAmount,    // 매출 합계
+        long totalGrossAmount,    // 매출 합계(할인 후 셀러 몫 합 = payable 합)
         long totalFee,            // PG 수수료 합계
         long totalPlatformFee,    // 플랫폼 판매수수료 합계
-        long totalNetAmount,      // 셀러 실수령 합계 (= 매출 - PG수수료 - 플랫폼수수료)
+        long totalNetAmount,      // 셀러 실수령 합계 (= 매출 - PG수수료 - 플랫폼수수료 + 플랫폼부담 할인 환원)
+        long totalDiscount,       // 쿠폰 할인 합계(안분된 할인액 총합)
         List<ProviderBreakdown> byProvider,   // PG별 분해 (MPG-3)
         List<SellerBreakdown> bySeller        // 셀러별 분해 (Phase 2 — 누구에게 얼마를 지급하나)
 ) {
@@ -26,10 +27,11 @@ public record SettlementRunResponse(
             String provider,         // PG 코드 (예: TOSS, KAKAOPAY)
             double feeRate,          // 그 PG에 적용한 수수료율 (예: 0.025)
             int count,               // 이 PG로 만든 정산 항목 수
-            long grossAmount,        // 매출 합계
+            long grossAmount,        // 매출 합계(할인 후 몫)
             long fee,                // PG 수수료 합계
             long platformFee,        // 플랫폼 수수료 합계
-            long netAmount           // 셀러 실수령 합계
+            long netAmount,          // 셀러 실수령 합계
+            long discount            // 쿠폰 할인 합계
     ) {
     }
 
@@ -37,10 +39,11 @@ public record SettlementRunResponse(
     public record SellerBreakdown(
             Long sellerId,           // 셀러 ID (null = 미귀속/플랫폼 직매입)
             int count,               // 이 셀러로 만든 정산 항목 수
-            long grossAmount,        // 셀러 매출 합계
+            long grossAmount,        // 셀러 매출 합계(할인 후 몫)
             long fee,                // PG 수수료(안분) 합계
             long platformFee,        // 플랫폼 판매수수료 합계
-            long netAmount           // 셀러 실수령 합계
+            long netAmount,          // 셀러 실수령 합계
+            long discount            // 쿠폰 할인 합계(이 셀러분에 안분된)
     ) {
     }
 }

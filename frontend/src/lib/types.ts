@@ -148,7 +148,10 @@ export interface Order {
   id: number;
   memberId: number;
   status: OrderStatus;
-  totalPrice: number;
+  totalPrice: number; // 할인 전 총액(gross)
+  discountAmount: number; // 쿠폰 할인액 (없으면 0)
+  payableAmount: number; // 실제 결제액 = totalPrice - discountAmount
+  couponCode: string | null; // 적용된 쿠폰 코드 (없으면 null)
   items: OrderItem[];
   shipping: ShippingInfo | null;
   createdAt: string;
@@ -195,7 +198,9 @@ export interface Settlement {
   feeRate: number; // 적용 PG 수수료율 스냅샷 (예: 0.025) — MPG-3
   platformFee: number; // 플랫폼 판매수수료
   platformFeeRate: number; // 적용 플랫폼 수수료율 스냅샷 (예: 0.10)
-  netAmount: number; // 셀러 실수령 (= gross - fee - platformFee)
+  discountAmount: number; // 이 항목에 안분된 쿠폰 할인액 (없으면 0) — 쿠폰 Step 2
+  discountFundedBy: string | null; // 할인 부담 주체 ("PLATFORM"/"SELLER", 없으면 null)
+  netAmount: number; // 셀러 실수령 (= gross - fee - platformFee + 플랫폼부담 할인 환원)
   status: SettlementStatus;
   settledDate: string; // 입금 예정/완료일 (LocalDate "YYYY-MM-DD")
   createdAt: string;
@@ -210,6 +215,7 @@ export interface SettlementProviderBreakdown {
   fee: number;
   platformFee: number;
   netAmount: number;
+  discount: number; // 쿠폰 할인 합계 — 쿠폰 Step 2
 }
 
 /** 정산 배치 결과의 셀러별 분해 (SettlementRunResponse.SellerBreakdown) — Phase 2 */
@@ -220,6 +226,7 @@ export interface SettlementSellerBreakdown {
   fee: number;
   platformFee: number;
   netAmount: number;
+  discount: number; // 쿠폰 할인 합계 — 쿠폰 Step 2
 }
 
 /** 정산 배치 실행 결과 (SettlementRunResponse) */
@@ -229,6 +236,7 @@ export interface SettlementRunResult {
   totalFee: number;
   totalPlatformFee: number;
   totalNetAmount: number;
+  totalDiscount: number; // 쿠폰 할인 합계 — 쿠폰 Step 2
   byProvider: SettlementProviderBreakdown[]; // PG별 분해 — MPG-3
   bySeller: SettlementSellerBreakdown[]; // 셀러별 분해 — Phase 2
 }
@@ -238,9 +246,10 @@ export interface SellerSettlementSummary {
   sellerId: number | null;
   sellerName: string | null; // 미귀속이면 null
   count: number;
-  grossAmount: number;
+  grossAmount: number; // 할인 후 셀러 몫
   fee: number;
   platformFee: number;
+  discountAmount: number; // 쿠폰 할인 합계 (원매출 = grossAmount + discountAmount) — 쿠폰 Step 2
   netAmount: number;
 }
 
@@ -309,4 +318,52 @@ export interface ReconciliationResult {
   totalMismatches: number;
   alreadyHandled: number;
   byProvider: ReconciliationProviderBreakdown[]; // PG별 분해 — MPG-2
+}
+
+// ───────── 쿠폰(Coupon) — Phase 2 후속 차별화 ─────────
+
+// 할인 종류 (백엔드 DiscountType): 정액 / 정률
+export type DiscountType = "FIXED_AMOUNT" | "PERCENTAGE";
+// 할인 부담 주체 (백엔드 CouponFundedBy): 플랫폼 / 셀러
+export type CouponFundedBy = "PLATFORM" | "SELLER";
+// 쿠폰 상태 (백엔드 CouponStatus)
+export type CouponStatus = "ACTIVE" | "DISABLED";
+
+/** 쿠폰 (CouponResponse) — ADMIN 관리 */
+export interface Coupon {
+  id: number;
+  code: string;
+  name: string;
+  discountType: DiscountType;
+  discountValue: number; // 정액=원, 정률=퍼센트(1~100)
+  maxDiscountAmount: number | null; // 정률 상한(원). 정액/무제한이면 null
+  minOrderAmount: number; // 최소 적용 대상 금액(원)
+  fundedBy: CouponFundedBy; // 할인 비용 부담 주체 (정산 분담 — Step 2)
+  sellerId: number | null; // null=플랫폼 와이드(주문 전체), 값=해당 셀러 상품 한정
+  validFrom: string; // ISO LocalDateTime
+  validUntil: string;
+  status: CouponStatus;
+  createdAt: string;
+}
+
+/** 쿠폰 발급 요청 (CouponCreateRequest) */
+export interface CouponCreateInput {
+  code: string;
+  name: string;
+  discountType: DiscountType;
+  discountValue: number;
+  maxDiscountAmount?: number | null;
+  minOrderAmount: number;
+  fundedBy: CouponFundedBy;
+  sellerId?: number | null;
+  validFrom: string;
+  validUntil: string;
+}
+
+/** 쿠폰 미리보기 응답 (CouponPreviewResponse) — 현재 장바구니 기준 할인·예상 결제액 */
+export interface CouponPreview {
+  couponCode: string;
+  totalPrice: number;
+  discountAmount: number;
+  payableAmount: number;
 }

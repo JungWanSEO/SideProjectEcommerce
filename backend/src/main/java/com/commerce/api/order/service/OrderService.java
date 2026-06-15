@@ -3,7 +3,9 @@ package com.commerce.api.order.service;
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.order.dto.CheckoutRequest;
+import com.commerce.api.order.dto.CouponPreviewResponse;
 import com.commerce.api.order.dto.OrderCreateRequest;
+import com.commerce.api.order.dto.OrderDiscountInfo;
 import com.commerce.api.order.dto.OrderResponse;
 import com.commerce.api.order.dto.OrderSummaryResponse;
 import com.commerce.api.order.entity.Order;
@@ -58,6 +60,11 @@ public class OrderService {
         return orderProcessor.checkout(memberId, request);
     }
 
+    /** 쿠폰 미리보기(주문 생성 없음) — 현재 장바구니 기준 할인·예상 결제액. 읽기 전용이라 재시도 불필요. */
+    public CouponPreviewResponse previewCoupon(Long memberId, String couponCode) {
+        return orderProcessor.previewCoupon(memberId, couponCode);
+    }
+
     /**
      * 결제 확정(PENDING → PAID + 재고 차감). 동시 재고 차감으로 낙관적 락 충돌이 나면
      * create와 동일하게 최대 3회까지 (새 트랜잭션으로) 재시도한다.
@@ -82,9 +89,20 @@ public class OrderService {
      */
     @Transactional(readOnly = true)
     public List<OrderResponse.OrderItemResponse> getOrderItems(Long orderId) {
-        return findOrder(orderId).getOrderItems().stream()
-                .map(OrderResponse.OrderItemResponse::from)
+        Order order = findOrder(orderId);
+        var shares = order.discountShares();   // 항목별 안분 할인 — 정산이 활성 항목 실효가를 쓰게 함
+        return order.getOrderItems().stream()
+                .map(item -> OrderResponse.OrderItemResponse.from(item, shares.getOrDefault(item, 0L)))
                 .toList();
+    }
+
+    /**
+     * 주문의 쿠폰 할인 스냅샷(할인액·부담주체·셀러 귀속) — 정산이 할인을 셀러/플랫폼으로 분담할 때 읽는다.
+     * getOrderItems와 같은 settlement → order 경계 경로(서비스 + DTO). 소유권 검증 없음(ADMIN 배치 전용).
+     */
+    @Transactional(readOnly = true)
+    public OrderDiscountInfo getOrderDiscount(Long orderId) {
+        return OrderDiscountInfo.from(findOrder(orderId));
     }
 
     /**

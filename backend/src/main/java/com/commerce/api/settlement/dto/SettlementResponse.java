@@ -18,7 +18,9 @@ public record SettlementResponse(
         double feeRate,          // 적용한 PG 수수료율 스냅샷 (예: 0.025)
         long platformFee,        // 플랫폼 판매수수료
         double platformFeeRate,  // 적용한 플랫폼 수수료율 스냅샷 (예: 0.10)
-        long netAmount,          // 셀러 실수령 (= grossAmount - fee - platformFee)
+        long discountAmount,     // 이 항목에 안분된 쿠폰 할인액 (없으면 0)
+        String discountFundedBy, // 할인 부담 주체 ("PLATFORM"/"SELLER", 없으면 null)
+        long netAmount,          // 셀러 실수령 (= grossAmount - fee - platformFee + 플랫폼부담 할인 환원)
         SettlementStatus status,
         LocalDate settledDate,
         LocalDateTime createdAt
@@ -36,6 +38,8 @@ public record SettlementResponse(
                 entry.getFeeRate(),
                 entry.getPlatformFee(),
                 entry.getPlatformFeeRate(),
+                entry.getDiscountAmount(),
+                entry.getDiscountFundedBy(),
                 entry.getNetAmount(),
                 entry.getStatus(),
                 entry.getSettledDate(),

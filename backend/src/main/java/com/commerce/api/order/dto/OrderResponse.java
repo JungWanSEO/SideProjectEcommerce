@@ -7,6 +7,7 @@ import com.commerce.api.order.entity.OrderStatus;
 import com.commerce.api.order.entity.ShippingInfo;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 주문 응답.
@@ -15,20 +16,28 @@ public record OrderResponse(
         Long id,
         Long memberId,
         OrderStatus status,
-        long totalPrice,
+        long totalPrice,          // 할인 전 총액(gross)
+        long discountAmount,      // 쿠폰 할인액 (없으면 0)
+        long payableAmount,       // 실제 결제액 = totalPrice - discountAmount
+        String couponCode,        // 적용된 쿠폰 코드 (없으면 null)
         List<OrderItemResponse> items,
         ShippingResponse shipping,   // 배송지 스냅샷 (없으면 null)
         LocalDateTime createdAt
 ) {
     public static OrderResponse from(Order order) {
+        // 쿠폰 할인을 항목별로 안분(매출 비례)한 값을 항목 응답에 실어, 환불액·정산이 같은 출처를 쓰게 한다.
+        Map<OrderItem, Long> shares = order.discountShares();
         List<OrderItemResponse> items = order.getOrderItems().stream()
-                .map(OrderItemResponse::from)
+                .map(item -> OrderItemResponse.from(item, shares.getOrDefault(item, 0L)))
                 .toList();
         return new OrderResponse(
                 order.getId(),
                 order.getMemberId(),
                 order.getStatus(),
                 order.getTotalPrice(),
+                order.getDiscountAmount(),
+                order.getPayableAmount(),
+                order.getCouponCode(),
                 items,
                 ShippingResponse.from(order.getShippingInfo()),
                 order.getCreatedAt()
@@ -67,9 +76,10 @@ public record OrderResponse(
             long orderPrice,
             int quantity,
             long subtotal,
+            long discountShare,      // 이 항목에 안분된 쿠폰 할인액(원). 실효가 = subtotal - discountShare
             OrderItemStatus status   // ACTIVE / CANCELLED(부분환불)
     ) {
-        public static OrderItemResponse from(OrderItem item) {
+        public static OrderItemResponse from(OrderItem item, long discountShare) {
             return new OrderItemResponse(
                     item.getId(),
                     item.getProductId(),
@@ -81,6 +91,7 @@ public record OrderResponse(
                     item.getOrderPrice(),
                     item.getQuantity(),
                     item.getSubtotal(),
+                    discountShare,
                     item.getStatus()
             );
         }
