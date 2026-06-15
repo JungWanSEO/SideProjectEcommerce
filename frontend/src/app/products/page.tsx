@@ -8,6 +8,7 @@ import ProductThumb from "@/components/ui/ProductThumb";
 import Badge from "@/components/ui/Badge";
 import Stars from "@/components/ui/Stars";
 import Select from "@/components/ui/Select";
+import WishlistButton from "@/components/ui/WishlistButton";
 import { productImageSrc } from "@/lib/productImage";
 
 /**
@@ -25,6 +26,7 @@ const SORTS = [
   { value: "price,desc", label: "높은 가격순" },
   { value: "ratingCount,desc", label: "리뷰 많은순" },
   { value: "ratingAverage,desc", label: "평점 높은순" },
+  { value: "wishlistCount,desc", label: "인기순(찜)" },
 ];
 
 interface Query {
@@ -280,7 +282,9 @@ export default function ProductsPage() {
       ) : (
         <ul className="grid grid-cols-2 gap-x-5 gap-y-10 lg:grid-cols-3">
           {products.map((p) => (
-            <li key={p.id}>
+            <li key={p.id} className="relative">
+              {/* 하트는 카드 <Link> 바깥(형제)에 둔다 — 앵커 안에 버튼을 넣지 않기 위해(유효 HTML) */}
+              <WishlistButton productId={p.id} variant="overlay" />
               <Link href={`/products/${p.id}`} className="group block">
                 <div className="relative overflow-hidden rounded-2xl">
                   <ProductThumb
@@ -302,12 +306,19 @@ export default function ProductsPage() {
                   <h2 className="mt-1 font-serif text-lg text-ink">{p.name}</h2>
                   <p className="mt-1 font-medium text-ink">{p.price.toLocaleString()}원</p>
 
-                  {p.ratingCount > 0 && (
-                    <div className="mt-1 flex items-center gap-1.5">
-                      <Stars value={p.ratingAverage} className="text-xs" />
-                      <span className="text-xs text-muted">
-                        {p.ratingAverage.toFixed(1)} ({p.ratingCount})
-                      </span>
+                  {(p.ratingCount > 0 || p.wishlistCount > 0) && (
+                    <div className="mt-1 flex items-center gap-2.5">
+                      {p.ratingCount > 0 && (
+                        <span className="flex items-center gap-1.5">
+                          <Stars value={p.ratingAverage} className="text-xs" />
+                          <span className="text-xs text-muted">
+                            {p.ratingAverage.toFixed(1)} ({p.ratingCount})
+                          </span>
+                        </span>
+                      )}
+                      {p.wishlistCount > 0 && (
+                        <span className="text-xs text-muted">♥ {p.wishlistCount}</span>
+                      )}
                     </div>
                   )}
 

@@ -10,6 +10,7 @@ import ProductThumb from "@/components/ui/ProductThumb";
 import Badge from "@/components/ui/Badge";
 import Stars, { StarInput } from "@/components/ui/Stars";
 import { buttonClass } from "@/components/ui/Button";
+import WishlistButton from "@/components/ui/WishlistButton";
 import { productImageSrc } from "@/lib/productImage";
 
 /**
@@ -248,7 +249,7 @@ export default function ProductDetailPage() {
             })}
           </div>
 
-          {/* 담기 */}
+          {/* 담기 + 찜 */}
           <div className="mt-8 flex items-center gap-3">
             <button
               type="button"
@@ -258,8 +259,12 @@ export default function ProductDetailPage() {
             >
               {adding ? "담는 중…" : "장바구니 담기"}
             </button>
+            <WishlistButton productId={product.id} variant="inline" />
             {cartMsg && <span className="text-sm text-muted">{cartMsg}</span>}
           </div>
+          {product.wishlistCount > 0 && (
+            <p className="mt-2 text-xs text-muted">{product.wishlistCount}명이 찜한 상품이에요.</p>
+          )}
           {!user && <p className="mt-2 text-xs text-muted">담으려면 로그인이 필요합니다.</p>}
         </div>
       </div>

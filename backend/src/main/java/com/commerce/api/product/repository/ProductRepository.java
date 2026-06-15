@@ -45,4 +45,15 @@ public interface ProductRepository extends JpaRepository<Product, Long>, Product
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("update Product p set p.ratingSum = p.ratingSum + :delta where p.id = :productId")
     void adjustRatingSum(@Param("productId") Long productId, @Param("delta") int delta);
+
+    /** 찜 카운터 증가(찜 추가 시). 원자 UPDATE로 동시 찜의 lost update 방지. (flush/clear 이유는 incrementRating 참고) */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("update Product p set p.wishlistCount = p.wishlistCount + 1 where p.id = :productId")
+    void incrementWishlist(@Param("productId") Long productId);
+
+    /** 찜 카운터 감소(찜 해제 시). 0 아래로 내려가지 않도록 가드. (flush/clear 이유는 incrementRating 참고) */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("update Product p set p.wishlistCount = p.wishlistCount - 1 "
+            + "where p.id = :productId and p.wishlistCount > 0")
+    void decrementWishlist(@Param("productId") Long productId);
 }

@@ -71,6 +71,14 @@ public class Product extends BaseEntity {
     @Column(nullable = false)
     private int ratingSum = 0;
 
+    /**
+     * 찜(위시리스트) 비정규화 카운터(wishlist 도메인이 원자 UPDATE로 갱신). = 이 상품을 찜한 회원 수.
+     * 인기도 신호 — 목록 정렬(인기순)·추천의 입력으로 쓴다. 찜할 때마다 wishlist를 COUNT 하지 않으려고
+     * 상품에 누적해 둔다(rating 카운터와 같은 패턴). 추가/해제 시점에만 +1/−1.
+     */
+    @Column(nullable = false)
+    private int wishlistCount = 0;
+
     /** 사이즈 옵션들(애그리거트 내부). 재고·@Version은 각 옵션이 보유. */
     @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<ProductOption> options = new ArrayList<>();
