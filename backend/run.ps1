@@ -21,5 +21,9 @@ Get-Content $envFile | ForEach-Object {
     }
 }
 
-Write-Output ".env 로드 완료 → Spring Boot 기동 (http://localhost:8080)"
+# dev 프로파일: 로컬 데모 데이터(카테고리·브랜드·다중항목 주문) 시드 + 추천 배치 1회 실행(DemoDataInitializer).
+# 운영에선 이 프로파일을 켜지 않는다(시드 빈이 생성되지 않음).
+$env:SPRING_PROFILES_ACTIVE = "dev"
+
+Write-Output ".env 로드 완료 → Spring Boot 기동 (dev 프로파일, http://localhost:8080)"
 & (Join-Path $PSScriptRoot "gradlew.bat") bootRun
