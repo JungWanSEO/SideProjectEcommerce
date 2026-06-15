@@ -4,6 +4,7 @@ import com.commerce.api.product.entity.Product;
 import com.commerce.api.product.entity.ProductStatus;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -29,6 +30,19 @@ public interface ProductRepository extends JpaRepository<Product, Long>, Product
      * 인기 = 찜 수 우선, 동률은 리뷰 수. ON_SALE만.
      */
     List<Product> findTop12ByStatusOrderByWishlistCountDescRatingCountDesc(ProductStatus status);
+
+    /**
+     * "함께 산 상품" 콜드스타트 폴백 — co-occurrence 데이터가 없을 때 같은 <b>카테고리 또는 브랜드</b>의
+     * ON_SALE 상품을 인기순(찜 수→리뷰 수)으로. 기준 상품 자신은 제외.
+     *
+     * <p>categoryId/brandId가 null이면 그 조건은 SQL의 {@code = null} 비교라 매칭되지 않는다(자연스럽게 무시됨).
+     * 둘 다 null인 상품(카테고리·브랜드 미지정)이면 결과가 비고, 서비스가 전체 인기순으로 한 번 더 폴백한다.
+     */
+    @Query("select p from Product p where p.id <> :excludeId and p.status = :status "
+            + "and (p.categoryId = :categoryId or p.brandId = :brandId) "
+            + "order by p.wishlistCount desc, p.ratingCount desc")
+    List<Product> findCoOccurrenceFallback(@Param("categoryId") Long categoryId, @Param("brandId") Long brandId,
+            @Param("excludeId") Long excludeId, @Param("status") ProductStatus status, Pageable pageable);
 
     /**
      * 평점 카운터 증가(리뷰 작성 시). <b>원자 UPDATE</b> — 엔티티 더티체킹 대신 DB에서 직접 증감해

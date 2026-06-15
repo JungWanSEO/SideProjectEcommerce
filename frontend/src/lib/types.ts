@@ -71,6 +71,12 @@ export interface RecommendationResult {
   products: Product[];
 }
 
+/** 함께 산 상품 응답 (CoOccurrenceResponse) — cooccurrence=true면 실제 함께 산 통계, false면 카테고리/브랜드 폴백 */
+export interface CoOccurrenceResult {
+  cooccurrence: boolean;
+  products: Product[];
+}
+
 /** 리뷰 (ReviewResponse) */
 export interface Review {
   id: number;

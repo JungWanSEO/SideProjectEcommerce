@@ -11,6 +11,7 @@ import Badge from "@/components/ui/Badge";
 import Stars, { StarInput } from "@/components/ui/Stars";
 import { buttonClass } from "@/components/ui/Button";
 import WishlistButton from "@/components/ui/WishlistButton";
+import CoOccurrenceSection from "@/components/CoOccurrenceSection";
 import { productImageSrc } from "@/lib/productImage";
 
 /**
@@ -422,6 +423,9 @@ export default function ProductDetailPage() {
           )}
         </ul>
       </section>
+
+      {/* 함께 산 상품 (공개·상품 통계) — 리뷰 아래에 노출 */}
+      <CoOccurrenceSection productId={Number(id)} />
     </main>
   );
 }
