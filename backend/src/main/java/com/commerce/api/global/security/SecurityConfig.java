@@ -93,6 +93,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/coupons/**").hasRole("ADMIN")
                         // 셀러 콘솔(본인 정산 조회)은 SELLER 전용 — 자기 sellerId로만 스코핑
                         .requestMatchers("/api/seller/**").hasRole("SELLER")
+                        // 추천 배치 수동 재계산은 운영 업무 → ADMIN (조회 /api/recommendations/me 는 아래 authenticated)
+                        .requestMatchers(HttpMethod.POST, "/api/recommendations/run").hasRole("ADMIN")
                         // 그 외는 인증 필요
                         .anyRequest().authenticated())
                 .addFilterBefore(new JwtAuthenticationFilter(jwtTokenProvider),

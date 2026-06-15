@@ -1,6 +1,8 @@
 package com.commerce.api.product.repository;
 
 import com.commerce.api.product.entity.Product;
+import com.commerce.api.product.entity.ProductStatus;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -21,6 +23,12 @@ public interface ProductRepository extends JpaRepository<Product, Long>, Product
      */
     @Query("select p from Product p join p.options o where o.id = :optionId")
     Optional<Product> findByOptionId(@Param("optionId") Long optionId);
+
+    /**
+     * 인기 상품 상위 12개 — 추천 콜드스타트 폴백(행동 이력이 없는 회원/비로그인은 전체 인기순으로 채운다).
+     * 인기 = 찜 수 우선, 동률은 리뷰 수. ON_SALE만.
+     */
+    List<Product> findTop12ByStatusOrderByWishlistCountDescRatingCountDesc(ProductStatus status);
 
     /**
      * 평점 카운터 증가(리뷰 작성 시). <b>원자 UPDATE</b> — 엔티티 더티체킹 대신 DB에서 직접 증감해
