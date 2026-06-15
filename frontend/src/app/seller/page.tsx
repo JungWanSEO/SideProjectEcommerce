@@ -98,6 +98,7 @@ export default function SellerConsolePage() {
               <th className="px-4 py-3 text-right">매출</th>
               <th className="px-4 py-3 text-right">PG수수료</th>
               <th className="px-4 py-3 text-right">플랫폼수수료</th>
+              <th className="px-4 py-3 text-right">쿠폰할인</th>
               <th className="px-4 py-3 text-right">실수령</th>
               <th className="px-4 py-3">상태</th>
               <th className="px-4 py-3">입금예정일</th>
@@ -106,13 +107,13 @@ export default function SellerConsolePage() {
           <tbody className="divide-y divide-gray-100">
             {loading ? (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
                   불러오는 중…
                 </td>
               </tr>
             ) : items.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
                   정산 항목이 없습니다.
                 </td>
               </tr>
@@ -131,6 +132,18 @@ export default function SellerConsolePage() {
                   <td className="px-4 py-3 text-right text-amber-600">
                     −{s.platformFee.toLocaleString()}
                     <span className="ml-1 text-xs text-gray-400">{formatRate(s.platformFeeRate)}</span>
+                  </td>
+                  <td className="px-4 py-3 text-right text-indigo-600">
+                    {s.discountAmount > 0 ? (
+                      <>
+                        {s.discountAmount.toLocaleString()}
+                        <span className="ml-1 text-xs text-gray-400">
+                          {s.discountFundedBy === "PLATFORM" ? "플랫폼" : "셀러"}
+                        </span>
+                      </>
+                    ) : (
+                      "—"
+                    )}
                   </td>
                   <td className="px-4 py-3 text-right font-medium">{s.netAmount.toLocaleString()}</td>
                   <td className="px-4 py-3">

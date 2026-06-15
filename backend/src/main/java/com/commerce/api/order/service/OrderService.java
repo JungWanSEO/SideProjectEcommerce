@@ -3,6 +3,7 @@ package com.commerce.api.order.service;
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.order.dto.CheckoutRequest;
+import com.commerce.api.order.dto.CouponPreviewResponse;
 import com.commerce.api.order.dto.OrderCreateRequest;
 import com.commerce.api.order.dto.OrderDiscountInfo;
 import com.commerce.api.order.dto.OrderResponse;
@@ -57,6 +58,11 @@ public class OrderService {
             backoff = @Backoff(delay = 100))
     public OrderResponse checkout(Long memberId, CheckoutRequest request) {
         return orderProcessor.checkout(memberId, request);
+    }
+
+    /** 쿠폰 미리보기(주문 생성 없음) — 현재 장바구니 기준 할인·예상 결제액. 읽기 전용이라 재시도 불필요. */
+    public CouponPreviewResponse previewCoupon(Long memberId, String couponCode) {
+        return orderProcessor.previewCoupon(memberId, couponCode);
     }
 
     /**

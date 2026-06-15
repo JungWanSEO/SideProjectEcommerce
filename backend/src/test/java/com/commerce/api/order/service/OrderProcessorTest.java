@@ -20,6 +20,7 @@ import com.commerce.api.coupon.entity.CouponFundedBy;
 import com.commerce.api.coupon.service.CouponService;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.order.dto.CheckoutRequest;
+import com.commerce.api.order.dto.CouponPreviewResponse;
 import com.commerce.api.order.dto.OrderCreateRequest;
 import com.commerce.api.order.dto.OrderCreateRequest.OrderItemRequest;
 import com.commerce.api.order.dto.OrderResponse;
@@ -214,6 +215,36 @@ class OrderProcessorTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("장바구니가 비어 있습니다");
         verify(orderRepository, never()).save(any(Order.class));
+    }
+
+    @Test
+    @DisplayName("쿠폰 미리보기 - 장바구니 기준 할인·예상 결제액 계산(주문 생성 없음)")
+    void previewCoupon_success() {
+        Product product = productWithOption(1L, 10L, "반팔티셔츠", 10000L, 10);
+        Cart cart = Cart.create(100L);
+        cart.addItem(1L, 10L, 2);   // 총 20000
+        given(cartRepository.findByMemberId(100L)).willReturn(Optional.of(cart));
+        given(productRepository.findByOptionId(10L)).willReturn(Optional.of(product));
+        given(couponService.applyCoupon(eq("WELCOME5000"), eq(20000L), anyMap()))
+                .willReturn(new CouponApplyResult("WELCOME5000", 5000L, CouponFundedBy.PLATFORM, null));
+
+        CouponPreviewResponse preview = orderProcessor.previewCoupon(100L, "WELCOME5000");
+
+        assertThat(preview.couponCode()).isEqualTo("WELCOME5000");
+        assertThat(preview.totalPrice()).isEqualTo(20000L);
+        assertThat(preview.discountAmount()).isEqualTo(5000L);
+        assertThat(preview.payableAmount()).isEqualTo(15000L);
+        verify(orderRepository, never()).save(any(Order.class));   // 주문 생성 없음
+    }
+
+    @Test
+    @DisplayName("쿠폰 미리보기 실패 - 빈 장바구니면 400")
+    void previewCoupon_emptyCart() {
+        given(cartRepository.findByMemberId(100L)).willReturn(Optional.of(Cart.create(100L)));
+
+        assertThatThrownBy(() -> orderProcessor.previewCoupon(100L, "ANY"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("장바구니가 비어 있습니다");
     }
 
     @Test

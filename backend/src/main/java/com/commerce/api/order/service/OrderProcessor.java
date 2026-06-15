@@ -5,11 +5,13 @@ import com.commerce.api.address.service.AddressService;
 import com.commerce.api.brand.entity.Brand;
 import com.commerce.api.brand.repository.BrandRepository;
 import com.commerce.api.cart.entity.Cart;
+import com.commerce.api.cart.entity.CartItem;
 import com.commerce.api.cart.repository.CartRepository;
 import com.commerce.api.coupon.dto.CouponApplyResult;
 import com.commerce.api.coupon.service.CouponService;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.order.dto.CheckoutRequest;
+import com.commerce.api.order.dto.CouponPreviewResponse;
 import com.commerce.api.order.dto.OrderCreateRequest;
 import com.commerce.api.order.dto.OrderCreateRequest.OrderItemRequest;
 import com.commerce.api.order.dto.OrderResponse;
@@ -76,6 +78,38 @@ public class OrderProcessor {
         OrderResponse response = placeOrder(memberId, items, shipping, request.couponCode());
         cart.clearItems();   // 주문 성공 후 장바구니 비우기 (orphanRemoval로 DB 삭제, 같은 트랜잭션)
         return response;
+    }
+
+    /**
+     * 쿠폰 미리보기 — 주문을 만들지 않고, 현재 서버 장바구니 기준으로 할인·예상 결제액만 계산한다.
+     * 체크아웃과 같은 방식으로 총액·셀러별 소계를 만들어 쿠폰 도메인에 넘긴다(읽기 전용).
+     * 적용 불가면 couponService가 400으로 사유를 던진다(체크아웃과 동일 검증).
+     */
+    @Transactional(readOnly = true)
+    public CouponPreviewResponse previewCoupon(Long memberId, String couponCode) {
+        Cart cart = cartRepository.findByMemberId(memberId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.BAD_REQUEST, "장바구니가 비어 있습니다."));
+        if (cart.getCartItems().isEmpty()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "장바구니가 비어 있습니다.");
+        }
+
+        long total = 0;
+        Map<Long, Long> grossBySeller = new HashMap<>();
+        for (CartItem ci : cart.getCartItems()) {
+            Product product = productRepository.findByOptionId(ci.getOptionId())
+                    .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND,
+                            "옵션을 찾을 수 없습니다. (id: " + ci.getOptionId() + ")"));
+            long subtotal = product.getPrice() * ci.getQuantity();
+            total += subtotal;
+            Long brandId = product.getBrandId();
+            Long sellerId = (brandId == null) ? null
+                    : brandRepository.findById(brandId).map(Brand::getSellerId).orElse(null);
+            grossBySeller.merge(sellerId, subtotal, Long::sum);
+        }
+
+        CouponApplyResult applied = couponService.applyCoupon(couponCode, total, grossBySeller);
+        return new CouponPreviewResponse(applied.code(), total, applied.discountAmount(),
+                total - applied.discountAmount());
     }
 
     /**

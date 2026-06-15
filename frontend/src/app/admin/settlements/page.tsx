@@ -154,7 +154,7 @@ export default function AdminSettlementsPage() {
         <div className="mb-4 rounded border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
           정산 배치 완료 — 신규 <b>{runResult.createdCount}</b>건 · 매출 {runResult.totalGrossAmount.toLocaleString()}원 ·
           PG수수료 {runResult.totalFee.toLocaleString()}원 · 플랫폼수수료 {runResult.totalPlatformFee.toLocaleString()}원
-          · 실수령 {runResult.totalNetAmount.toLocaleString()}원
+          · 쿠폰할인 {runResult.totalDiscount.toLocaleString()}원 · 실수령 {runResult.totalNetAmount.toLocaleString()}원
           {runResult.bySeller.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-2">
               {runResult.bySeller.map((b) => (
@@ -194,6 +194,7 @@ export default function AdminSettlementsPage() {
               <th className="px-4 py-2 text-right">매출</th>
               <th className="px-4 py-2 text-right">PG수수료</th>
               <th className="px-4 py-2 text-right">플랫폼수수료</th>
+              <th className="px-4 py-2 text-right">쿠폰할인</th>
               <th className="px-4 py-2 text-right">실수령</th>
               <th className="px-4 py-2 text-right">액션</th>
             </tr>
@@ -201,7 +202,7 @@ export default function AdminSettlementsPage() {
           <tbody className="divide-y divide-gray-100">
             {summary.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-gray-400">
+                <td colSpan={8} className="px-4 py-6 text-center text-gray-400">
                   정산 데이터가 없습니다.
                 </td>
               </tr>
@@ -213,6 +214,9 @@ export default function AdminSettlementsPage() {
                   <td className="px-4 py-2 text-right">{s.grossAmount.toLocaleString()}</td>
                   <td className="px-4 py-2 text-right text-amber-600">−{s.fee.toLocaleString()}</td>
                   <td className="px-4 py-2 text-right text-amber-600">−{s.platformFee.toLocaleString()}</td>
+                  <td className="px-4 py-2 text-right text-indigo-600">
+                    {s.discountAmount > 0 ? s.discountAmount.toLocaleString() : "—"}
+                  </td>
                   <td className="px-4 py-2 text-right font-medium text-green-700">{s.netAmount.toLocaleString()}</td>
                   <td className="px-4 py-2 text-right">
                     {s.sellerId != null && (
