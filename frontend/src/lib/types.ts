@@ -65,6 +65,12 @@ export interface Wishlist {
   product: Product | null;
 }
 
+/** 추천 응답 (RecommendationResponse) — personalized=true면 행동 기반, false면 인기순 폴백 */
+export interface RecommendationResult {
+  personalized: boolean;
+  products: Product[];
+}
+
 /** 리뷰 (ReviewResponse) */
 export interface Review {
   id: number;
