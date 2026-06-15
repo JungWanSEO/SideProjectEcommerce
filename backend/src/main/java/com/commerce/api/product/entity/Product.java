@@ -95,6 +95,12 @@ public class Product extends BaseEntity {
         this.brandId = brandId;
     }
 
+    /** 카테고리/브랜드 귀속(또는 null로 해제). 상품 분류 — 데모 시드/추후 재분류 API가 쓴다. */
+    public void assignTaxonomy(Long categoryId, Long brandId) {
+        this.categoryId = categoryId;
+        this.brandId = brandId;
+    }
+
     /** 평점 평균(소수 1자리). 리뷰가 없으면 0. (비정규화 카운터에서 계산 — 별도 집계 쿼리 불필요) */
     public double getRatingAverage() {
         return ratingCount == 0 ? 0.0 : Math.round((double) ratingSum / ratingCount * 10) / 10.0;
