@@ -15,6 +15,7 @@
   코드 ...
   ```
   > 메모                  -> 작은 회색 노트
+  ![alt](상대경로.png)    -> 이미지 임베드(폭 맞춤). 파일 없으면 자리표시자 박스.
   인라인: **굵게**, `코드`
 
 사용법
@@ -131,6 +132,12 @@ def parse(md):
             i += 1
             continue
 
+        m_img = re.match(r"!\[(.*?)\]\((.+?)\)\s*$", s)
+        if m_img:
+            current["blocks"].append(("image", (m_img.group(1), m_img.group(2))))
+            i += 1
+            continue
+
         if s.startswith("|"):
             raw = []
             while i < n and lines[i].strip().startswith("|"):
@@ -200,8 +207,41 @@ def render_title_bar(slide, title):
     line.line.fill.background()
 
 
-def render_block(slide, block, top):
+def render_block(slide, block, top, base_dir):
     kind, payload = block
+
+    if kind == "image":
+        # ![alt](상대경로) → PNG/이미지를 슬라이드 폭에 맞춰 임베드.
+        # 파일이 없으면(아직 mermaid.live에서 안 내보낸 경우) 자리표시자 박스를 그려 빌드가 깨지지 않게 한다.
+        alt, rel = payload
+        path = (base_dir / rel)
+        avail_h = SLIDE_H - top - Inches(0.3)
+        if path.exists():
+            pic = slide.shapes.add_picture(str(path), MARGIN_L, top, width=CONTENT_W)
+            if pic.height > avail_h:  # 너무 길면 높이에 맞춰 비례 축소
+                ratio = avail_h / pic.height
+                pic.width = int(pic.width * ratio)
+                pic.height = int(avail_h)
+            pic.left = int((SLIDE_W - pic.width) / 2)  # 가로 중앙
+            return top + pic.height + Inches(0.18)
+        # --- 자리표시자 ---
+        h = Inches(2.2)
+        rect = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, MARGIN_L, top, CONTENT_W, h)
+        rect.fill.solid()
+        rect.fill.fore_color.rgb = CODE_BG
+        rect.line.color.rgb = RGBColor(0xD5, 0xDB, 0xE5)
+        tf = rect.text_frame
+        tf.word_wrap = True
+        p = tf.paragraphs[0]
+        add_runs(p, f"[다이어그램] {alt}", Pt(16), GRAY)
+        for r in p.runs:
+            r.font.bold = True
+        p2 = tf.add_paragraph()
+        p2.space_before = Pt(6)
+        add_runs(p2, f"이미지 미배치: {rel}", Pt(12), GRAY)
+        p3 = tf.add_paragraph()
+        add_runs(p3, "→ mermaid.live에서 PNG로 내보내 위 경로에 저장하면 자동 삽입됩니다.", Pt(11), GRAY)
+        return top + h + Inches(0.18)
 
     if kind == "bullets":
         h = Inches(0.36) * len(payload) + Inches(0.1)
@@ -306,6 +346,7 @@ def paragraph_prefix(paragraph, marker, level):
 
 def build(md_path, out_path):
     md = Path(md_path).read_text(encoding="utf-8")
+    base_dir = Path(md_path).resolve().parent  # 이미지 상대경로 기준
     title_slide, slides = parse(md)
 
     prs = Presentation()
@@ -319,7 +360,7 @@ def build(md_path, out_path):
         render_title_bar(slide, s["title"])
         top = Inches(1.5)
         for block in s["blocks"]:
-            top = render_block(slide, block, top)
+            top = render_block(slide, block, top, base_dir)
 
     prs.save(out_path)
     total = (1 if title_slide else 0) + len(slides)
