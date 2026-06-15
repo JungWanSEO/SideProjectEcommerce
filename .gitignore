@@ -23,6 +23,10 @@ Thumbs.db
 .env
 *.env.local
 
+# ── 개인 작업 문서 (로컬 전용, 커밋 제외) ──
+# 발표 덱·아키텍처 다이어그램·ADR 등 "강점 설명 자료"는 공개 안 함.
+docs/private/
+
 # ── 프론트엔드 (예정) ──
 node_modules/
 dist/

@@ -27,6 +27,4 @@
 - 새 도메인 추가 → `add-domain` skill (`/add-domain`)
 - 개발 일지 작성 → `dev-log` skill
 - 아키텍처 근거 → `docs/architecture.md`
-- 발표용 다이어그램(mermaid) → `docs/architecture-diagrams.md` (도메인 맵·시퀀스·컴포넌트)
-- 아키텍처 결정 기록(ADR, 결정 1개=1파일) → `docs/adr/` (`docs/adr/README.md` 인덱스)
 - Git 브랜치·PR·커밋 규칙 → `CONTRIBUTING.md` (main 보호 · 작업은 `feature/*`→PR로 dev 병합 · Conventional Commits)
