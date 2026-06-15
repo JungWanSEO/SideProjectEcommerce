@@ -53,7 +53,16 @@ export interface Product {
   options: ProductOption[];
   ratingCount: number; // 리뷰 수
   ratingAverage: number; // 평점 평균(소수 1자리, 리뷰 없으면 0)
+  wishlistCount: number; // 찜 수(인기도 신호)
   createdAt: string;
+}
+
+/** 찜 항목 (WishlistResponse) — 찜한 시각 + 그 상품 정보(삭제됐으면 product=null) */
+export interface Wishlist {
+  id: number;
+  productId: number;
+  wishlistedAt: string;
+  product: Product | null;
 }
 
 /** 리뷰 (ReviewResponse) */

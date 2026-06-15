@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
+import { WishlistProvider } from "@/lib/wishlist";
 import Header from "@/components/Header";
 
 export const metadata: Metadata = {
@@ -18,8 +19,10 @@ export default function RootLayout({
     <html lang="ko">
       <body className="min-h-screen bg-cream text-ink antialiased">
         <AuthProvider>
-          <Header />
-          {children}
+          <WishlistProvider>
+            <Header />
+            {children}
+          </WishlistProvider>
         </AuthProvider>
       </body>
     </html>

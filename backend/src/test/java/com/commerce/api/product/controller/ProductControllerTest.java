@@ -52,7 +52,7 @@ class ProductControllerTest {
         given(productService.create(any())).willReturn(
                 new ProductResponse(1L, "반팔티셔츠", 29000L, "면 100%", "/products/1.svg",
                         ProductStatus.ON_SALE, 1L, "상의", 1L, "Nike",
-                        List.of(new ProductOptionResponse(10L, "M", 100, false)), 0, 0.0, LocalDateTime.now()));
+                        List.of(new ProductOptionResponse(10L, "M", 100, false)), 0, 0.0, 0, LocalDateTime.now()));
 
         mockMvc.perform(post("/api/products")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -89,7 +89,7 @@ class ProductControllerTest {
         PageResponse<ProductResponse> page = new PageResponse<>(
                 List.of(new ProductResponse(1L, "반팔티셔츠", 29000L, "면 100%", "/products/1.svg",
                         ProductStatus.ON_SALE, 1L, "상의", 1L, "Nike",
-                        List.of(new ProductOptionResponse(10L, "M", 100, false)), 0, 0.0, LocalDateTime.now())),
+                        List.of(new ProductOptionResponse(10L, "M", 100, false)), 0, 0.0, 0, LocalDateTime.now())),
                 0, 20, 1L, 1, false);
         given(productService.getProducts(any(ProductSearchCondition.class), any(Pageable.class)))
                 .willReturn(page);
@@ -148,7 +148,7 @@ class ProductControllerTest {
         given(productService.getProduct(1L)).willReturn(
                 new ProductResponse(1L, "반팔티셔츠", 29000L, "면 100%", "/products/1.svg",
                         ProductStatus.ON_SALE, 1L, "상의", 1L, "Nike",
-                        List.of(new ProductOptionResponse(10L, "M", 100, false)), 0, 0.0, LocalDateTime.now()));
+                        List.of(new ProductOptionResponse(10L, "M", 100, false)), 0, 0.0, 0, LocalDateTime.now()));
 
         mockMvc.perform(get("/api/products/1"))
                 .andExpect(status().isOk())

@@ -25,6 +25,7 @@ public record ProductResponse(
         List<ProductOptionResponse> options,   // 사이즈별 재고/품절
         int ratingCount,        // 리뷰 수
         double ratingAverage,   // 평점 평균(소수 1자리, 리뷰 없으면 0)
+        int wishlistCount,      // 찜 수(인기도 신호)
         LocalDateTime createdAt
 ) {
     public static ProductResponse of(Product product, String categoryName, String brandName) {
@@ -45,6 +46,7 @@ public record ProductResponse(
                 options,
                 product.getRatingCount(),
                 product.getRatingAverage(),
+                product.getWishlistCount(),
                 product.getCreatedAt()
         );
     }

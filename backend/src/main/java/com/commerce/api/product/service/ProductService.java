@@ -13,6 +13,7 @@ import com.commerce.api.product.entity.Product;
 import com.commerce.api.product.entity.ProductOption;
 import com.commerce.api.product.entity.ProductStatus;
 import com.commerce.api.product.repository.ProductRepository;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -89,6 +90,21 @@ public class ProductService {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "상품을 찾을 수 없습니다."));
         return enrich(product);
+    }
+
+    /**
+     * 여러 상품을 ID로 한 번에 조회해 {id: 응답} 맵으로 반환(이름 enrich 포함). 찜 목록처럼 "상품 ID 묶음 →
+     * 상품 정보"가 필요한 다른 도메인이 N+1 없이 재사용한다(상품 enrich 로직은 여기 한 곳에만 둔다).
+     * 호출자가 원래 순서(예: 찜한 최신순)대로 다시 배열할 수 있도록 List가 아니라 Map으로 돌려준다.
+     * 존재하지 않는 ID는 맵에 없다(삭제된 상품 등 — 호출자가 null 처리).
+     */
+    public Map<Long, ProductResponse> getProductMap(Collection<Long> ids) {
+        List<Product> products = productRepository.findAllById(ids);
+        Map<Long, String> categoryNames = categoryNameMap(products);
+        Map<Long, String> brandNames = brandNameMap(products);
+        return products.stream().collect(Collectors.toMap(
+                Product::getId,
+                p -> ProductResponse.of(p, categoryNames.get(p.getCategoryId()), brandNames.get(p.getBrandId()))));
     }
 
     // --- enrich: 상품의 categoryId/brandId로 이름을 채워 응답 생성 ---
