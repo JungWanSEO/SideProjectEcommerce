@@ -10,9 +10,10 @@ public record SellerSettlementSummary(
         Long sellerId,
         String sellerName,    // 셀러명(서비스가 enrich) — 미귀속이면 null
         long count,           // 정산 항목 수
-        long grossAmount,     // 매출 합계
+        long grossAmount,     // 매출 합계(할인 후 셀러 몫)
         long fee,             // PG 수수료(안분) 합계
         long platformFee,     // 플랫폼 판매수수료 합계
-        long netAmount        // 셀러 실수령 합계
+        long discountAmount,  // 쿠폰 할인 합계(이 셀러분에 안분된)
+        long netAmount        // 셀러 실수령 합계 (원매출 = grossAmount + discountAmount)
 ) {
 }

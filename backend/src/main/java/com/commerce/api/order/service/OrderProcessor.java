@@ -125,7 +125,9 @@ public class OrderProcessor {
                 grossBySeller.merge(item.getSellerId(), item.getSubtotal(), Long::sum);
             }
             CouponApplyResult applied = couponService.applyCoupon(couponCode, order.getTotalPrice(), grossBySeller);
-            order.applyCoupon(applied.code(), applied.discountAmount());
+            // 분담 주체는 enum 대신 이름(String)으로 스냅샷(order→coupon 결합 회피). 정산 분담(Step 2)이 읽는다.
+            String fundedBy = applied.fundedBy() == null ? null : applied.fundedBy().name();
+            order.applyCoupon(applied.code(), applied.discountAmount(), fundedBy, applied.sellerId());
         }
 
         return OrderResponse.from(orderRepository.save(order));

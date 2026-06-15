@@ -4,6 +4,7 @@ import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.order.dto.CheckoutRequest;
 import com.commerce.api.order.dto.OrderCreateRequest;
+import com.commerce.api.order.dto.OrderDiscountInfo;
 import com.commerce.api.order.dto.OrderResponse;
 import com.commerce.api.order.dto.OrderSummaryResponse;
 import com.commerce.api.order.entity.Order;
@@ -85,6 +86,15 @@ public class OrderService {
         return findOrder(orderId).getOrderItems().stream()
                 .map(OrderResponse.OrderItemResponse::from)
                 .toList();
+    }
+
+    /**
+     * 주문의 쿠폰 할인 스냅샷(할인액·부담주체·셀러 귀속) — 정산이 할인을 셀러/플랫폼으로 분담할 때 읽는다.
+     * getOrderItems와 같은 settlement → order 경계 경로(서비스 + DTO). 소유권 검증 없음(ADMIN 배치 전용).
+     */
+    @Transactional(readOnly = true)
+    public OrderDiscountInfo getOrderDiscount(Long orderId) {
+        return OrderDiscountInfo.from(findOrder(orderId));
     }
 
     /**

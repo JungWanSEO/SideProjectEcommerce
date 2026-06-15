@@ -55,6 +55,17 @@ public class Order extends BaseEntity {
     @Column(name = "coupon_code", length = 40)
     private String couponCode;
 
+    /**
+     * 할인 부담 주체 스냅샷("PLATFORM"/"SELLER", 없으면 null). 셀러별 정산 분담(Step 2)이 읽는다.
+     * 쿠폰 도메인 enum 대신 문자열 스냅샷으로 둬 order→coupon 결합을 피한다(productName 같은 원시 스냅샷 패턴).
+     */
+    @Column(name = "coupon_funded_by", length = 20)
+    private String couponFundedBy;
+
+    /** 셀러 한정 쿠폰이면 그 셀러 ID 스냅샷(플랫폼 와이드면 null). 정산이 할인을 그 셀러에 귀속할 때 쓴다. */
+    @Column(name = "coupon_seller_id")
+    private Long couponSellerId;
+
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<OrderItem> orderItems = new ArrayList<>();
 
@@ -87,17 +98,20 @@ public class Order extends BaseEntity {
     }
 
     /**
-     * 쿠폰 적용 (체크아웃 시 1회). 할인액과 코드를 스냅샷하고 결제 대상 금액(payable)을 낮춘다.
+     * 쿠폰 적용 (체크아웃 시 1회). 할인액·코드·분담 메타를 스냅샷하고 결제 대상 금액(payable)을 낮춘다.
      *
      * <p><b>항목 소계(gross)는 그대로 둔다</b> — 셀러별 정산 분해(Step 2)가 원가 기준 gross를 읽어
      * 할인을 셀러/플랫폼으로 안분해야 하기 때문. 할인은 [0, totalPrice] 범위로 가드(음수 결제 방지).
+     * fundedBy("PLATFORM"/"SELLER")·sellerId는 정산 분담을 위한 스냅샷이다(Step 2).
      */
-    public void applyCoupon(String couponCode, long discountAmount) {
+    public void applyCoupon(String couponCode, long discountAmount, String fundedBy, Long sellerId) {
         if (discountAmount < 0 || discountAmount > this.totalPrice) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "할인 금액이 주문 금액을 초과할 수 없습니다.");
         }
         this.couponCode = couponCode;
         this.discountAmount = discountAmount;
+        this.couponFundedBy = fundedBy;
+        this.couponSellerId = sellerId;
     }
 
     /** 실제 결제 대상 금액 = 총액(gross) - 쿠폰 할인액. PG 승인·Payment.amount의 기준. */

@@ -70,7 +70,7 @@ class SellerConsoleControllerTest {
     @DisplayName("GET /api/seller/me/summary - 내 정산서 200")
     void getMySummary() throws Exception {
         given(sellerConsoleService.getMySummary(eq(1L), any(), any(), any())).willReturn(
-                List.of(new SellerSettlementSummary(5L, "UrbanSelect", 1, 10000, 250, 1000, 8750)));
+                List.of(new SellerSettlementSummary(5L, "UrbanSelect", 1, 10000, 250, 1000, 0, 8750)));
 
         mockMvc.perform(get("/api/seller/me/summary"))
                 .andExpect(status().isOk())

@@ -5,10 +5,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import com.commerce.api.global.exception.BusinessException;
+import com.commerce.api.order.dto.OrderDiscountInfo;
 import com.commerce.api.order.dto.OrderResponse.OrderItemResponse;
 import com.commerce.api.order.entity.OrderItemStatus;
 import com.commerce.api.order.service.OrderService;
@@ -56,6 +58,12 @@ class SettlementServiceTest {
 
     @InjectMocks
     private SettlementService settlementService;
+
+    /** 기본은 할인 없는 주문 — 할인 테스트만 getOrderDiscount를 따로 스텁한다(lenient: 미사용 테스트 무시). */
+    @org.junit.jupiter.api.BeforeEach
+    void defaultNoDiscount() {
+        lenient().when(orderService.getOrderDiscount(anyLong())).thenReturn(OrderDiscountInfo.none());
+    }
 
     private PaymentResponse paidPayment(Long id, Long orderId, long amount, String provider) {
         return new PaymentResponse(id, orderId, amount, PaymentStatus.PAID,
@@ -227,6 +235,73 @@ class SettlementServiceTest {
         SettlementEntry entry = captureSaved(1).get(0);
         assertThat(entry.getGrossAmount()).isEqualTo(10000L);   // 취소분 20000 제외
         assertThat(entry.getFee()).isEqualTo(250L);             // 활성 매출 기준 PG수수료
+    }
+
+    @Test
+    @DisplayName("정산 - 플랫폼 와이드·플랫폼 부담 쿠폰: 할인을 매출 비례로 안분, gross=할인 후 몫, net에 할인 환원(셀러 무손실)")
+    void run_platformWidePlatformFundedDiscount() {
+        given(paymentService.getPaidPayments()).willReturn(List.of(paidPayment(1L, 11L, 9000L, "TOSS")));
+        given(settlementRepository.existsByPaymentId(anyLong())).willReturn(false);
+        given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
+        given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);
+        given(orderService.getOrderItems(11L)).willReturn(List.of(item(1L, 6000L), item(2L, 4000L)));   // gross 10000
+        // 플랫폼 와이드(sellerId=null) 1000원 할인, 플랫폼 부담
+        given(orderService.getOrderDiscount(11L)).willReturn(new OrderDiscountInfo(1000L, "PLATFORM", null));
+        given(sellerRepository.findById(1L)).willReturn(Optional.of(sellerWithRate(1L, 0.10)));
+        given(sellerRepository.findById(2L)).willReturn(Optional.of(sellerWithRate(2L, 0.05)));
+
+        SettlementRunResponse summary = settlementService.run();
+
+        List<SettlementEntry> saved = captureSaved(2);
+        SettlementEntry s1 = saved.stream().filter(e -> e.getSellerId() == 1L).findFirst().orElseThrow();
+        SettlementEntry s2 = saved.stream().filter(e -> e.getSellerId() == 2L).findFirst().orElseThrow();
+        // 할인 안분: 1000 × 6000/10000 = 600(s1), 400(s2). gross = 매출 - 안분 할인.
+        assertThat(s1.getDiscountAmount()).isEqualTo(600L);
+        assertThat(s1.getGrossAmount()).isEqualTo(5400L);
+        assertThat(s1.getDiscountFundedBy()).isEqualTo("PLATFORM");
+        // s1 net = 5400 - pgFee(135) - platformFee(540) + 환원(600) = 5325
+        assertThat(s1.getFee()).isEqualTo(135L);
+        assertThat(s1.getPlatformFee()).isEqualTo(540L);
+        assertThat(s1.getNetAmount()).isEqualTo(5325L);
+        assertThat(s2.getDiscountAmount()).isEqualTo(400L);
+        assertThat(s2.getGrossAmount()).isEqualTo(3600L);
+        assertThat(s2.getNetAmount()).isEqualTo(3730L);   // 3600 - 90 - 180 + 400
+        // 대사 불변식: Σgross = payable(9000)
+        assertThat(summary.totalGrossAmount()).isEqualTo(9000L);
+        assertThat(summary.totalDiscount()).isEqualTo(1000L);
+    }
+
+    @Test
+    @DisplayName("정산 - 셀러 한정·셀러 부담 쿠폰: 할인은 그 셀러에 전액, 그 셀러 net이 줄어 셀러가 부담(다른 셀러 불변)")
+    void run_sellerScopedSellerFundedDiscount() {
+        given(paymentService.getPaidPayments()).willReturn(List.of(paidPayment(1L, 11L, 9000L, "TOSS")));
+        given(settlementRepository.existsByPaymentId(anyLong())).willReturn(false);
+        given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
+        given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);
+        given(orderService.getOrderItems(11L)).willReturn(List.of(item(1L, 6000L), item(2L, 4000L)));
+        // 셀러1 한정 1000원 할인, 셀러 부담
+        given(orderService.getOrderDiscount(11L)).willReturn(new OrderDiscountInfo(1000L, "SELLER", 1L));
+        given(sellerRepository.findById(1L)).willReturn(Optional.of(sellerWithRate(1L, 0.10)));
+        given(sellerRepository.findById(2L)).willReturn(Optional.of(sellerWithRate(2L, 0.05)));
+
+        SettlementRunResponse summary = settlementService.run();
+
+        List<SettlementEntry> saved = captureSaved(2);
+        SettlementEntry s1 = saved.stream().filter(e -> e.getSellerId() == 1L).findFirst().orElseThrow();
+        SettlementEntry s2 = saved.stream().filter(e -> e.getSellerId() == 2L).findFirst().orElseThrow();
+        // 셀러1: 전액 할인 1000 → gross 5000, 환원 없음(셀러 부담)
+        assertThat(s1.getDiscountAmount()).isEqualTo(1000L);
+        assertThat(s1.getGrossAmount()).isEqualTo(5000L);
+        assertThat(s1.getDiscountFundedBy()).isEqualTo("SELLER");
+        // s1 net = 5000 - pgFee(125) - platformFee(500) + 0 = 4375
+        assertThat(s1.getFee()).isEqualTo(125L);
+        assertThat(s1.getPlatformFee()).isEqualTo(500L);
+        assertThat(s1.getNetAmount()).isEqualTo(4375L);
+        // 셀러2: 할인 없음(불변)
+        assertThat(s2.getDiscountAmount()).isZero();
+        assertThat(s2.getGrossAmount()).isEqualTo(4000L);
+        assertThat(s2.getNetAmount()).isEqualTo(3700L);   // 4000 - 100 - 200
+        assertThat(summary.totalGrossAmount()).isEqualTo(9000L);   // 대사 = payable
     }
 
     @Test

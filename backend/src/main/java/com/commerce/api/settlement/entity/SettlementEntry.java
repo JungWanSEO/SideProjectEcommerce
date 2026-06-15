@@ -70,8 +70,14 @@ public class SettlementEntry extends BaseEntity {
     @Column(nullable = false)
     private double platformFeeRate;  // 적용한 플랫폼 수수료율 스냅샷(= Seller.commissionRate 그때 값)
 
+    @Column(name = "discount_amount", nullable = false)
+    private long discountAmount;     // 이 항목에 안분된 쿠폰 할인액(원). 할인 없으면 0
+
+    @Column(name = "discount_funded_by", length = 20)
+    private String discountFundedBy; // 할인 부담 주체 스냅샷("PLATFORM"/"SELLER", 없으면 null) — net 분담에 사용
+
     @Column(nullable = false)
-    private long netAmount;          // 셀러 실수령(원) = grossAmount - fee - platformFee  ← "매출 ≠ 실수령"
+    private long netAmount;          // 셀러 실수령(원). "매출 ≠ 실수령"
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
@@ -83,9 +89,13 @@ public class SettlementEntry extends BaseEntity {
     @Column(nullable = false)
     private LocalDate settledDate;   // 입금(정산) 예정/완료일 (T+N)
 
+    /** 할인 부담 주체 — 문자열 스냅샷(settlement→coupon 결합 회피). 정산 net 환원 판정에만 쓴다. */
+    private static final String FUNDED_BY_PLATFORM = "PLATFORM";
+
     private SettlementEntry(Long paymentId, Long orderId, String pgTransactionId, String provider,
                             Long sellerId, long grossAmount, long fee, double feeRate,
-                            long platformFee, double platformFeeRate, LocalDate settledDate) {
+                            long platformFee, double platformFeeRate,
+                            long discountAmount, String discountFundedBy, LocalDate settledDate) {
         this.paymentId = paymentId;
         this.orderId = orderId;
         this.pgTransactionId = pgTransactionId;
@@ -96,18 +106,33 @@ public class SettlementEntry extends BaseEntity {
         this.feeRate = feeRate;
         this.platformFee = platformFee;
         this.platformFeeRate = platformFeeRate;
-        // 셀러 실수령은 파생값 — 엔티티가 스스로 계산해 일관성 보장(매출에서 PG수수료·플랫폼수수료를 뗀 값)
-        this.netAmount = grossAmount - fee - platformFee;
+        this.discountAmount = discountAmount;
+        this.discountFundedBy = discountFundedBy;
+        // 셀러 실수령은 파생값(엔티티가 스스로 계산). gross(할인 후 몫)에서 PG·플랫폼 수수료를 떼되,
+        // 플랫폼 부담 할인이면 그만큼 셀러에게 환원(subsidy) — 셀러는 할인 없이 받은 것과 같아지고 플랫폼이 부담.
+        // 셀러 부담 할인이면 환원 없음(gross가 이미 줄어 셀러가 부담).
+        long subsidy = FUNDED_BY_PLATFORM.equals(discountFundedBy) ? discountAmount : 0L;
+        this.netAmount = grossAmount - fee - platformFee + subsidy;
         this.settledDate = settledDate;
         this.status = SettlementStatus.SCHEDULED;    // 생성 시점 = 입금 전(예정)
     }
 
-    /** 정산 예정 항목 생성(셀러 단위). 수수료(PG 안분분·플랫폼)·요율은 정산 서비스가 계산해 넘겨준다. */
+    /** 정산 예정 항목 생성(셀러 단위, 할인 없음). 기존 호출부 호환용 — 할인=0/부담주체=null로 위임. */
     public static SettlementEntry scheduled(Long paymentId, Long orderId, String pgTransactionId, String provider,
                                             Long sellerId, long grossAmount, long fee, double feeRate,
                                             long platformFee, double platformFeeRate, LocalDate settledDate) {
+        return scheduled(paymentId, orderId, pgTransactionId, provider, sellerId,
+                grossAmount, fee, feeRate, platformFee, platformFeeRate, 0L, null, settledDate);
+    }
+
+    /** 정산 예정 항목 생성(셀러 단위, 할인 반영). gross는 '할인 후 셀러 몫', discountAmount는 안분된 할인액. */
+    public static SettlementEntry scheduled(Long paymentId, Long orderId, String pgTransactionId, String provider,
+                                            Long sellerId, long grossAmount, long fee, double feeRate,
+                                            long platformFee, double platformFeeRate,
+                                            long discountAmount, String discountFundedBy, LocalDate settledDate) {
         return new SettlementEntry(paymentId, orderId, pgTransactionId, provider, sellerId,
-                grossAmount, fee, feeRate, platformFee, platformFeeRate, settledDate);
+                grossAmount, fee, feeRate, platformFee, platformFeeRate,
+                discountAmount, discountFundedBy, settledDate);
     }
 
     /** 지급 묶음(Payout)에 편입. */

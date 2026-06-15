@@ -60,6 +60,7 @@ public class SettlementRepositoryImpl implements SettlementRepositoryCustom {
                         settlementEntry.grossAmount.sum(),
                         settlementEntry.fee.sum(),
                         settlementEntry.platformFee.sum(),
+                        settlementEntry.discountAmount.sum(),
                         settlementEntry.netAmount.sum()))
                 .from(settlementEntry)
                 .where(whereOf(condition))
