@@ -70,13 +70,22 @@ class SettlementServiceTest {
                 "MOCK_CARD", provider, "MOCK-tx-" + id, LocalDateTime.now());
     }
 
-    /** 주문 항목 — 정산은 sellerId·subtotal·status만 본다(나머지는 적당히 채움). 기본 ACTIVE. */
+    /** 주문 항목 — 정산은 sellerId·subtotal·discountShare·status만 본다. 기본 ACTIVE·할인 0. */
     private OrderItemResponse item(Long sellerId, long subtotal) {
-        return item(sellerId, subtotal, OrderItemStatus.ACTIVE);
+        return item(sellerId, subtotal, 0L, OrderItemStatus.ACTIVE);
     }
 
     private OrderItemResponse item(Long sellerId, long subtotal, OrderItemStatus status) {
-        return new OrderItemResponse(1L, 1L, 1L, null, sellerId, "P", "M", subtotal, 1, subtotal, status);
+        return item(sellerId, subtotal, 0L, status);
+    }
+
+    /** 항목별 안분 할인(discountShare)을 지정 — 할인 정산 테스트용(ACTIVE). */
+    private OrderItemResponse itemWithDiscount(Long sellerId, long subtotal, long discountShare) {
+        return item(sellerId, subtotal, discountShare, OrderItemStatus.ACTIVE);
+    }
+
+    private OrderItemResponse item(Long sellerId, long subtotal, long discountShare, OrderItemStatus status) {
+        return new OrderItemResponse(1L, 1L, 1L, null, sellerId, "P", "M", subtotal, 1, subtotal, discountShare, status);
     }
 
     /** 이미 정산된 항목(역분개 테스트용) — platformFeeRate 0.10 스냅샷. */
@@ -244,8 +253,9 @@ class SettlementServiceTest {
         given(settlementRepository.existsByPaymentId(anyLong())).willReturn(false);
         given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
         given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);
-        given(orderService.getOrderItems(11L)).willReturn(List.of(item(1L, 6000L), item(2L, 4000L)));   // gross 10000
-        // 플랫폼 와이드(sellerId=null) 1000원 할인, 플랫폼 부담
+        // 주문이 할인을 항목별로 안분(매출 비례): 600(s1)·400(s2). 정산은 활성 항목의 share를 합산. 플랫폼 부담.
+        given(orderService.getOrderItems(11L))
+                .willReturn(List.of(itemWithDiscount(1L, 6000L, 600L), itemWithDiscount(2L, 4000L, 400L)));
         given(orderService.getOrderDiscount(11L)).willReturn(new OrderDiscountInfo(1000L, "PLATFORM", null));
         given(sellerRepository.findById(1L)).willReturn(Optional.of(sellerWithRate(1L, 0.10)));
         given(sellerRepository.findById(2L)).willReturn(Optional.of(sellerWithRate(2L, 0.05)));
@@ -278,8 +288,9 @@ class SettlementServiceTest {
         given(settlementRepository.existsByPaymentId(anyLong())).willReturn(false);
         given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
         given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);
-        given(orderService.getOrderItems(11L)).willReturn(List.of(item(1L, 6000L), item(2L, 4000L)));
-        // 셀러1 한정 1000원 할인, 셀러 부담
+        // 셀러1 한정: 셀러1 항목에 전액 안분(1000), 셀러2는 0. 셀러 부담.
+        given(orderService.getOrderItems(11L))
+                .willReturn(List.of(itemWithDiscount(1L, 6000L, 1000L), item(2L, 4000L)));
         given(orderService.getOrderDiscount(11L)).willReturn(new OrderDiscountInfo(1000L, "SELLER", 1L));
         given(sellerRepository.findById(1L)).willReturn(Optional.of(sellerWithRate(1L, 0.10)));
         given(sellerRepository.findById(2L)).willReturn(Optional.of(sellerWithRate(2L, 0.05)));
@@ -326,6 +337,37 @@ class SettlementServiceTest {
         assertThat(rev.getFee()).isEqualTo(-500L);
         assertThat(rev.getPlatformFee()).isEqualTo(-2000L);
         assertThat(rev.getNetAmount()).isEqualTo(-17500L);
+    }
+
+    @Test
+    @DisplayName("환불 상계(할인 주문) - 할인 항목 취소 시 할인·net 환원까지 음수로 상계(Step 2b)")
+    void reverseRefunds_discountedOrder() {
+        // 원 정산(플랫폼 부담 쿠폰): s1 reduced5400·fee135·plat540·disc600·net5325 / s2 reduced3600·fee90·plat180·disc400·net3730
+        SettlementEntry s1 = SettlementEntry.scheduled(1L, 11L, "tx", "TOSS", 1L,
+                5400, 135, 0.025, 540, 0.10, 600, "PLATFORM", LocalDate.now().plusDays(2));
+        SettlementEntry s2 = SettlementEntry.scheduled(1L, 11L, "tx", "TOSS", 2L,
+                3600, 90, 0.025, 180, 0.05, 400, "PLATFORM", LocalDate.now().plusDays(2));
+        given(paymentService.getPaidPayments()).willReturn(List.of(paidPayment(1L, 11L, 9000L, "TOSS")));
+        given(settlementRepository.findByPaymentId(1L)).willReturn(List.of(s1, s2));
+        given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);
+        // 셀러2 항목 취소 → 활성=셀러1만(gross6000·share600). 취소된 셀러2 항목(share400)은 정산에서 제외.
+        given(orderService.getOrderItems(11L)).willReturn(List.of(
+                itemWithDiscount(1L, 6000L, 600L),
+                item(2L, 4000L, 400L, OrderItemStatus.CANCELLED)));
+        given(orderService.getOrderDiscount(11L)).willReturn(new OrderDiscountInfo(1000L, "PLATFORM", null));
+        given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
+
+        SettlementReverseResponse result = settlementService.reverseRefunds();
+
+        assertThat(result.reversedCount()).isEqualTo(1);   // 셀러1은 불변(diff 0), 셀러2만 상계
+        SettlementEntry rev = captureSaved(1).get(0);
+        assertThat(rev.getSellerId()).isEqualTo(2L);
+        assertThat(rev.getGrossAmount()).isEqualTo(-3600L);
+        assertThat(rev.getFee()).isEqualTo(-90L);
+        assertThat(rev.getPlatformFee()).isEqualTo(-180L);
+        assertThat(rev.getDiscountAmount()).isEqualTo(-400L);          // 할인도 음수 상계
+        assertThat(rev.getDiscountFundedBy()).isEqualTo("PLATFORM");
+        assertThat(rev.getNetAmount()).isEqualTo(-3730L);             // 환원(subsidy)까지 선형 상계 = −원net
     }
 
     @Test

@@ -7,6 +7,7 @@ import com.commerce.api.order.entity.OrderStatus;
 import com.commerce.api.order.entity.ShippingInfo;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 주문 응답.
@@ -24,8 +25,10 @@ public record OrderResponse(
         LocalDateTime createdAt
 ) {
     public static OrderResponse from(Order order) {
+        // 쿠폰 할인을 항목별로 안분(매출 비례)한 값을 항목 응답에 실어, 환불액·정산이 같은 출처를 쓰게 한다.
+        Map<OrderItem, Long> shares = order.discountShares();
         List<OrderItemResponse> items = order.getOrderItems().stream()
-                .map(OrderItemResponse::from)
+                .map(item -> OrderItemResponse.from(item, shares.getOrDefault(item, 0L)))
                 .toList();
         return new OrderResponse(
                 order.getId(),
@@ -73,9 +76,10 @@ public record OrderResponse(
             long orderPrice,
             int quantity,
             long subtotal,
+            long discountShare,      // 이 항목에 안분된 쿠폰 할인액(원). 실효가 = subtotal - discountShare
             OrderItemStatus status   // ACTIVE / CANCELLED(부분환불)
     ) {
-        public static OrderItemResponse from(OrderItem item) {
+        public static OrderItemResponse from(OrderItem item, long discountShare) {
             return new OrderItemResponse(
                     item.getId(),
                     item.getProductId(),
@@ -87,6 +91,7 @@ public record OrderResponse(
                     item.getOrderPrice(),
                     item.getQuantity(),
                     item.getSubtotal(),
+                    discountShare,
                     item.getStatus()
             );
         }

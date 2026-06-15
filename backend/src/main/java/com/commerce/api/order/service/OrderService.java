@@ -89,8 +89,10 @@ public class OrderService {
      */
     @Transactional(readOnly = true)
     public List<OrderResponse.OrderItemResponse> getOrderItems(Long orderId) {
-        return findOrder(orderId).getOrderItems().stream()
-                .map(OrderResponse.OrderItemResponse::from)
+        Order order = findOrder(orderId);
+        var shares = order.discountShares();   // 항목별 안분 할인 — 정산이 활성 항목 실효가를 쓰게 함
+        return order.getOrderItems().stream()
+                .map(item -> OrderResponse.OrderItemResponse.from(item, shares.getOrDefault(item, 0L)))
                 .toList();
     }
 

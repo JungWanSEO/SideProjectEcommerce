@@ -141,7 +141,9 @@ public class PaymentService {
                 .filter(i -> orderItemId.equals(i.id()))
                 .findFirst()
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "주문 항목을 찾을 수 없습니다."));
-        long refundAmount = cancelledItem.subtotal();
+        // 할인 주문이면 항목의 <b>실효가</b>(소계 − 안분 할인)만 환불한다 — 소계(gross)를 환불하면
+        // 고객이 실제 낸 금액(payable)보다 많이 돌려줘 과다환불이 되고 정산/대사도 깨진다. 할인 없으면 share=0이라 소계 그대로.
+        long refundAmount = cancelledItem.subtotal() - cancelledItem.discountShare();
 
         paymentRepository.findByOrderIdAndStatus(orderId, PaymentStatus.PAID)
                 .ifPresent(payment -> {

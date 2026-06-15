@@ -14,7 +14,9 @@ import jakarta.persistence.Id;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -117,6 +119,54 @@ public class Order extends BaseEntity {
     /** 실제 결제 대상 금액 = 총액(gross) - 쿠폰 할인액. PG 승인·Payment.amount의 기준. */
     public long getPayableAmount() {
         return this.totalPrice - this.discountAmount;
+    }
+
+    /**
+     * 쿠폰 할인을 <b>항목별로 안분</b>한다(매출 비례, 잔차는 매출 최대 항목에). 항목의 "실효가"(= 소계 − 안분 할인)는
+     * 부분환불 환불액과 셀러별 정산(활성 항목 실효가 합)의 <b>단일 출처</b>다 — 둘이 같은 값을 써야
+     * 어떤 취소 순서에도 "Σ실효가 = 결제액"이 유지된다(과다환불·대사 불일치 방지).
+     *
+     * <p>적용 범위: 플랫폼 와이드(couponSellerId=null)는 모든 항목, 셀러 한정은 그 셀러 항목만. 범위 밖은 0.
+     * 기준 매출은 <b>주문 시점 전체 항목</b>(취소분 포함) — 항목이 "구매 시 받은 할인"은 다른 항목이 취소돼도 변치 않는다.
+     */
+    public Map<OrderItem, Long> discountShares() {
+        Map<OrderItem, Long> shares = new LinkedHashMap<>();
+        for (OrderItem item : orderItems) {
+            shares.put(item, 0L);
+        }
+        if (discountAmount <= 0) {
+            return shares;
+        }
+
+        // 적용 범위 내 항목 + 기준 매출(전체 항목 기준, 취소분 포함)
+        List<OrderItem> inScope = new ArrayList<>();
+        long basis = 0;
+        for (OrderItem item : orderItems) {
+            if (couponSellerId == null || couponSellerId.equals(item.getSellerId())) {
+                inScope.add(item);
+                basis += item.getSubtotal();
+            }
+        }
+        if (basis <= 0) {
+            return shares;   // 적용 대상 매출 없음(방어)
+        }
+
+        long allocated = 0;
+        OrderItem maxItem = null;
+        long maxSubtotal = -1;
+        for (OrderItem item : inScope) {
+            long share = Math.round((double) discountAmount * item.getSubtotal() / basis);
+            shares.put(item, share);
+            allocated += share;
+            if (item.getSubtotal() > maxSubtotal) {
+                maxSubtotal = item.getSubtotal();
+                maxItem = item;
+            }
+        }
+        if (maxItem != null && allocated != discountAmount) {
+            shares.merge(maxItem, discountAmount - allocated, Long::sum);   // 반올림 잔차 보정(Σ = discountAmount)
+        }
+        return shares;
     }
 
     /** 주문 취소 (이미 취소된 주문은 불가) */
