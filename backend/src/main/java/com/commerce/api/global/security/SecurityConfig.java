@@ -77,6 +77,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/members").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/products/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/categories/**", "/api/brands/**").permitAll()
+                        // 함께 산 상품(상품 통계, 개인정보 아님)은 상품 상세처럼 공개
+                        .requestMatchers(HttpMethod.GET, "/api/recommendations/products/*/together").permitAll()
                         .requestMatchers("/swagger-ui/**", "/swagger-ui.html",
                                 "/v3/api-docs/**", "/actuator/health").permitAll()
                         // 관리자
@@ -94,7 +96,8 @@ public class SecurityConfig {
                         // 셀러 콘솔(본인 정산 조회)은 SELLER 전용 — 자기 sellerId로만 스코핑
                         .requestMatchers("/api/seller/**").hasRole("SELLER")
                         // 추천 배치 수동 재계산은 운영 업무 → ADMIN (조회 /api/recommendations/me 는 아래 authenticated)
-                        .requestMatchers(HttpMethod.POST, "/api/recommendations/run").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.POST,
+                                "/api/recommendations/run", "/api/recommendations/cooccurrence/run").hasRole("ADMIN")
                         // 그 외는 인증 필요
                         .anyRequest().authenticated())
                 .addFilterBefore(new JwtAuthenticationFilter(jwtTokenProvider),
