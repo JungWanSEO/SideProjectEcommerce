@@ -64,6 +64,12 @@ export default function ProductDetailPage() {
     loadReviews();
   }, [loadProduct, loadReviews]);
 
+  // 로그인 사용자가 상품을 보면 조회를 기록한다(개인화 추천 신호). best-effort — 실패해도 화면엔 영향 없음.
+  useEffect(() => {
+    if (!user) return;
+    apiPost<void>("/api/activity/views", { productId: Number(id) }).catch(() => {});
+  }, [user, id]);
+
   const addToCart = async () => {
     if (!user) {
       router.push("/login"); // 비로그인 → 로그인으로
