@@ -58,7 +58,8 @@ public class PaymentService {
                     "결제할 수 없는 주문 상태입니다. (현재: " + order.status() + ")");
         }
 
-        long amount = order.totalPrice();
+        // 결제액은 쿠폰 할인을 반영한 payable(= 총액 - 할인액). 고객이 실제로 내는 금액이 PG로 간다.
+        long amount = order.payableAmount();
         String method = (request.method() == null || request.method().isBlank()) ? "MOCK_CARD" : request.method();
 
         // 3) PG 승인 요청 — 클라이언트가 고른 PG로 시도하되, 그 PG가 장애·거절이면 다른 PG로 자동 페일오버

@@ -89,6 +89,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/settlements/**").hasRole("ADMIN")
                         .requestMatchers("/api/payouts/**").hasRole("ADMIN")
                         .requestMatchers("/api/reconciliations/**").hasRole("ADMIN")
+                        // 쿠폰 발급·조회는 운영 업무 → ADMIN 전용(고객은 체크아웃에서 코드만 입력)
+                        .requestMatchers("/api/coupons/**").hasRole("ADMIN")
                         // 셀러 콘솔(본인 정산 조회)은 SELLER 전용 — 자기 sellerId로만 스코핑
                         .requestMatchers("/api/seller/**").hasRole("SELLER")
                         // 그 외는 인증 필요

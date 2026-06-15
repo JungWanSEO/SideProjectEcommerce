@@ -17,6 +17,10 @@ public record CheckoutRequest(
 
         @Schema(description = "배송 요청사항(선택)", example = "부재 시 경비실에 맡겨주세요.")
         @Size(max = 200, message = "배송 메모는 200자 이내여야 합니다.")
-        String deliveryMemo
+        String deliveryMemo,
+
+        @Schema(description = "적용할 쿠폰 코드(선택). 비우면 할인 없음.", example = "WELCOME5000")
+        @Size(max = 40, message = "쿠폰 코드는 40자 이내여야 합니다.")
+        String couponCode
 ) {
 }

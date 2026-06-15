@@ -45,7 +45,15 @@ public class Order extends BaseEntity {
     private OrderStatus status;
 
     @Column(nullable = false)
-    private long totalPrice;
+    private long totalPrice;   // 항목 소계 합(할인 전 gross). 항목별 원가 — 셀러별 정산 분해의 기준.
+
+    /** 쿠폰 할인액(원). 쿠폰 미적용이면 0. 결제 대상 금액 = totalPrice - discountAmount. */
+    @Column(name = "discount_amount", nullable = false)
+    private long discountAmount;
+
+    /** 적용된 쿠폰 코드 스냅샷(없으면 null). 쿠폰 행이 바뀌어도 "무엇을 적용했는지" 보존. */
+    @Column(name = "coupon_code", length = 40)
+    private String couponCode;
 
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<OrderItem> orderItems = new ArrayList<>();
@@ -58,6 +66,7 @@ public class Order extends BaseEntity {
         this.memberId = memberId;
         this.status = OrderStatus.PENDING;   // 생성 시점 = 결제 대기
         this.totalPrice = 0L;
+        this.discountAmount = 0L;            // 쿠폰 미적용 기본값
     }
 
     /** 빈 주문 생성 (항목은 addItem으로 추가) */
@@ -75,6 +84,25 @@ public class Order extends BaseEntity {
     /** 배송지 스냅샷 지정 (체크아웃 시). */
     public void ship(ShippingInfo shippingInfo) {
         this.shippingInfo = shippingInfo;
+    }
+
+    /**
+     * 쿠폰 적용 (체크아웃 시 1회). 할인액과 코드를 스냅샷하고 결제 대상 금액(payable)을 낮춘다.
+     *
+     * <p><b>항목 소계(gross)는 그대로 둔다</b> — 셀러별 정산 분해(Step 2)가 원가 기준 gross를 읽어
+     * 할인을 셀러/플랫폼으로 안분해야 하기 때문. 할인은 [0, totalPrice] 범위로 가드(음수 결제 방지).
+     */
+    public void applyCoupon(String couponCode, long discountAmount) {
+        if (discountAmount < 0 || discountAmount > this.totalPrice) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "할인 금액이 주문 금액을 초과할 수 없습니다.");
+        }
+        this.couponCode = couponCode;
+        this.discountAmount = discountAmount;
+    }
+
+    /** 실제 결제 대상 금액 = 총액(gross) - 쿠폰 할인액. PG 승인·Payment.amount의 기준. */
+    public long getPayableAmount() {
+        return this.totalPrice - this.discountAmount;
     }
 
     /** 주문 취소 (이미 취소된 주문은 불가) */

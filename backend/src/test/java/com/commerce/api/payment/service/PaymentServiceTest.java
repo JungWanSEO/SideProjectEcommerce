@@ -56,7 +56,14 @@ class PaymentServiceTest {
     private PaymentService paymentService;
 
     private OrderResponse order(Long id, Long memberId, OrderStatus status, long total) {
-        return new OrderResponse(id, memberId, status, total, List.of(), null, LocalDateTime.now());
+        // 쿠폰 없음: discountAmount=0, payableAmount=total. PaymentService는 payableAmount로 결제한다.
+        return new OrderResponse(id, memberId, status, total, 0L, total, null, List.of(), null, LocalDateTime.now());
+    }
+
+    /** 쿠폰 할인이 적용된 주문(gross=total, 할인=discount → payable=total-discount). */
+    private OrderResponse discountedOrder(Long id, Long memberId, OrderStatus status, long total, long discount) {
+        return new OrderResponse(id, memberId, status, total, discount, total - discount, "WELCOME5000",
+                List.of(), null, LocalDateTime.now());
     }
 
     private PaymentRequest request() {
@@ -79,6 +86,21 @@ class PaymentServiceTest {
         assertThat(response.amount()).isEqualTo(30000L);
         verify(orderService).pay(1L);                                   // 재고 차감 + 주문 PAID 위임
         verify(paymentCompletionRecorder).saveWithEvent(any(Payment.class)); // 결제 저장 + 아웃박스 이벤트(한 트랜잭션)
+    }
+
+    @Test
+    @DisplayName("결제 - 쿠폰 할인 주문이면 payable(총액-할인)로 결제된다")
+    void pay_chargesPayableAmountWhenDiscounted() {
+        given(paymentRepository.findByIdempotencyKey("key-1")).willReturn(Optional.empty());
+        // 총액 30000, 할인 5000 → 실제 결제액 25000
+        given(orderService.getOrder(1L, 100L, false))
+                .willReturn(discountedOrder(1L, 100L, OrderStatus.PENDING, 30000L, 5000L));
+        given(paymentGatewayRouter.approveWithFailover(eq("TOSS"), any()))
+                .willReturn(new PaymentRoutingResult("TOSS", PaymentApproval.approved("MOCK-tx-2"), List.of("TOSS")));
+
+        PaymentResponse response = paymentService.pay(100L, request());
+
+        assertThat(response.amount()).isEqualTo(25000L);   // 할인 반영(gross 30000이 아님)
     }
 
     @Test

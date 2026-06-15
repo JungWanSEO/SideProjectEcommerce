@@ -15,7 +15,10 @@ public record OrderResponse(
         Long id,
         Long memberId,
         OrderStatus status,
-        long totalPrice,
+        long totalPrice,          // 할인 전 총액(gross)
+        long discountAmount,      // 쿠폰 할인액 (없으면 0)
+        long payableAmount,       // 실제 결제액 = totalPrice - discountAmount
+        String couponCode,        // 적용된 쿠폰 코드 (없으면 null)
         List<OrderItemResponse> items,
         ShippingResponse shipping,   // 배송지 스냅샷 (없으면 null)
         LocalDateTime createdAt
@@ -29,6 +32,9 @@ public record OrderResponse(
                 order.getMemberId(),
                 order.getStatus(),
                 order.getTotalPrice(),
+                order.getDiscountAmount(),
+                order.getPayableAmount(),
+                order.getCouponCode(),
                 items,
                 ShippingResponse.from(order.getShippingInfo()),
                 order.getCreatedAt()
