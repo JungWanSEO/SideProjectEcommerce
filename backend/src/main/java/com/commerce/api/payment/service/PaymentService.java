@@ -1,5 +1,6 @@
 package com.commerce.api.payment.service;
 
+import com.commerce.api.coupon.service.MemberCouponService;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.order.dto.OrderResponse;
 import com.commerce.api.order.entity.OrderStatus;
@@ -43,6 +44,7 @@ public class PaymentService {
     private final OrderService orderService;
     private final PaymentGatewayRouter paymentGatewayRouter;
     private final PaymentCompletionRecorder paymentCompletionRecorder;
+    private final MemberCouponService memberCouponService;   // 주문 취소 시 발급형 쿠폰 복원
 
     public PaymentResponse pay(Long memberId, PaymentRequest request) {
         // 1) 멱등성: 같은 키로 이미 처리된 결제가 있으면 재실행 없이 그 결과를 반환
@@ -106,6 +108,8 @@ public class PaymentService {
         // 1) 주문 취소 위임 — 소유권(404/403) + 상태 가드(이미 취소면 409) + PAID였으면 재고 복원.
         //    무효한 요청이면 여기서 예외가 나 환불을 시도하지 않는다.
         OrderResponse cancelled = orderService.cancel(orderId, memberId, admin);
+        // 발급형 쿠폰이면 미사용으로 복원 — "취소했는데 쿠폰 날림" 방지(공개형/미보유면 no-op).
+        memberCouponService.release(cancelled.memberId(), cancelled.couponCode());
 
         // 2) 결제 완료(PAID) 건이 있으면 환불. PENDING 주문은 결제 레코드가 없으므로 환불 대상이 없다.
         //    (주문이 CANCELLED로 바뀌면 재취소가 409로 막히므로 중복 환불도 함께 방지된다.)
@@ -156,6 +160,10 @@ public class PaymentService {
                     payment.partialRefund(refundAmount);   // 누적, 전액 도달 시 CANCELLED
                     paymentRepository.save(payment);
                 });
+        // 마지막 항목 취소로 주문 전체가 취소되면 발급형 쿠폰도 복원.
+        if (order.status() == OrderStatus.CANCELLED) {
+            memberCouponService.release(order.memberId(), order.couponCode());
+        }
         return order;
     }
 

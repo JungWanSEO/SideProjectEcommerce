@@ -2,11 +2,20 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPost } from "@/lib/api";
-import { Coupon, CouponCreateInput, DiscountType, CouponFundedBy, Seller } from "@/lib/types";
+import {
+  Coupon,
+  CouponCreateInput,
+  DiscountType,
+  CouponFundedBy,
+  CouponIssueType,
+  Seller,
+} from "@/lib/types";
 import {
   DISCOUNT_TYPE_LABEL,
   FUNDED_BY_LABEL,
   FUNDED_BY_BADGE,
+  ISSUE_TYPE_LABEL,
+  ISSUE_TYPE_BADGE,
   COUPON_STATUS_LABEL,
   COUPON_STATUS_BADGE,
   formatDiscount,
@@ -23,9 +32,11 @@ export default function AdminCouponsPage() {
   const [sellers, setSellers] = useState<Seller[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [issuingId, setIssuingId] = useState<number | null>(null);
 
-  // 발급 폼 상태
+  // 생성 폼 상태
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [discountType, setDiscountType] = useState<DiscountType>("FIXED_AMOUNT");
@@ -33,6 +44,7 @@ export default function AdminCouponsPage() {
   const [maxDiscountAmount, setMaxDiscountAmount] = useState("");
   const [minOrderAmount, setMinOrderAmount] = useState("0");
   const [fundedBy, setFundedBy] = useState<CouponFundedBy>("PLATFORM");
+  const [issueType, setIssueType] = useState<CouponIssueType>("PUBLIC");
   const [sellerId, setSellerId] = useState(""); // "" = 플랫폼 와이드
   const [validFrom, setValidFrom] = useState("");
   const [validUntil, setValidUntil] = useState("");
@@ -60,6 +72,7 @@ export default function AdminCouponsPage() {
     setMaxDiscountAmount("");
     setMinOrderAmount("0");
     setFundedBy("PLATFORM");
+    setIssueType("PUBLIC");
     setSellerId("");
     setValidFrom("");
     setValidUntil("");
@@ -80,6 +93,7 @@ export default function AdminCouponsPage() {
       maxDiscountAmount: discountType === "PERCENTAGE" && maxDiscountAmount ? Number(maxDiscountAmount) : null,
       minOrderAmount: Number(minOrderAmount || 0),
       fundedBy,
+      issueType,
       sellerId: sellerId ? Number(sellerId) : null,
       validFrom,
       validUntil,
@@ -95,6 +109,22 @@ export default function AdminCouponsPage() {
     }
   };
 
+  // 발급형(ISSUED) 쿠폰을 전체 회원 지갑으로 발급
+  const issue = async (couponId: number) => {
+    if (!confirm("이 쿠폰을 전체 회원에게 발급할까요?")) return;
+    setIssuingId(couponId);
+    setError(null);
+    setSuccess(null);
+    try {
+      const issued = await apiPost<number>(`/api/coupons/${couponId}/issue`, { toAll: true });
+      setSuccess(`${issued}명에게 발급했습니다.`);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setIssuingId(null);
+    }
+  };
+
   const now = new Date();
   const activeCount = coupons.filter((c) => effectiveStatus(c, now) === "ACTIVE").length;
 
@@ -103,12 +133,15 @@ export default function AdminCouponsPage() {
       <div className="mb-6">
         <h1 className="text-xl font-bold">쿠폰 관리</h1>
         <p className="text-sm text-gray-500">
-          정액/정률 · 플랫폼/셀러 부담 · 전체/셀러한정 쿠폰을 발급합니다. 부담 주체는 셀러별 정산에 반영됩니다.
+          정액/정률 · 플랫폼/셀러 부담 · 공개코드/회원발급 쿠폰을 만들고, 발급형은 회원 지갑으로 발급합니다. 부담 주체는 셀러별 정산에 반영됩니다.
         </p>
       </div>
 
       {error && (
         <div className="mb-4 rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+      )}
+      {success && (
+        <div className="mb-4 rounded border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">{success}</div>
       )}
 
       {/* KPI */}
@@ -206,6 +239,17 @@ export default function AdminCouponsPage() {
             </select>
           </label>
           <label className="flex flex-col gap-1">
+            <span className="text-xs text-gray-500">배포 방식</span>
+            <select
+              value={issueType}
+              onChange={(e) => setIssueType(e.target.value as CouponIssueType)}
+              className="rounded border border-gray-300 px-2 py-1"
+            >
+              <option value="PUBLIC">공개 코드(누구나)</option>
+              <option value="ISSUED">회원 발급(지갑·단일사용)</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
             <span className="text-xs text-gray-500">적용 범위</span>
             <select
               value={sellerId}
@@ -245,7 +289,7 @@ export default function AdminCouponsPage() {
             disabled={busy}
             className="rounded bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50"
           >
-            {busy ? "발급 중…" : "쿠폰 발급"}
+            {busy ? "생성 중…" : "쿠폰 생성"}
           </button>
         </div>
       </div>
@@ -260,22 +304,24 @@ export default function AdminCouponsPage() {
               <th className="px-4 py-3">할인</th>
               <th className="px-4 py-3">적용 범위</th>
               <th className="px-4 py-3">부담</th>
+              <th className="px-4 py-3">배포</th>
               <th className="px-4 py-3 text-right">최소주문</th>
               <th className="px-4 py-3">유효기간</th>
               <th className="px-4 py-3">상태</th>
+              <th className="px-4 py-3 text-right">발급</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {loading ? (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={10} className="px-4 py-8 text-center text-gray-400">
                   불러오는 중…
                 </td>
               </tr>
             ) : coupons.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-gray-400">
-                  발급된 쿠폰이 없습니다. 위에서 발급하세요.
+                <td colSpan={10} className="px-4 py-8 text-center text-gray-400">
+                  쿠폰이 없습니다. 위에서 생성하세요.
                 </td>
               </tr>
             ) : (
@@ -295,6 +341,11 @@ export default function AdminCouponsPage() {
                         {FUNDED_BY_LABEL[c.fundedBy]}
                       </span>
                     </td>
+                    <td className="px-4 py-3">
+                      <span className={`rounded px-2 py-0.5 text-xs ${ISSUE_TYPE_BADGE[c.issueType]}`}>
+                        {ISSUE_TYPE_LABEL[c.issueType]}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-right text-gray-500">
                       {c.minOrderAmount > 0 ? `${c.minOrderAmount.toLocaleString()}원` : "—"}
                     </td>
@@ -305,6 +356,19 @@ export default function AdminCouponsPage() {
                       <span className={`rounded px-2 py-0.5 text-xs ${COUPON_STATUS_BADGE[st]}`}>
                         {COUPON_STATUS_LABEL[st]}
                       </span>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {c.issueType === "ISSUED" ? (
+                        <button
+                          onClick={() => issue(c.id)}
+                          disabled={issuingId === c.id}
+                          className="rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-100 disabled:opacity-50"
+                        >
+                          {issuingId === c.id ? "발급 중…" : "전체 발급"}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-gray-300">—</span>
+                      )}
                     </td>
                   </tr>
                 );

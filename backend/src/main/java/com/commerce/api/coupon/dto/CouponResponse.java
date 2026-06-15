@@ -2,6 +2,7 @@ package com.commerce.api.coupon.dto;
 
 import com.commerce.api.coupon.entity.Coupon;
 import com.commerce.api.coupon.entity.CouponFundedBy;
+import com.commerce.api.coupon.entity.CouponIssueType;
 import com.commerce.api.coupon.entity.CouponStatus;
 import com.commerce.api.coupon.entity.DiscountType;
 import java.time.LocalDateTime;
@@ -18,6 +19,7 @@ public record CouponResponse(
         Long maxDiscountAmount,
         long minOrderAmount,
         CouponFundedBy fundedBy,
+        CouponIssueType issueType,
         Long sellerId,
         LocalDateTime validFrom,
         LocalDateTime validUntil,
@@ -34,6 +36,7 @@ public record CouponResponse(
                 c.getMaxDiscountAmount(),
                 c.getMinOrderAmount(),
                 c.getFundedBy(),
+                c.getIssueType(),
                 c.getSellerId(),
                 c.getValidFrom(),
                 c.getValidUntil(),

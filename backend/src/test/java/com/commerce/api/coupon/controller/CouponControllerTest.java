@@ -1,6 +1,7 @@
 package com.commerce.api.coupon.controller;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -9,9 +10,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.commerce.api.coupon.dto.CouponResponse;
 import com.commerce.api.coupon.entity.CouponFundedBy;
+import com.commerce.api.coupon.entity.CouponIssueType;
 import com.commerce.api.coupon.entity.CouponStatus;
 import com.commerce.api.coupon.entity.DiscountType;
 import com.commerce.api.coupon.service.CouponService;
+import com.commerce.api.coupon.service.MemberCouponService;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
@@ -36,10 +39,12 @@ class CouponControllerTest {
 
     @MockitoBean
     private CouponService couponService;
+    @MockitoBean
+    private MemberCouponService memberCouponService;
 
     private CouponResponse sample() {
         return new CouponResponse(1L, "WELCOME5000", "신규 5천원", DiscountType.FIXED_AMOUNT, 5000L, null,
-                30000L, CouponFundedBy.PLATFORM, null,
+                30000L, CouponFundedBy.PLATFORM, CouponIssueType.PUBLIC, null,
                 LocalDateTime.of(2026, 6, 1, 0, 0), LocalDateTime.of(2026, 12, 31, 23, 59),
                 CouponStatus.ACTIVE, LocalDateTime.now());
     }
@@ -53,7 +58,7 @@ class CouponControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"code":"welcome5000","name":"신규 5천원","discountType":"FIXED_AMOUNT",
-                                 "discountValue":5000,"minOrderAmount":30000,"fundedBy":"PLATFORM",
+                                 "discountValue":5000,"minOrderAmount":30000,"fundedBy":"PLATFORM","issueType":"PUBLIC",
                                  "validFrom":"2026-06-01T00:00:00","validUntil":"2026-12-31T23:59:59"}
                                 """))
                 .andExpect(status().isCreated())
@@ -69,11 +74,25 @@ class CouponControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"code":"","name":"x","discountType":"FIXED_AMOUNT","discountValue":5000,
-                                 "minOrderAmount":0,"fundedBy":"PLATFORM",
+                                 "minOrderAmount":0,"fundedBy":"PLATFORM","issueType":"PUBLIC",
                                  "validFrom":"2026-06-01T00:00:00","validUntil":"2026-12-31T23:59:59"}
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    @DisplayName("POST /api/coupons/{id}/issue - 회원 발급 200(발급 장수 반환)")
+    void issue_success() throws Exception {
+        given(memberCouponService.issue(eq(1L), any())).willReturn(3);
+
+        mockMvc.perform(post("/api/coupons/1/issue")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"toAll":true}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").value(3));
     }
 
     @Test

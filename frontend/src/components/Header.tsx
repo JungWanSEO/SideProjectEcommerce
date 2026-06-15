@@ -32,6 +32,9 @@ export default function Header() {
               <Link href="/account/addresses" className={navLink}>
                 배송지
               </Link>
+              <Link href="/account/coupons" className={navLink}>
+                쿠폰함
+              </Link>
               <Link href="/cart" className={navLink}>
                 장바구니
               </Link>
