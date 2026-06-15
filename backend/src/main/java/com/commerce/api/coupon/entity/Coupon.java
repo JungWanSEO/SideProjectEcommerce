@@ -67,6 +67,11 @@ public class Coupon extends BaseEntity {
     @Column(name = "funded_by", nullable = false, length = 20)
     private CouponFundedBy fundedBy;
 
+    /** 배포 방식: PUBLIC(코드 입력·무제한) / ISSUED(회원 발급·지갑·단일 사용). */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "issue_type", nullable = false, length = 20)
+    private CouponIssueType issueType;
+
     /** 적용 범위: null=플랫폼 와이드(주문 전체), 값=해당 셀러 상품에만(셀러 한정). 다른 애그리거트 → ID 참조. */
     @Column(name = "seller_id")
     private Long sellerId;
@@ -83,7 +88,7 @@ public class Coupon extends BaseEntity {
 
     private Coupon(String code, String name, DiscountType discountType, long discountValue,
             Long maxDiscountAmount, long minOrderAmount, CouponFundedBy fundedBy, Long sellerId,
-            LocalDateTime validFrom, LocalDateTime validUntil) {
+            CouponIssueType issueType, LocalDateTime validFrom, LocalDateTime validUntil) {
         // 한 쿠폰 안에서 닫히는 불변식은 엔티티가 지킨다(교차필드라 DTO 어노테이션으로 표현하기 어려운 것들).
         if (validUntil.isBefore(validFrom)) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "쿠폰 유효기간이 올바르지 않습니다(시작 > 종료).");
@@ -102,6 +107,7 @@ public class Coupon extends BaseEntity {
         this.minOrderAmount = minOrderAmount;
         this.fundedBy = fundedBy;
         this.sellerId = sellerId;
+        this.issueType = issueType != null ? issueType : CouponIssueType.PUBLIC;   // 미지정 시 공개형
         this.validFrom = validFrom;
         this.validUntil = validUntil;
         this.status = CouponStatus.ACTIVE;   // 발급 시 활성
@@ -110,9 +116,14 @@ public class Coupon extends BaseEntity {
     /** 신규 쿠폰 발급(상태=ACTIVE). 코드 유일성은 CouponService가 보장. */
     public static Coupon create(String code, String name, DiscountType discountType, long discountValue,
             Long maxDiscountAmount, long minOrderAmount, CouponFundedBy fundedBy, Long sellerId,
-            LocalDateTime validFrom, LocalDateTime validUntil) {
+            CouponIssueType issueType, LocalDateTime validFrom, LocalDateTime validUntil) {
         return new Coupon(code, name, discountType, discountValue, maxDiscountAmount, minOrderAmount,
-                fundedBy, sellerId, validFrom, validUntil);
+                fundedBy, sellerId, issueType, validFrom, validUntil);
+    }
+
+    /** 발급형(ISSUED) 쿠폰인지 — 지갑 보유·단일 사용이 필요한 쿠폰. */
+    public boolean isIssued() {
+        return this.issueType == CouponIssueType.ISSUED;
     }
 
     /** 운영자 비활성화(기간이 남아도 즉시 사용 불가). */

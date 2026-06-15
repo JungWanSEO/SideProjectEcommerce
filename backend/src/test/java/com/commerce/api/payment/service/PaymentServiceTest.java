@@ -9,6 +9,7 @@ import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import com.commerce.api.coupon.service.MemberCouponService;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.order.dto.OrderResponse;
 import com.commerce.api.order.entity.OrderStatus;
@@ -51,6 +52,8 @@ class PaymentServiceTest {
     private PaymentGateway paymentGateway;   // 라우터가 골라주는 어댑터(resolve 반환)
     @Mock
     private PaymentCompletionRecorder paymentCompletionRecorder;
+    @Mock
+    private MemberCouponService memberCouponService;   // 취소 시 쿠폰 복원(release) — void, 검증 불필요
 
     @InjectMocks
     private PaymentService paymentService;

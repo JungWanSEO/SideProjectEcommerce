@@ -1,4 +1,4 @@
-import { Coupon, CouponFundedBy, DiscountType } from "./types";
+import { Coupon, CouponFundedBy, CouponIssueType, DiscountType } from "./types";
 
 /** 할인 종류 라벨 */
 export const DISCOUNT_TYPE_LABEL: Record<DiscountType, string> = {
@@ -18,6 +18,17 @@ export const FUNDED_BY_BADGE: Record<CouponFundedBy, string> = {
   SELLER: "bg-amber-50 text-amber-700",
 };
 
+/** 배포 방식 라벨/뱃지 (공개 코드 / 회원 발급) — Step 3 */
+export const ISSUE_TYPE_LABEL: Record<CouponIssueType, string> = {
+  PUBLIC: "공개 코드",
+  ISSUED: "회원 발급",
+};
+
+export const ISSUE_TYPE_BADGE: Record<CouponIssueType, string> = {
+  PUBLIC: "bg-gray-100 text-gray-600",
+  ISSUED: "bg-violet-50 text-violet-700",
+};
+
 /** 쿠폰 상태 라벨/뱃지 (운영 스위치 ACTIVE/DISABLED + 기간) */
 export const COUPON_STATUS_LABEL: Record<string, string> = {
   ACTIVE: "활성",
@@ -31,13 +42,22 @@ export const COUPON_STATUS_BADGE: Record<string, string> = {
   EXPIRED: "bg-amber-100 text-amber-700",
 };
 
-/** 할인 표시 — 정액은 "5,000원", 정률은 "10% (최대 1만원)". */
-export function formatDiscount(c: Coupon): string {
-  if (c.discountType === "FIXED_AMOUNT") {
-    return `${c.discountValue.toLocaleString()}원`;
+/** 할인 표시(필드 직접) — 정액은 "5,000원", 정률은 "10% (최대 1만원)". Coupon·MemberCoupon 공용. */
+export function formatDiscountOf(
+  discountType: DiscountType,
+  discountValue: number,
+  maxDiscountAmount: number | null,
+): string {
+  if (discountType === "FIXED_AMOUNT") {
+    return `${discountValue.toLocaleString()}원`;
   }
-  const cap = c.maxDiscountAmount ? ` (최대 ${c.maxDiscountAmount.toLocaleString()}원)` : "";
-  return `${c.discountValue}%${cap}`;
+  const cap = maxDiscountAmount ? ` (최대 ${maxDiscountAmount.toLocaleString()}원)` : "";
+  return `${discountValue}%${cap}`;
+}
+
+/** 할인 표시 — 쿠폰. */
+export function formatDiscount(c: Coupon): string {
+  return formatDiscountOf(c.discountType, c.discountValue, c.maxDiscountAmount);
 }
 
 /** 적용 범위 표시 — 셀러 한정이면 셀러 ID, 아니면 전체. */

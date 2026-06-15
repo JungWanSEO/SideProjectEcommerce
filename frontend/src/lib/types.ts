@@ -328,6 +328,8 @@ export type DiscountType = "FIXED_AMOUNT" | "PERCENTAGE";
 export type CouponFundedBy = "PLATFORM" | "SELLER";
 // 쿠폰 상태 (백엔드 CouponStatus)
 export type CouponStatus = "ACTIVE" | "DISABLED";
+// 배포 방식 (백엔드 CouponIssueType): 공개 코드 / 회원 발급(지갑)
+export type CouponIssueType = "PUBLIC" | "ISSUED";
 
 /** 쿠폰 (CouponResponse) — ADMIN 관리 */
 export interface Coupon {
@@ -339,6 +341,7 @@ export interface Coupon {
   maxDiscountAmount: number | null; // 정률 상한(원). 정액/무제한이면 null
   minOrderAmount: number; // 최소 적용 대상 금액(원)
   fundedBy: CouponFundedBy; // 할인 비용 부담 주체 (정산 분담 — Step 2)
+  issueType: CouponIssueType; // PUBLIC(코드 입력·무제한) / ISSUED(회원 발급·지갑·단일 사용) — Step 3
   sellerId: number | null; // null=플랫폼 와이드(주문 전체), 값=해당 셀러 상품 한정
   validFrom: string; // ISO LocalDateTime
   validUntil: string;
@@ -346,7 +349,7 @@ export interface Coupon {
   createdAt: string;
 }
 
-/** 쿠폰 발급 요청 (CouponCreateRequest) */
+/** 쿠폰 생성 요청 (CouponCreateRequest) */
 export interface CouponCreateInput {
   code: string;
   name: string;
@@ -355,9 +358,32 @@ export interface CouponCreateInput {
   maxDiscountAmount?: number | null;
   minOrderAmount: number;
   fundedBy: CouponFundedBy;
+  issueType: CouponIssueType;
   sellerId?: number | null;
   validFrom: string;
   validUntil: string;
+}
+
+// 회원 쿠폰(쿠폰함) 사용 상태 (백엔드 MemberCouponStatus)
+export type MemberCouponStatus = "UNUSED" | "USED";
+
+/** 회원 쿠폰함의 한 장 (MemberCouponResponse) — 발급 쿠폰 + 쿠폰 상세 enrich — Step 3 */
+export interface MemberCoupon {
+  id: number; // member_coupon id
+  couponId: number;
+  code: string;
+  name: string;
+  discountType: DiscountType;
+  discountValue: number;
+  maxDiscountAmount: number | null;
+  minOrderAmount: number;
+  fundedBy: CouponFundedBy;
+  sellerId: number | null;
+  validFrom: string;
+  validUntil: string;
+  status: MemberCouponStatus;
+  usedAt: string | null;
+  usable: boolean; // 미사용 + 쿠폰 활성 + 기간 내
 }
 
 /** 쿠폰 미리보기 응답 (CouponPreviewResponse) — 현재 장바구니 기준 할인·예상 결제액 */

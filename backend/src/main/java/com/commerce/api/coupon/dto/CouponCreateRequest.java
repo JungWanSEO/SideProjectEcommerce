@@ -1,6 +1,7 @@
 package com.commerce.api.coupon.dto;
 
 import com.commerce.api.coupon.entity.CouponFundedBy;
+import com.commerce.api.coupon.entity.CouponIssueType;
 import com.commerce.api.coupon.entity.DiscountType;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
@@ -48,6 +49,10 @@ public record CouponCreateRequest(
         @Schema(description = "할인 비용 부담 주체", example = "PLATFORM")
         @NotNull(message = "부담 주체는 필수입니다.")
         CouponFundedBy fundedBy,
+
+        @Schema(description = "배포 방식: PUBLIC(코드 입력·무제한) / ISSUED(회원 발급·지갑·단일 사용)", example = "PUBLIC")
+        @NotNull(message = "배포 방식은 필수입니다.")
+        CouponIssueType issueType,
 
         @Schema(description = "셀러 한정 시 셀러 ID(비우면 플랫폼 와이드=주문 전체 적용)", example = "1")
         Long sellerId,

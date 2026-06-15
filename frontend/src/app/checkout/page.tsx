@@ -4,9 +4,10 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { apiGet, apiPost } from "@/lib/api";
-import { Cart, Address, Order, CouponPreview } from "@/lib/types";
+import { Cart, Address, Order, CouponPreview, MemberCoupon } from "@/lib/types";
 import { useAuth } from "@/lib/auth";
 import Badge from "@/components/ui/Badge";
+import { formatDiscountOf } from "@/lib/coupon";
 
 /**
  * 주문서 / 체크아웃 확인 페이지 (/checkout). 장바구니 → 결제 사이 단계.
@@ -25,11 +26,12 @@ export default function CheckoutPage() {
   const [error, setError] = useState<string | null>(null);
   const [ordering, setOrdering] = useState(false);
 
-  // 쿠폰: 코드 입력 → "적용"(미리보기) → 할인·결제액 인라인 표시. 적용된 코드만 주문에 보낸다.
+  // 쿠폰: 쿠폰함에서 선택하거나 코드 입력 → "적용"(미리보기) → 할인·결제액 인라인 표시. 적용된 코드만 주문에 보낸다.
   const [couponCode, setCouponCode] = useState("");
   const [coupon, setCoupon] = useState<CouponPreview | null>(null);
   const [couponError, setCouponError] = useState<string | null>(null);
   const [applyingCoupon, setApplyingCoupon] = useState(false);
+  const [wallet, setWallet] = useState<MemberCoupon[]>([]); // 내 쿠폰함(사용 가능한 발급 쿠폰)
 
   useEffect(() => {
     if (!authLoading && !user) router.replace("/login");
@@ -37,21 +39,26 @@ export default function CheckoutPage() {
 
   useEffect(() => {
     if (!user) return;
-    // 장바구니 + 주소록을 함께 로드. 기본배송지(없으면 첫 주소)를 미리 선택.
-    Promise.all([apiGet<Cart>("/api/carts"), apiGet<Address[]>("/api/addresses")])
-      .then(([c, a]) => {
+    // 장바구니 + 주소록 + 쿠폰함을 함께 로드. 기본배송지(없으면 첫 주소)를 미리 선택.
+    Promise.all([
+      apiGet<Cart>("/api/carts"),
+      apiGet<Address[]>("/api/addresses"),
+      apiGet<MemberCoupon[]>("/api/member-coupons/me"),
+    ])
+      .then(([c, a, w]) => {
         setCart(c);
         setAddresses(a);
         const def = a.find((x) => x.isDefault) ?? a[0];
         setSelectedId(def ? def.id : null);
+        setWallet(w.filter((mc) => mc.usable)); // 사용 가능한 것만 선택지로
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
   }, [user]);
 
   // 쿠폰 적용(미리보기): 주문을 만들지 않고 현재 장바구니 기준 할인을 받아 표시한다.
-  const applyCoupon = async () => {
-    const code = couponCode.trim();
+  const previewCode = async (rawCode: string) => {
+    const code = rawCode.trim();
     if (!code) return;
     setApplyingCoupon(true);
     setCouponError(null);
@@ -60,10 +67,18 @@ export default function CheckoutPage() {
       setCoupon(preview);
     } catch (e) {
       setCoupon(null);
-      setCouponError((e as Error).message); // 코드 없음·기간 외·최소금액 미달 등 400
+      setCouponError((e as Error).message); // 미보유·이미 사용·기간 외·최소금액 미달 등 400
     } finally {
       setApplyingCoupon(false);
     }
+  };
+
+  const applyCoupon = () => previewCode(couponCode);
+
+  // 쿠폰함에서 선택 → 코드 채우고 즉시 미리보기
+  const selectWalletCoupon = (code: string) => {
+    setCouponCode(code);
+    if (code) previewCode(code);
   };
 
   const removeCoupon = () => {
@@ -203,10 +218,26 @@ export default function CheckoutPage() {
       <section className="mb-6">
         <h2 className="mb-3 font-serif text-xl text-ink">쿠폰</h2>
         <div className="rounded-2xl border border-line bg-paper p-4">
+          {/* 쿠폰함에서 선택(발급 쿠폰) */}
+          {wallet.length > 0 && (
+            <select
+              className="mb-2 w-full rounded-xl border border-line bg-paper px-4 py-2.5 text-ink outline-none transition focus:border-clay disabled:opacity-50"
+              value=""
+              disabled={!!coupon}
+              onChange={(e) => selectWalletCoupon(e.target.value)}
+            >
+              <option value="">내 쿠폰함에서 선택 ({wallet.length}장)</option>
+              {wallet.map((mc) => (
+                <option key={mc.id} value={mc.code}>
+                  {formatDiscountOf(mc.discountType, mc.discountValue, mc.maxDiscountAmount)} · {mc.name} ({mc.code})
+                </option>
+              ))}
+            </select>
+          )}
           <div className="flex gap-2">
             <input
               className="flex-1 rounded-xl border border-line bg-paper px-4 py-2.5 text-ink outline-none transition placeholder:text-muted focus:border-clay disabled:opacity-50"
-              placeholder="쿠폰 코드"
+              placeholder="쿠폰 코드 직접 입력"
               maxLength={40}
               value={couponCode}
               disabled={!!coupon}

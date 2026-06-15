@@ -17,7 +17,7 @@ import com.commerce.api.cart.entity.Cart;
 import com.commerce.api.cart.repository.CartRepository;
 import com.commerce.api.coupon.dto.CouponApplyResult;
 import com.commerce.api.coupon.entity.CouponFundedBy;
-import com.commerce.api.coupon.service.CouponService;
+import com.commerce.api.coupon.service.MemberCouponService;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.order.dto.CheckoutRequest;
 import com.commerce.api.order.dto.CouponPreviewResponse;
@@ -60,7 +60,7 @@ class OrderProcessorTest {
     @Mock
     private BrandRepository brandRepository;
     @Mock
-    private CouponService couponService;
+    private MemberCouponService memberCouponService;
 
     @InjectMocks
     private OrderProcessor orderProcessor;
@@ -191,8 +191,8 @@ class OrderProcessorTest {
         given(orderRepository.save(any(Order.class))).willAnswer(inv -> inv.getArgument(0));
         given(addressService.getOwnedAddress(100L, 5L)).willReturn(
                 new AddressResponse(5L, "홍길동", "010-1234-5678", "06236", "서울 강남구", "4층", true, null));
-        // 쿠폰 도메인은 적용 대상 금액(주문 총액 20000)을 받아 5000 할인을 돌려준다(플랫폼 부담).
-        given(couponService.applyCoupon(eq("WELCOME5000"), eq(20000L), anyMap()))
+        // 쿠폰 도메인(MemberCouponService)이 적용 대상 금액(주문 총액 20000)으로 5000 할인을 돌려준다(플랫폼 부담).
+        given(memberCouponService.apply(eq(100L), eq("WELCOME5000"), eq(20000L), anyMap()))
                 .willReturn(new CouponApplyResult("WELCOME5000", 5000L, CouponFundedBy.PLATFORM, null));
 
         OrderResponse response = orderProcessor.checkout(100L,
@@ -225,7 +225,7 @@ class OrderProcessorTest {
         cart.addItem(1L, 10L, 2);   // 총 20000
         given(cartRepository.findByMemberId(100L)).willReturn(Optional.of(cart));
         given(productRepository.findByOptionId(10L)).willReturn(Optional.of(product));
-        given(couponService.applyCoupon(eq("WELCOME5000"), eq(20000L), anyMap()))
+        given(memberCouponService.preview(eq(100L), eq("WELCOME5000"), eq(20000L), anyMap()))
                 .willReturn(new CouponApplyResult("WELCOME5000", 5000L, CouponFundedBy.PLATFORM, null));
 
         CouponPreviewResponse preview = orderProcessor.previewCoupon(100L, "WELCOME5000");

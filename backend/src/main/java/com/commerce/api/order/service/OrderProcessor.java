@@ -8,7 +8,7 @@ import com.commerce.api.cart.entity.Cart;
 import com.commerce.api.cart.entity.CartItem;
 import com.commerce.api.cart.repository.CartRepository;
 import com.commerce.api.coupon.dto.CouponApplyResult;
-import com.commerce.api.coupon.service.CouponService;
+import com.commerce.api.coupon.service.MemberCouponService;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.order.dto.CheckoutRequest;
 import com.commerce.api.order.dto.CouponPreviewResponse;
@@ -45,7 +45,7 @@ public class OrderProcessor {
     private final CartRepository cartRepository;
     private final AddressService addressService;   // 배송지 스냅샷(주소록에서) — 도메인 경계는 서비스+DTO로
     private final BrandRepository brandRepository;  // 주문 시점 셀러 귀속 스냅샷용(brandId→sellerId 조회)
-    private final CouponService couponService;      // 체크아웃 쿠폰 할인 계산 — 경계는 서비스+DTO(CouponApplyResult)로
+    private final MemberCouponService memberCouponService;   // 쿠폰 적용/미리보기(공개형·발급형 분기·단일 사용) — 경계는 DTO로
 
     /** 명시적 항목 목록으로 주문 생성 (POST /api/orders). 배송지·쿠폰은 없다(null). */
     @Transactional
@@ -107,7 +107,7 @@ public class OrderProcessor {
             grossBySeller.merge(sellerId, subtotal, Long::sum);
         }
 
-        CouponApplyResult applied = couponService.applyCoupon(couponCode, total, grossBySeller);
+        CouponApplyResult applied = memberCouponService.preview(memberId, couponCode, total, grossBySeller);
         return new CouponPreviewResponse(applied.code(), total, applied.discountAmount(),
                 total - applied.discountAmount());
     }
@@ -158,7 +158,9 @@ public class OrderProcessor {
             for (OrderItem item : order.getOrderItems()) {
                 grossBySeller.merge(item.getSellerId(), item.getSubtotal(), Long::sum);
             }
-            CouponApplyResult applied = couponService.applyCoupon(couponCode, order.getTotalPrice(), grossBySeller);
+            // 공개형이면 코드만으로, 발급형이면 보유(미사용) 검증 후 USED로 잠근다(단일 사용). 주문 tx와 원자적.
+            CouponApplyResult applied =
+                    memberCouponService.apply(memberId, couponCode, order.getTotalPrice(), grossBySeller);
             // 분담 주체는 enum 대신 이름(String)으로 스냅샷(order→coupon 결합 회피). 정산 분담(Step 2)이 읽는다.
             String fundedBy = applied.fundedBy() == null ? null : applied.fundedBy().name();
             order.applyCoupon(applied.code(), applied.discountAmount(), fundedBy, applied.sellerId());

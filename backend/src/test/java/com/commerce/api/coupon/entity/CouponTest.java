@@ -22,12 +22,12 @@ class CouponTest {
 
     private Coupon fixed(long value, long minOrder) {
         return Coupon.create("WELCOME", "정액", DiscountType.FIXED_AMOUNT, value, null, minOrder,
-                CouponFundedBy.PLATFORM, null, FROM, UNTIL);
+                CouponFundedBy.PLATFORM, null, CouponIssueType.PUBLIC, FROM, UNTIL);
     }
 
     private Coupon percentCoupon(long percent, Long cap) {
         return Coupon.create("SALE", "정률", DiscountType.PERCENTAGE, percent, cap, 0L,
-                CouponFundedBy.SELLER, 3L, FROM, UNTIL);
+                CouponFundedBy.SELLER, 3L, CouponIssueType.PUBLIC, FROM, UNTIL);
     }
 
     @Nested
@@ -116,7 +116,7 @@ class CouponTest {
         @DisplayName("유효기간 역전(시작 > 종료)이면 400")
         void invalidWindow() {
             assertThatThrownBy(() -> Coupon.create("X", "n", DiscountType.FIXED_AMOUNT, 1000, null, 0L,
-                    CouponFundedBy.PLATFORM, null, UNTIL, FROM))
+                    CouponFundedBy.PLATFORM, null, CouponIssueType.PUBLIC, UNTIL, FROM))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("유효기간");
         }
@@ -125,7 +125,7 @@ class CouponTest {
         @DisplayName("정률 100% 초과면 400")
         void percentOver100() {
             assertThatThrownBy(() -> Coupon.create("X", "n", DiscountType.PERCENTAGE, 101, null, 0L,
-                    CouponFundedBy.PLATFORM, null, FROM, UNTIL))
+                    CouponFundedBy.PLATFORM, null, CouponIssueType.PUBLIC, FROM, UNTIL))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("100%");
         }
@@ -134,7 +134,7 @@ class CouponTest {
         @DisplayName("할인 값이 0 이하면 400")
         void nonPositiveValue() {
             assertThatThrownBy(() -> Coupon.create("X", "n", DiscountType.FIXED_AMOUNT, 0, null, 0L,
-                    CouponFundedBy.PLATFORM, null, FROM, UNTIL))
+                    CouponFundedBy.PLATFORM, null, CouponIssueType.PUBLIC, FROM, UNTIL))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("0보다 커야");
         }
