@@ -38,6 +38,13 @@ export interface ProductOption {
   soldOut: boolean;
 }
 
+/** 상품 이미지(갤러리) — 대표 imageUrl 외 추가 이미지. sortOrder 순. */
+export interface ProductImage {
+  id: number;
+  url: string;
+  sortOrder: number;
+}
+
 /** 상품 (ProductResponse) */
 export interface Product {
   id: number;
@@ -54,6 +61,7 @@ export interface Product {
   ratingCount: number; // 리뷰 수
   ratingAverage: number; // 평점 평균(소수 1자리, 리뷰 없으면 0)
   wishlistCount: number; // 찜 수(인기도 신호)
+  images: ProductImage[]; // 갤러리(대표 imageUrl 외 추가 이미지)
   createdAt: string;
 }
 

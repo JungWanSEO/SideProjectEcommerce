@@ -89,6 +89,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.DELETE, "/api/products/*/options/**").hasRole("ADMIN")
                         // 상품 상태 변경(판매중/품절/판매중지)도 운영 업무 → ADMIN
                         .requestMatchers(HttpMethod.PATCH, "/api/products/*/status").hasRole("ADMIN")
+                        // 상품 이미지(갤러리) 추가·삭제도 운영 업무 → ADMIN
+                        .requestMatchers(HttpMethod.POST, "/api/products/*/images").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/products/*/images/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/categories", "/api/brands").hasRole("ADMIN")
                         // 브랜드 변경(셀러 귀속 등)은 ADMIN (GET /api/brands/** 는 위에서 공개)
                         .requestMatchers(HttpMethod.PUT, "/api/brands/**").hasRole("ADMIN")

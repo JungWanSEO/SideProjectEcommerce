@@ -3,6 +3,7 @@ package com.commerce.api.product.controller;
 import com.commerce.api.global.common.ApiResponse;
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.product.dto.ProductCreateRequest;
+import com.commerce.api.product.dto.ProductImageCreateRequest;
 import com.commerce.api.product.dto.ProductOptionUpsertRequest;
 import com.commerce.api.product.dto.ProductResponse;
 import com.commerce.api.product.dto.ProductSearchCondition;
@@ -117,5 +118,25 @@ public class ProductController {
             @Valid @RequestBody ProductStatusUpdateRequest request) {
         ProductResponse response = productService.changeStatus(id, request);
         return ResponseEntity.ok(ApiResponse.success("상품 상태를 변경했습니다.", response));
+    }
+
+    @Operation(summary = "이미지(갤러리) 추가 (ADMIN)",
+            description = "상품에 갤러리 이미지를 추가한다(대표 imageUrl 외 추가분). 갱신된 상품을 반환.")
+    @PostMapping("/{productId}/images")
+    public ResponseEntity<ApiResponse<ProductResponse>> addImage(
+            @PathVariable Long productId,
+            @Valid @RequestBody ProductImageCreateRequest request) {
+        ProductResponse response = productService.addImage(productId, request);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success("이미지가 추가되었습니다.", response));
+    }
+
+    @Operation(summary = "이미지(갤러리) 삭제 (ADMIN)", description = "갤러리 이미지를 삭제한다. 없는 이미지면 404.")
+    @DeleteMapping("/{productId}/images/{imageId}")
+    public ResponseEntity<ApiResponse<ProductResponse>> removeImage(
+            @PathVariable Long productId,
+            @PathVariable Long imageId) {
+        ProductResponse response = productService.removeImage(productId, imageId);
+        return ResponseEntity.ok(ApiResponse.success("이미지가 삭제되었습니다.", response));
     }
 }

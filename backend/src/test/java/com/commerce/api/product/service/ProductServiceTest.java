@@ -11,12 +11,14 @@ import com.commerce.api.category.repository.CategoryRepository;
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.product.dto.ProductCreateRequest;
+import com.commerce.api.product.dto.ProductImageCreateRequest;
 import com.commerce.api.product.dto.ProductOptionUpsertRequest;
 import com.commerce.api.product.dto.ProductResponse;
 import com.commerce.api.product.dto.ProductSearchCondition;
 import com.commerce.api.product.dto.ProductStatusUpdateRequest;
 import com.commerce.api.product.dto.ProductCreateRequest.ProductOptionRequest;
 import com.commerce.api.product.entity.Product;
+import com.commerce.api.product.entity.ProductImage;
 import com.commerce.api.product.entity.ProductOption;
 import com.commerce.api.product.entity.ProductStatus;
 import com.commerce.api.product.repository.ProductRepository;
@@ -232,5 +234,47 @@ class ProductServiceTest {
                 productService.changeStatus(999L, new ProductStatusUpdateRequest(ProductStatus.SOLD_OUT)))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("상품을 찾을 수 없습니다");
+    }
+
+    /** id가 부여된 이미지 1장을 가진 상품. */
+    private Product productWithImage(Long productId, Long imageId, String url) {
+        Product product = Product.builder()
+                .name("반팔티셔츠").price(29000L).status(ProductStatus.ON_SALE).build();
+        ReflectionTestUtils.setField(product, "id", productId);
+        ProductImage image = product.addImage(url);
+        ReflectionTestUtils.setField(image, "id", imageId);
+        return product;
+    }
+
+    @Test
+    @DisplayName("이미지 추가 성공 - 갤러리에 더해진다")
+    void addImage_success() {
+        given(productRepository.findById(1L)).willReturn(Optional.of(productWithId(1L)));
+
+        ProductResponse response = productService.addImage(1L, new ProductImageCreateRequest("/products/2.svg"));
+
+        assertThat(response.images()).hasSize(1);
+        assertThat(response.images().get(0).url()).isEqualTo("/products/2.svg");
+        verify(productRepository).saveAndFlush(any(Product.class));
+    }
+
+    @Test
+    @DisplayName("이미지 삭제 성공 - 갤러리에서 제거된다")
+    void removeImage_success() {
+        given(productRepository.findById(1L)).willReturn(Optional.of(productWithImage(1L, 50L, "/products/2.svg")));
+
+        ProductResponse response = productService.removeImage(1L, 50L);
+
+        assertThat(response.images()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("이미지 삭제 실패 - 없는 이미지면 404")
+    void removeImage_notFound() {
+        given(productRepository.findById(1L)).willReturn(Optional.of(productWithImage(1L, 50L, "/products/2.svg")));
+
+        assertThatThrownBy(() -> productService.removeImage(1L, 999L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("이미지를 찾을 수 없습니다");
     }
 }

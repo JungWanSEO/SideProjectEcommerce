@@ -6,13 +6,11 @@ import Link from "next/link";
 import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/api";
 import { Cart, PageResponse, Product, Review } from "@/lib/types";
 import { useAuth } from "@/lib/auth";
-import ProductThumb from "@/components/ui/ProductThumb";
-import Badge from "@/components/ui/Badge";
 import Stars, { StarInput } from "@/components/ui/Stars";
 import { buttonClass } from "@/components/ui/Button";
 import WishlistButton from "@/components/ui/WishlistButton";
 import CoOccurrenceSection from "@/components/CoOccurrenceSection";
-import { productImageSrc } from "@/lib/productImage";
+import ProductGallery from "@/components/ProductGallery";
 
 /**
  * 상품 상세 페이지 (/products/[id]).
@@ -188,19 +186,8 @@ export default function ProductDetailPage() {
       </Link>
 
       <div className="mt-6 grid gap-10 lg:grid-cols-2">
-        {/* 이미지 */}
-        <div className="relative">
-          <ProductThumb
-            name={product.name}
-            src={productImageSrc(product)}
-            className="aspect-[4/5] w-full rounded-2xl shadow-soft"
-          />
-          {product.status === "SOLD_OUT" && (
-            <span className="absolute left-4 top-4">
-              <Badge tone="dark">품절</Badge>
-            </span>
-          )}
-        </div>
+        {/* 이미지 갤러리 (대표 + 추가 이미지) */}
+        <ProductGallery product={product} />
 
         {/* 정보 */}
         <div className="lg:py-4">
