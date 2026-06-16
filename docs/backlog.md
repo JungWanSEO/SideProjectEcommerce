@@ -5,7 +5,7 @@
 > 외부 프로그램 연동(RabbitMQ·외부 API·새 외부 도구)은 자율 금지 → "함께(학습)"에서 사용자와 직접.
 
 ## READY (결정 완료 · 외부 무관 · 자율 진행 가능 · 위에서부터)
-- [ ] **상품 수정 API (PUT)** (BE) — `PUT /api/products/{id}`(ADMIN): name/price/description/imageUrl/categoryId/brandId 수정(옵션·이미지·상태는 각자 API). `Product.updateBasics`. 카테고리/브랜드 존재 검증(create와 동일). 마이그레이션 0. → 상품 CRUD 완성(현재 등록만 가능·수정 없음).
+- [x] **상품 수정 API (PUT)** (BE) — `PUT /api/products/{id}`(ADMIN): name/price/description/imageUrl/categoryId/brandId 수정. `Product.updateBasics`·카테고리/브랜드 존재 검증·SecurityConfig PUT `/api/products/*` ADMIN. 마이그레이션 0. ✅ dev 병합(332 tests·정적 완결).
 - [ ] **어드민 상품 이미지·상태 관리 UI** (FE) — `/admin/products`에 선택 상품 이미지 추가/삭제(이미지 API)+상태 드롭다운(상태 API)을 옵션 관리 옆에. → 갤러리·상태를 화면에서 데모 가능(현재 이미지 0). 브라우저 확인은 사용자.
 - [ ] **어드민 상품 등록·수정 폼** (FE · 위 "상품 수정 API" 뒤) — `/admin/products`에 새 상품 등록 폼 + 기본정보 수정(PUT 연동). 옵션은 등록 후 옵션 관리로. 카테고리/브랜드는 평면 선택(계층화는 별도). 브라우저 확인은 사용자.
 - [ ] **카테고리 계층화 (2단계)** (BE+FE) — `category.parent_id`(self-ref ID, nullable)+Flyway V33, `CategoryResponse.parentId`, 카테고리 목록 부모→자식 구조 노출, FE 2단계 표시. 상품 필터는 exact(부모 선택 시 자식 포함 expansion은 후속). ⚠️V33 스키마 → MySQL 런타임 스모크는 사용자 복귀 후.

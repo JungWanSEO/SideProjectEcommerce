@@ -11,6 +11,7 @@ import com.commerce.api.product.dto.ProductImageCreateRequest;
 import com.commerce.api.product.dto.ProductOptionUpsertRequest;
 import com.commerce.api.product.dto.ProductResponse;
 import com.commerce.api.product.dto.ProductStatusUpdateRequest;
+import com.commerce.api.product.dto.ProductUpdateRequest;
 import com.commerce.api.product.dto.ProductSearchCondition;
 import com.commerce.api.product.entity.Product;
 import com.commerce.api.product.entity.ProductOption;
@@ -91,6 +92,17 @@ public class ProductService {
     /** 단건 조회 */
     public ProductResponse getProduct(Long id) {
         return enrich(findProduct(id));
+    }
+
+    /** 기본정보 수정 (ADMIN). 없는 상품 404, 카테고리/브랜드 id가 있으면 존재 검증(없으면 400). 옵션·이미지·상태는 별도 API. */
+    @Transactional
+    public ProductResponse update(Long id, ProductUpdateRequest request) {
+        Product product = findProduct(id);
+        validateRefExists(categoryRepository, request.categoryId(), "카테고리");
+        validateRefExists(brandRepository, request.brandId(), "브랜드");
+        product.updateBasics(request.name(), request.price(), request.description(),
+                request.imageUrl(), request.categoryId(), request.brandId());
+        return enrich(product);
     }
 
     /**

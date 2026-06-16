@@ -112,6 +112,17 @@ public class Product extends BaseEntity {
         this.status = status;
     }
 
+    /** 기본 정보 수정(ADMIN) — 옵션·이미지·상태는 각자 메서드/엔드포인트로 관리한다(여기선 안 건드림). */
+    public void updateBasics(String name, long price, String description, String imageUrl,
+                             Long categoryId, Long brandId) {
+        this.name = name;
+        this.price = price;
+        this.description = description;
+        this.imageUrl = imageUrl;
+        this.categoryId = categoryId;
+        this.brandId = brandId;
+    }
+
     /** 평점 평균(소수 1자리). 리뷰가 없으면 0. (비정규화 카운터에서 계산 — 별도 집계 쿼리 불필요) */
     public double getRatingAverage() {
         return ratingCount == 0 ? 0.0 : Math.round((double) ratingSum / ratingCount * 10) / 10.0;
