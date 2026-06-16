@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "@/lib/api";
-import { PageResponse, Product, ProductStatus } from "@/lib/types";
+import { Brand, Category, PageResponse, Product, ProductStatus } from "@/lib/types";
 
 /**
  * 상품 관리 화면 (/admin/products, ADMIN).
@@ -42,6 +42,28 @@ export default function AdminProductsPage() {
   // 이미지 추가 폼
   const [addImageUrl, setAddImageUrl] = useState("");
 
+  // 카테고리·브랜드 (등록/수정 셀렉트용)
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [brands, setBrands] = useState<Brand[]>([]);
+
+  // 새 상품 등록 폼 (등록 시 옵션 1개 필수)
+  const [nName, setNName] = useState("");
+  const [nPrice, setNPrice] = useState("");
+  const [nDesc, setNDesc] = useState("");
+  const [nImage, setNImage] = useState("");
+  const [nCategory, setNCategory] = useState("");
+  const [nBrand, setNBrand] = useState("");
+  const [nOptSize, setNOptSize] = useState("FREE");
+  const [nOptStock, setNOptStock] = useState("0");
+
+  // 선택 상품 기본정보 수정 폼 (선택 변경 시 채워짐)
+  const [bName, setBName] = useState("");
+  const [bPrice, setBPrice] = useState("");
+  const [bDesc, setBDesc] = useState("");
+  const [bImage, setBImage] = useState("");
+  const [bCategory, setBCategory] = useState("");
+  const [bBrand, setBBrand] = useState("");
+
   const load = useCallback(() => {
     setLoading(true);
     apiGet<PageResponse<Product>>("/api/products?size=100")
@@ -52,9 +74,27 @@ export default function AdminProductsPage() {
 
   useEffect(() => {
     load();
+    Promise.all([apiGet<Category[]>("/api/categories"), apiGet<Brand[]>("/api/brands")])
+      .then(([cs, bs]) => {
+        setCategories(cs);
+        setBrands(bs);
+      })
+      .catch(() => {});
   }, [load]);
 
   const selected = products.find((p) => p.id === selectedId) ?? null;
+
+  // 상품 선택이 바뀌면 기본정보 수정 폼을 그 상품 값으로 채운다(상품 mutation 시엔 유지).
+  useEffect(() => {
+    if (!selected) return;
+    setBName(selected.name);
+    setBPrice(String(selected.price));
+    setBDesc(selected.description ?? "");
+    setBImage(selected.imageUrl ?? "");
+    setBCategory(selected.categoryId ? String(selected.categoryId) : "");
+    setBBrand(selected.brandId ? String(selected.brandId) : "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
 
   // 갱신된 상품으로 로컬 목록 교체
   const replaceProduct = (updated: Product) =>
@@ -95,6 +135,64 @@ export default function AdminProductsPage() {
     setError(null);
     try {
       replaceProduct(await apiDelete<Product>(`/api/products/${productId}/images/${imageId}`));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const createProduct = async () => {
+    if (!nName.trim() || !nPrice || !nOptSize.trim()) {
+      setError("상품명·가격·옵션(사이즈)은 필수입니다.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await apiPost<Product>("/api/products", {
+        name: nName.trim(),
+        price: Number(nPrice),
+        description: nDesc.trim() || null,
+        imageUrl: nImage.trim() || null,
+        categoryId: nCategory ? Number(nCategory) : null,
+        brandId: nBrand ? Number(nBrand) : null,
+        options: [{ size: nOptSize.trim(), stock: Number(nOptStock || 0) }],
+      });
+      setNName("");
+      setNPrice("");
+      setNDesc("");
+      setNImage("");
+      setNCategory("");
+      setNBrand("");
+      setNOptSize("FREE");
+      setNOptStock("0");
+      load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveBasics = async (productId: number) => {
+    if (!bName.trim() || !bPrice) {
+      setError("상품명·가격은 필수입니다.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      replaceProduct(
+        await apiPut<Product>(`/api/products/${productId}`, {
+          name: bName.trim(),
+          price: Number(bPrice),
+          description: bDesc.trim() || null,
+          imageUrl: bImage.trim() || null,
+          categoryId: bCategory ? Number(bCategory) : null,
+          brandId: bBrand ? Number(bBrand) : null,
+        }),
+      );
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -169,15 +267,69 @@ export default function AdminProductsPage() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-xl font-bold">상품 옵션 관리</h1>
+        <h1 className="text-xl font-bold">상품 관리</h1>
         <p className="text-sm text-gray-500">
-          상품을 골라 사이즈 옵션(재고)을 추가·수정·삭제합니다. 재고는 옵션(사이즈) 단위입니다.
+          상품을 등록하고, 골라서 기본정보·옵션(재고)·상태·이미지를 관리합니다.
         </p>
       </div>
 
       {error && (
         <div className="mb-4 rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       )}
+
+      {/* 새 상품 등록 */}
+      <div className="mb-6 rounded-lg border border-gray-200 bg-white p-4">
+        <div className="mb-3 text-sm font-semibold text-gray-700">새 상품 등록</div>
+        <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-gray-500">상품명</span>
+            <input value={nName} onChange={(e) => setNName(e.target.value)} className="rounded border border-gray-300 px-2 py-1" />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-gray-500">가격(원)</span>
+            <input type="number" value={nPrice} onChange={(e) => setNPrice(e.target.value)} className="rounded border border-gray-300 px-2 py-1" />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-gray-500">카테고리</span>
+            <select value={nCategory} onChange={(e) => setNCategory(e.target.value)} className="rounded border border-gray-300 px-2 py-1">
+              <option value="">(없음)</option>
+              {categories.map((c) => (
+                <option key={c.id} value={String(c.id)}>{c.name}</option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-gray-500">브랜드</span>
+            <select value={nBrand} onChange={(e) => setNBrand(e.target.value)} className="rounded border border-gray-300 px-2 py-1">
+              <option value="">(없음)</option>
+              {brands.map((b) => (
+                <option key={b.id} value={String(b.id)}>{b.name}</option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 md:col-span-2">
+            <span className="text-xs text-gray-500">대표 이미지 URL(선택)</span>
+            <input value={nImage} onChange={(e) => setNImage(e.target.value)} placeholder="/products/3.svg" className="rounded border border-gray-300 px-2 py-1" />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-gray-500">옵션 사이즈</span>
+            <input value={nOptSize} onChange={(e) => setNOptSize(e.target.value)} className="rounded border border-gray-300 px-2 py-1" />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-gray-500">옵션 재고</span>
+            <input type="number" value={nOptStock} onChange={(e) => setNOptStock(e.target.value)} className="rounded border border-gray-300 px-2 py-1" />
+          </label>
+          <label className="flex flex-col gap-1 md:col-span-4">
+            <span className="text-xs text-gray-500">설명(선택)</span>
+            <input value={nDesc} onChange={(e) => setNDesc(e.target.value)} className="rounded border border-gray-300 px-2 py-1" />
+          </label>
+        </div>
+        <div className="mt-3">
+          <button onClick={createProduct} disabled={busy} className="rounded bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50">
+            {busy ? "처리 중…" : "상품 등록"}
+          </button>
+        </div>
+      </div>
 
       <div className="grid gap-6 md:grid-cols-2">
         {/* 상품 목록 */}
@@ -235,6 +387,34 @@ export default function AdminProductsPage() {
             <p className="py-12 text-center text-sm text-gray-400">왼쪽에서 상품을 선택하세요.</p>
           ) : (
             <div>
+              {/* 기본정보 수정 */}
+              <div className="mb-4 rounded border border-gray-100 bg-gray-50 p-3">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                  기본정보 수정
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <input value={bName} onChange={(e) => setBName(e.target.value)} placeholder="상품명" className="rounded border border-gray-300 px-2 py-1" />
+                  <input type="number" value={bPrice} onChange={(e) => setBPrice(e.target.value)} placeholder="가격" className="rounded border border-gray-300 px-2 py-1" />
+                  <select value={bCategory} onChange={(e) => setBCategory(e.target.value)} className="rounded border border-gray-300 px-2 py-1">
+                    <option value="">카테고리(없음)</option>
+                    {categories.map((c) => (
+                      <option key={c.id} value={String(c.id)}>{c.name}</option>
+                    ))}
+                  </select>
+                  <select value={bBrand} onChange={(e) => setBBrand(e.target.value)} className="rounded border border-gray-300 px-2 py-1">
+                    <option value="">브랜드(없음)</option>
+                    {brands.map((b) => (
+                      <option key={b.id} value={String(b.id)}>{b.name}</option>
+                    ))}
+                  </select>
+                  <input value={bImage} onChange={(e) => setBImage(e.target.value)} placeholder="대표 이미지 URL" className="col-span-2 rounded border border-gray-300 px-2 py-1" />
+                  <input value={bDesc} onChange={(e) => setBDesc(e.target.value)} placeholder="설명" className="col-span-2 rounded border border-gray-300 px-2 py-1" />
+                </div>
+                <button onClick={() => saveBasics(selected.id)} disabled={busy} className="mt-2 rounded bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-700 disabled:opacity-50">
+                  기본정보 저장
+                </button>
+              </div>
+
               <div className="mb-3 flex items-center justify-between">
                 <span className="text-sm font-semibold text-gray-700">{selected.name}</span>
                 <label className="flex items-center gap-2 text-xs text-gray-500">
