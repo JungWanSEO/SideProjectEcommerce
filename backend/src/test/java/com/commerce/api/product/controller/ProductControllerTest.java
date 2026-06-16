@@ -263,6 +263,36 @@ class ProductControllerTest {
     }
 
     @Test
+    @DisplayName("PUT /api/products/{id} - 기본정보 수정 성공 시 200")
+    void update_success() throws Exception {
+        given(productService.update(eq(1L), any())).willReturn(
+                new ProductResponse(1L, "새이름", 50000L, "새설명", "/products/9.svg",
+                        ProductStatus.ON_SALE, 1L, "상의", 1L, "Nike",
+                        List.of(), 0, 0.0, 0, LocalDateTime.now()));
+
+        mockMvc.perform(put("/api/products/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"새이름","price":50000,"description":"새설명","imageUrl":"/products/9.svg"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.name").value("새이름"))
+                .andExpect(jsonPath("$.data.price").value(50000));
+    }
+
+    @Test
+    @DisplayName("PUT /api/products/{id} - 상품명 누락·음수 가격이면 400")
+    void update_validationFail() throws Exception {
+        mockMvc.perform(put("/api/products/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"","price":-1}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
     @DisplayName("POST /api/products/{id}/images - 이미지 추가 성공 시 201")
     void addImage_success() throws Exception {
         given(productService.addImage(eq(1L), any())).willReturn(

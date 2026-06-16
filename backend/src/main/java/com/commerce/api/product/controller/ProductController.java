@@ -8,6 +8,7 @@ import com.commerce.api.product.dto.ProductOptionUpsertRequest;
 import com.commerce.api.product.dto.ProductResponse;
 import com.commerce.api.product.dto.ProductSearchCondition;
 import com.commerce.api.product.dto.ProductStatusUpdateRequest;
+import com.commerce.api.product.dto.ProductUpdateRequest;
 import com.commerce.api.product.service.ProductService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -77,6 +78,16 @@ public class ProductController {
     public ResponseEntity<ApiResponse<ProductResponse>> getProduct(@PathVariable Long id) {
         ProductResponse response = productService.getProduct(id);
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @Operation(summary = "상품 기본정보 수정 (ADMIN)",
+            description = "상품명/가격/설명/대표이미지/카테고리/브랜드를 수정한다. 옵션·이미지·상태는 별도 API. 없으면 404.")
+    @PutMapping("/{id}")
+    public ResponseEntity<ApiResponse<ProductResponse>> update(
+            @PathVariable Long id,
+            @Valid @RequestBody ProductUpdateRequest request) {
+        ProductResponse response = productService.update(id, request);
+        return ResponseEntity.ok(ApiResponse.success("상품이 수정되었습니다.", response));
     }
 
     @Operation(summary = "옵션 추가 (ADMIN)",

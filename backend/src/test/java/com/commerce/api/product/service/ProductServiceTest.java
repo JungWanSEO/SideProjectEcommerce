@@ -16,6 +16,7 @@ import com.commerce.api.product.dto.ProductOptionUpsertRequest;
 import com.commerce.api.product.dto.ProductResponse;
 import com.commerce.api.product.dto.ProductSearchCondition;
 import com.commerce.api.product.dto.ProductStatusUpdateRequest;
+import com.commerce.api.product.dto.ProductUpdateRequest;
 import com.commerce.api.product.dto.ProductCreateRequest.ProductOptionRequest;
 import com.commerce.api.product.entity.Product;
 import com.commerce.api.product.entity.ProductImage;
@@ -276,5 +277,41 @@ class ProductServiceTest {
         assertThatThrownBy(() -> productService.removeImage(1L, 999L))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("이미지를 찾을 수 없습니다");
+    }
+
+    @Test
+    @DisplayName("상품 수정 성공 - 기본정보가 갱신된다")
+    void update_success() {
+        given(productRepository.findById(1L)).willReturn(Optional.of(productWithId(1L)));
+
+        ProductResponse response = productService.update(1L,
+                new ProductUpdateRequest("새이름", 50000L, "새설명", "/products/9.svg", null, null));
+
+        assertThat(response.name()).isEqualTo("새이름");
+        assertThat(response.price()).isEqualTo(50000L);
+        assertThat(response.imageUrl()).isEqualTo("/products/9.svg");
+    }
+
+    @Test
+    @DisplayName("상품 수정 실패 - 없는 상품이면 404")
+    void update_notFound() {
+        given(productRepository.findById(999L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> productService.update(999L,
+                new ProductUpdateRequest("n", 1L, null, null, null, null)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("상품을 찾을 수 없습니다");
+    }
+
+    @Test
+    @DisplayName("상품 수정 실패 - 존재하지 않는 카테고리면 400")
+    void update_invalidCategory() {
+        given(productRepository.findById(1L)).willReturn(Optional.of(productWithId(1L)));
+        given(categoryRepository.existsById(99L)).willReturn(false);
+
+        assertThatThrownBy(() -> productService.update(1L,
+                new ProductUpdateRequest("n", 1L, null, null, 99L, null)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("존재하지 않는 카테고리");
     }
 }
