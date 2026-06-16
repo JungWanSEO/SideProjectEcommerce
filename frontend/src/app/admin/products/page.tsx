@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "@/lib/api";
 import { PageResponse, Product, ProductStatus } from "@/lib/types";
 
 /**
- * 상품 옵션 관리 화면 (/admin/products, ADMIN).
- * 상품을 골라 사이즈 옵션(재고)을 추가/수정/삭제한다. 옵션 API(POST/PUT/DELETE /api/products/{id}/options)를 쓴다.
+ * 상품 관리 화면 (/admin/products, ADMIN).
+ * 상품을 골라 사이즈 옵션(재고)·상태(판매중/품절/판매중지)·이미지(갤러리)를 관리한다.
+ * 옵션/상태/이미지 API(/api/products/{id}/options·/status·/images)를 쓴다.
  *
  * 참고: 상품 목록은 공개 목록 API(GET /api/products)를 재사용하므로 판매중지(DISCONTINUED)는 보이지 않는다
  * (전용 어드민 상품 목록은 후속). 각 옵션 변경 응답이 갱신된 상품이라 그걸로 로컬 상태를 바꾼다.
@@ -38,6 +39,9 @@ export default function AdminProductsPage() {
   const [editSize, setEditSize] = useState("");
   const [editStock, setEditStock] = useState("0");
 
+  // 이미지 추가 폼
+  const [addImageUrl, setAddImageUrl] = useState("");
+
   const load = useCallback(() => {
     setLoading(true);
     apiGet<PageResponse<Product>>("/api/products?size=100")
@@ -55,6 +59,48 @@ export default function AdminProductsPage() {
   // 갱신된 상품으로 로컬 목록 교체
   const replaceProduct = (updated: Product) =>
     setProducts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+
+  const changeStatus = async (productId: number, status: ProductStatus) => {
+    setBusy(true);
+    setError(null);
+    try {
+      replaceProduct(await apiPatch<Product>(`/api/products/${productId}/status`, { status }));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addImage = async (productId: number) => {
+    if (!addImageUrl.trim()) {
+      setError("이미지 URL을 입력하세요.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      replaceProduct(await apiPost<Product>(`/api/products/${productId}/images`, { url: addImageUrl.trim() }));
+      setAddImageUrl("");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeImage = async (productId: number, imageId: number) => {
+    if (!confirm("이 이미지를 삭제할까요?")) return;
+    setBusy(true);
+    setError(null);
+    try {
+      replaceProduct(await apiDelete<Product>(`/api/products/${productId}/images/${imageId}`));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const addOption = async (productId: number) => {
     if (!addSize.trim()) {
@@ -189,7 +235,23 @@ export default function AdminProductsPage() {
             <p className="py-12 text-center text-sm text-gray-400">왼쪽에서 상품을 선택하세요.</p>
           ) : (
             <div>
-              <div className="mb-3 text-sm font-semibold text-gray-700">{selected.name} · 옵션</div>
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-sm font-semibold text-gray-700">{selected.name}</span>
+                <label className="flex items-center gap-2 text-xs text-gray-500">
+                  상태
+                  <select
+                    value={selected.status}
+                    onChange={(e) => changeStatus(selected.id, e.target.value as ProductStatus)}
+                    disabled={busy}
+                    className="rounded border border-gray-300 px-2 py-1 text-sm text-gray-800"
+                  >
+                    <option value="ON_SALE">판매중</option>
+                    <option value="SOLD_OUT">품절</option>
+                    <option value="DISCONTINUED">판매중지</option>
+                  </select>
+                </label>
+              </div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">옵션</div>
 
               <table className="w-full text-sm">
                 <thead className="text-left text-xs uppercase tracking-wide text-gray-400">
@@ -297,6 +359,55 @@ export default function AdminProductsPage() {
                 >
                   {busy ? "처리 중…" : "옵션 추가"}
                 </button>
+              </div>
+
+              {/* 이미지 갤러리 (대표 imageUrl 외 추가분) */}
+              <div className="mt-6 border-t border-gray-100 pt-4">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                  이미지 갤러리
+                </div>
+                {selected.images.length === 0 ? (
+                  <p className="text-xs text-gray-400">추가 이미지가 없습니다(대표 이미지는 imageUrl).</p>
+                ) : (
+                  <ul className="flex flex-wrap gap-2">
+                    {selected.images.map((img) => (
+                      <li key={img.id} className="group relative">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={img.url}
+                          alt="상품 이미지"
+                          className="h-16 w-16 rounded border border-gray-200 object-cover"
+                        />
+                        <button
+                          onClick={() => removeImage(selected.id, img.id)}
+                          disabled={busy}
+                          aria-label="이미지 삭제"
+                          className="absolute -right-1 -top-1 rounded-full bg-gray-900 px-1.5 text-xs text-white opacity-0 transition group-hover:opacity-100 disabled:opacity-50"
+                        >
+                          ✕
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <div className="mt-3 flex items-end gap-2">
+                  <label className="flex flex-1 flex-col gap-1">
+                    <span className="text-xs text-gray-500">이미지 URL</span>
+                    <input
+                      value={addImageUrl}
+                      onChange={(e) => setAddImageUrl(e.target.value)}
+                      placeholder="/products/2.svg"
+                      className="rounded border border-gray-300 px-2 py-1 text-sm"
+                    />
+                  </label>
+                  <button
+                    onClick={() => addImage(selected.id)}
+                    disabled={busy}
+                    className="rounded bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50"
+                  >
+                    이미지 추가
+                  </button>
+                </div>
               </div>
             </div>
           )}

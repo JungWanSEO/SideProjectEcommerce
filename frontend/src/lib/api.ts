@@ -55,4 +55,7 @@ export const apiPost = <T>(path: string, body?: unknown): Promise<T> =>
 export const apiPut = <T>(path: string, body?: unknown): Promise<T> =>
   request<T>(path, "PUT", body);
 
+export const apiPatch = <T>(path: string, body?: unknown): Promise<T> =>
+  request<T>(path, "PATCH", body);
+
 export const apiDelete = <T>(path: string): Promise<T> => request<T>(path, "DELETE");
