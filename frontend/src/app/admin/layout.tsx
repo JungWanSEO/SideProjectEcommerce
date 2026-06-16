@@ -14,6 +14,7 @@ import { useAuth } from "@/lib/auth";
  * 참고: 루트 레이아웃의 스토어 Header는 /admin 경로에서 자기 자신을 숨긴다(Header.tsx).
  */
 const NAV = [
+  { href: "/admin/products", label: "상품" },
   { href: "/admin/settlements", label: "정산" },
   { href: "/admin/payouts", label: "지급" },
   { href: "/admin/reconciliations", label: "대사" },
