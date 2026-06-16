@@ -101,6 +101,11 @@ public class Product extends BaseEntity {
         this.brandId = brandId;
     }
 
+    /** 상품 상태 변경(ADMIN) — 판매중/품절/판매중지 전환. 옵션 재고와 독립적인 상품 단위 라이프사이클. */
+    public void changeStatus(ProductStatus status) {
+        this.status = status;
+    }
+
     /** 평점 평균(소수 1자리). 리뷰가 없으면 0. (비정규화 카운터에서 계산 — 별도 집계 쿼리 불필요) */
     public double getRatingAverage() {
         return ratingCount == 0 ? 0.0 : Math.round((double) ratingSum / ratingCount * 10) / 10.0;

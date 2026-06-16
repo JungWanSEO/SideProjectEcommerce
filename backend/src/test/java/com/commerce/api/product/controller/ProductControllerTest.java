@@ -7,6 +7,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -231,5 +232,32 @@ class ProductControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.options").isEmpty());
+    }
+
+    @Test
+    @DisplayName("PATCH /api/products/{id}/status - 상태 변경 성공 시 200")
+    void changeStatus_success() throws Exception {
+        given(productService.changeStatus(eq(1L), any())).willReturn(
+                new ProductResponse(1L, "반팔티셔츠", 29000L, "면 100%", "/products/1.svg",
+                        ProductStatus.DISCONTINUED, 1L, "상의", 1L, "Nike",
+                        List.of(), 0, 0.0, 0, LocalDateTime.now()));
+
+        mockMvc.perform(patch("/api/products/1/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"status":"DISCONTINUED"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("DISCONTINUED"));
+    }
+
+    @Test
+    @DisplayName("PATCH /api/products/{id}/status - status 누락이면 400")
+    void changeStatus_validationFail() throws Exception {
+        mockMvc.perform(patch("/api/products/1/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false));
     }
 }

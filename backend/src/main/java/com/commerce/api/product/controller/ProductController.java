@@ -6,6 +6,7 @@ import com.commerce.api.product.dto.ProductCreateRequest;
 import com.commerce.api.product.dto.ProductOptionUpsertRequest;
 import com.commerce.api.product.dto.ProductResponse;
 import com.commerce.api.product.dto.ProductSearchCondition;
+import com.commerce.api.product.dto.ProductStatusUpdateRequest;
 import com.commerce.api.product.service.ProductService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -19,6 +20,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -105,5 +107,15 @@ public class ProductController {
             @PathVariable Long optionId) {
         ProductResponse response = productService.removeOption(productId, optionId);
         return ResponseEntity.ok(ApiResponse.success("옵션이 삭제되었습니다.", response));
+    }
+
+    @Operation(summary = "상품 상태 변경 (ADMIN)",
+            description = "상품 상태를 변경한다(ON_SALE/SOLD_OUT/DISCONTINUED). 없는 상품이면 404.")
+    @PatchMapping("/{id}/status")
+    public ResponseEntity<ApiResponse<ProductResponse>> changeStatus(
+            @PathVariable Long id,
+            @Valid @RequestBody ProductStatusUpdateRequest request) {
+        ProductResponse response = productService.changeStatus(id, request);
+        return ResponseEntity.ok(ApiResponse.success("상품 상태를 변경했습니다.", response));
     }
 }
