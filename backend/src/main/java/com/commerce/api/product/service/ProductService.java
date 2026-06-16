@@ -7,6 +7,7 @@ import com.commerce.api.category.repository.CategoryRepository;
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.product.dto.ProductCreateRequest;
+import com.commerce.api.product.dto.ProductOptionUpsertRequest;
 import com.commerce.api.product.dto.ProductResponse;
 import com.commerce.api.product.dto.ProductSearchCondition;
 import com.commerce.api.product.entity.Product;
@@ -87,9 +88,40 @@ public class ProductService {
 
     /** 단건 조회 */
     public ProductResponse getProduct(Long id) {
-        Product product = productRepository.findById(id)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "상품을 찾을 수 없습니다."));
+        return enrich(findProduct(id));
+    }
+
+    /**
+     * 옵션(사이즈) 추가 (ADMIN). 같은 사이즈가 이미 있으면 409. 갱신된 상품을 반환한다.
+     * 새 옵션의 id를 응답에 채우려면 cascade INSERT를 즉시 반영해야 하므로 saveAndFlush.
+     */
+    @Transactional
+    public ProductResponse addOption(Long productId, ProductOptionUpsertRequest request) {
+        Product product = findProduct(productId);
+        product.addOption(request.size(), request.stock());
+        productRepository.saveAndFlush(product);
         return enrich(product);
+    }
+
+    /** 옵션 수정 (ADMIN). 없는 옵션 404, 다른 옵션과 사이즈 중복 409. 더티체킹으로 반영. */
+    @Transactional
+    public ProductResponse updateOption(Long productId, Long optionId, ProductOptionUpsertRequest request) {
+        Product product = findProduct(productId);
+        product.updateOption(optionId, request.size(), request.stock());
+        return enrich(product);
+    }
+
+    /** 옵션 삭제 (ADMIN). 없는 옵션 404. orphanRemoval로 행 삭제. */
+    @Transactional
+    public ProductResponse removeOption(Long productId, Long optionId) {
+        Product product = findProduct(productId);
+        product.removeOption(optionId);
+        return enrich(product);
+    }
+
+    private Product findProduct(Long id) {
+        return productRepository.findById(id)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "상품을 찾을 수 없습니다."));
     }
 
     /**

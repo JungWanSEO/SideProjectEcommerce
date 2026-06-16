@@ -5,8 +5,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -166,5 +168,68 @@ class ProductControllerTest {
         mockMvc.perform(get("/api/products/999"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.success").value(false));
+    }
+
+    private ProductResponse productWithOptions(ProductOptionResponse... options) {
+        return new ProductResponse(1L, "반팔티셔츠", 29000L, "면 100%", "/products/1.svg",
+                ProductStatus.ON_SALE, 1L, "상의", 1L, "Nike",
+                List.of(options), 0, 0.0, 0, LocalDateTime.now());
+    }
+
+    @Test
+    @DisplayName("POST /api/products/{id}/options - 옵션 추가 성공 시 201")
+    void addOption_success() throws Exception {
+        given(productService.addOption(eq(1L), any())).willReturn(productWithOptions(
+                new ProductOptionResponse(10L, "M", 100, false),
+                new ProductOptionResponse(11L, "L", 50, false)));
+
+        mockMvc.perform(post("/api/products/1/options")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"size":"L","stock":50}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.options[1].size").value("L"))
+                .andExpect(jsonPath("$.data.options[1].stock").value(50));
+    }
+
+    @Test
+    @DisplayName("POST /api/products/{id}/options - 사이즈 누락이면 400")
+    void addOption_validationFail() throws Exception {
+        mockMvc.perform(post("/api/products/1/options")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"size":"","stock":-1}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    @DisplayName("PUT /api/products/{id}/options/{optionId} - 옵션 수정 성공 시 200")
+    void updateOption_success() throws Exception {
+        given(productService.updateOption(eq(1L), eq(10L), any())).willReturn(productWithOptions(
+                new ProductOptionResponse(10L, "L", 50, false)));
+
+        mockMvc.perform(put("/api/products/1/options/10")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"size":"L","stock":50}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.options[0].size").value("L"))
+                .andExpect(jsonPath("$.data.options[0].stock").value(50));
+    }
+
+    @Test
+    @DisplayName("DELETE /api/products/{id}/options/{optionId} - 옵션 삭제 성공 시 200")
+    void removeOption_success() throws Exception {
+        given(productService.removeOption(eq(1L), eq(10L))).willReturn(productWithOptions());
+
+        mockMvc.perform(delete("/api/products/1/options/10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.options").isEmpty());
     }
 }

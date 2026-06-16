@@ -11,6 +11,7 @@ import com.commerce.api.category.repository.CategoryRepository;
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.product.dto.ProductCreateRequest;
+import com.commerce.api.product.dto.ProductOptionUpsertRequest;
 import com.commerce.api.product.dto.ProductResponse;
 import com.commerce.api.product.dto.ProductSearchCondition;
 import com.commerce.api.product.dto.ProductCreateRequest.ProductOptionRequest;
@@ -134,5 +135,79 @@ class ProductServiceTest {
         assertThatThrownBy(() -> productService.getProduct(999L))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("상품을 찾을 수 없습니다");
+    }
+
+    /** id가 부여된 옵션 1개를 가진 상품. */
+    private Product productWithOption(Long productId, Long optionId, String size, int stock) {
+        Product product = Product.builder()
+                .name("반팔티셔츠").price(29000L).status(ProductStatus.ON_SALE).build();
+        ReflectionTestUtils.setField(product, "id", productId);
+        ProductOption option = ProductOption.create(size, stock);
+        ReflectionTestUtils.setField(option, "id", optionId);
+        product.addOption(option);
+        return product;
+    }
+
+    @Test
+    @DisplayName("옵션 추가 성공 - 새 사이즈가 옵션 목록에 더해진다")
+    void addOption_success() {
+        given(productRepository.findById(1L)).willReturn(Optional.of(productWithOption(1L, 10L, "M", 100)));
+
+        ProductResponse response = productService.addOption(1L, new ProductOptionUpsertRequest("L", 50));
+
+        assertThat(response.options()).extracting(o -> o.size()).contains("M", "L");
+        assertThat(response.options()).hasSize(2);
+        verify(productRepository).saveAndFlush(any(Product.class));
+    }
+
+    @Test
+    @DisplayName("옵션 추가 실패 - 같은 사이즈가 이미 있으면 409")
+    void addOption_duplicateSize() {
+        given(productRepository.findById(1L)).willReturn(Optional.of(productWithOption(1L, 10L, "M", 100)));
+
+        assertThatThrownBy(() -> productService.addOption(1L, new ProductOptionUpsertRequest("M", 50)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("이미 존재하는 사이즈");
+    }
+
+    @Test
+    @DisplayName("옵션 수정 성공 - 사이즈/재고가 갱신된다")
+    void updateOption_success() {
+        given(productRepository.findById(1L)).willReturn(Optional.of(productWithOption(1L, 10L, "M", 100)));
+
+        ProductResponse response = productService.updateOption(1L, 10L, new ProductOptionUpsertRequest("L", 50));
+
+        assertThat(response.options().get(0).size()).isEqualTo("L");
+        assertThat(response.options().get(0).stock()).isEqualTo(50);
+    }
+
+    @Test
+    @DisplayName("옵션 수정 실패 - 없는 옵션이면 404")
+    void updateOption_notFound() {
+        given(productRepository.findById(1L)).willReturn(Optional.of(productWithOption(1L, 10L, "M", 100)));
+
+        assertThatThrownBy(() -> productService.updateOption(1L, 999L, new ProductOptionUpsertRequest("L", 50)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("옵션을 찾을 수 없습니다");
+    }
+
+    @Test
+    @DisplayName("옵션 삭제 성공 - 옵션이 목록에서 제거된다")
+    void removeOption_success() {
+        given(productRepository.findById(1L)).willReturn(Optional.of(productWithOption(1L, 10L, "M", 100)));
+
+        ProductResponse response = productService.removeOption(1L, 10L);
+
+        assertThat(response.options()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("옵션 삭제 실패 - 없는 옵션이면 404")
+    void removeOption_notFound() {
+        given(productRepository.findById(1L)).willReturn(Optional.of(productWithOption(1L, 10L, "M", 100)));
+
+        assertThatThrownBy(() -> productService.removeOption(1L, 999L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("옵션을 찾을 수 없습니다");
     }
 }
