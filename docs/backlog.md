@@ -8,7 +8,9 @@
 - [x] **상품 수정 API (PUT)** (BE) — `PUT /api/products/{id}`(ADMIN): name/price/description/imageUrl/categoryId/brandId 수정. `Product.updateBasics`·카테고리/브랜드 존재 검증·SecurityConfig PUT `/api/products/*` ADMIN. 마이그레이션 0. ✅ dev 병합(332 tests·정적 완결).
 - [x] **어드민 상품 이미지·상태 관리 UI** (FE) — `/admin/products`에 상태 드롭다운(상태 API·apiPatch 추가)+이미지 갤러리 추가/삭제(이미지 API)를 옵션 관리와 함께. ✅ dev 병합(FE tsc/lint 0). 브라우저 확인은 사용자.
 - [x] **어드민 상품 등록·수정 폼** (FE) — `/admin/products`에 새 상품 등록 폼(POST·옵션 1개·카테고리/브랜드 셀렉트) + 선택 상품 기본정보 수정(PUT 연동·선택 시 자동 채움). ✅ dev 병합(FE tsc/lint 0). 브라우저 확인은 사용자.
-- [ ] **카테고리 계층화 (2단계)** (BE+FE) — `category.parent_id`(self-ref ID, nullable)+Flyway V33, `CategoryResponse.parentId`, 카테고리 목록 부모→자식 구조 노출, FE 2단계 표시. 상품 필터는 exact(부모 선택 시 자식 포함 expansion은 후속). ⚠️V33 스키마 → MySQL 런타임 스모크는 사용자 복귀 후.
+- [x] **카테고리 계층화 (2단계)** (BE+FE) — `category.parent_id`(ID 참조·V33)+`CategoryResponse.parentId`+`CategoryService.create` 2단계 검증(부모 없으면400·3단계400)+편의 생성자로 기존 호출부 무변경. FE=`Category.parentId`+어드민 폼 카테고리 셀렉트 부모→자식 들여쓰기. ✅ dev 병합(335 tests·FE 0). ⚠️V33 스키마 → **MySQL 런타임 스모크는 사용자 복귀 후**. (PLP 필터 계층 표시는 후속.)
+
+> **READY 비었음** — 다음 `자율진행`은 멈춰 "백로그 채우기 필요"를 보고함. 다음 후보=「함께(외부)」 RabbitMQ·우편번호·Testcontainers / 카테고리 계층 후속(PLP 필터·어드민 카테고리 관리 화면) / 주문 배송상태 등.
 
 ## 함께 (외부 연동 · 학습 — 자율 금지)
 - 아웃박스 P2b 실제 RabbitMQ (메시지 브로커)

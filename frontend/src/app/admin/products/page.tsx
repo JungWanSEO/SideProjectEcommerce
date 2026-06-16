@@ -23,6 +23,23 @@ const STATUS_LABEL: Record<ProductStatus, string> = {
   DISCONTINUED: "판매중지",
 };
 
+/** 카테고리를 2단계(부모 → 자식 들여쓰기)로 펼친 셀렉트 옵션 목록. 부모·자식 모두 선택 가능. */
+function categoryOptions(categories: Category[]): { id: number; label: string }[] {
+  const roots = categories.filter((c) => c.parentId == null);
+  const out: { id: number; label: string }[] = [];
+  for (const r of roots) {
+    out.push({ id: r.id, label: r.name });
+    for (const ch of categories.filter((c) => c.parentId === r.id)) {
+      out.push({ id: ch.id, label: `└ ${ch.name}` });
+    }
+  }
+  // 부모가 목록에 없는 자식(방어)도 누락 없이
+  for (const c of categories.filter((c) => c.parentId != null && !roots.some((r) => r.id === c.parentId))) {
+    out.push({ id: c.id, label: c.name });
+  }
+  return out;
+}
+
 export default function AdminProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -293,8 +310,8 @@ export default function AdminProductsPage() {
             <span className="text-xs text-gray-500">카테고리</span>
             <select value={nCategory} onChange={(e) => setNCategory(e.target.value)} className="rounded border border-gray-300 px-2 py-1">
               <option value="">(없음)</option>
-              {categories.map((c) => (
-                <option key={c.id} value={String(c.id)}>{c.name}</option>
+              {categoryOptions(categories).map((o) => (
+                <option key={o.id} value={String(o.id)}>{o.label}</option>
               ))}
             </select>
           </label>
@@ -397,8 +414,8 @@ export default function AdminProductsPage() {
                   <input type="number" value={bPrice} onChange={(e) => setBPrice(e.target.value)} placeholder="가격" className="rounded border border-gray-300 px-2 py-1" />
                   <select value={bCategory} onChange={(e) => setBCategory(e.target.value)} className="rounded border border-gray-300 px-2 py-1">
                     <option value="">카테고리(없음)</option>
-                    {categories.map((c) => (
-                      <option key={c.id} value={String(c.id)}>{c.name}</option>
+                    {categoryOptions(categories).map((o) => (
+                      <option key={o.id} value={String(o.id)}>{o.label}</option>
                     ))}
                   </select>
                   <select value={bBrand} onChange={(e) => setBBrand(e.target.value)} className="rounded border border-gray-300 px-2 py-1">

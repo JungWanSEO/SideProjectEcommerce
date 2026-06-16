@@ -13,6 +13,7 @@ import com.commerce.api.category.entity.Category;
 import com.commerce.api.category.repository.CategoryRepository;
 import com.commerce.api.global.exception.BusinessException;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -35,6 +36,12 @@ class CategoryServiceTest {
     private Category categoryWithId(Long id, String name) {
         Category c = Category.create(name);
         ReflectionTestUtils.setField(c, "id", id);   // DB가 채울 id를 테스트에서 강제 주입
+        return c;
+    }
+
+    private Category childCategory(Long id, String name, Long parentId) {
+        Category c = Category.create(name, parentId);
+        ReflectionTestUtils.setField(c, "id", id);
         return c;
     }
 
@@ -62,13 +69,51 @@ class CategoryServiceTest {
     }
 
     @Test
-    @DisplayName("카테고리 목록 조회 - DTO로 매핑")
+    @DisplayName("카테고리 목록 조회 - DTO로 매핑(parentId 포함)")
     void getCategories_maps() {
         given(categoryRepository.findAll())
-                .willReturn(List.of(categoryWithId(1L, "상의"), categoryWithId(2L, "하의")));
+                .willReturn(List.of(categoryWithId(1L, "상의"), childCategory(2L, "티셔츠", 1L)));
 
         List<CategoryResponse> result = categoryService.getCategories();
 
-        assertThat(result).extracting(CategoryResponse::name).containsExactly("상의", "하의");
+        assertThat(result).extracting(CategoryResponse::name).containsExactly("상의", "티셔츠");
+        assertThat(result).extracting(CategoryResponse::parentId).containsExactly(null, 1L);
+    }
+
+    @Test
+    @DisplayName("자식 카테고리 등록 성공 - 부모가 최상위면 저장")
+    void create_child_success() {
+        given(categoryRepository.existsByName("티셔츠")).willReturn(false);
+        given(categoryRepository.findById(1L)).willReturn(Optional.of(categoryWithId(1L, "상의")));
+        given(categoryRepository.save(any(Category.class))).willReturn(childCategory(2L, "티셔츠", 1L));
+
+        CategoryResponse response = categoryService.create(new CategoryCreateRequest("티셔츠", 1L));
+
+        assertThat(response.name()).isEqualTo("티셔츠");
+        assertThat(response.parentId()).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("자식 카테고리 등록 실패 - 부모가 없으면 400")
+    void create_child_invalidParent() {
+        given(categoryRepository.existsByName("티셔츠")).willReturn(false);
+        given(categoryRepository.findById(99L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> categoryService.create(new CategoryCreateRequest("티셔츠", 99L)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("존재하지 않는 상위 카테고리");
+        verify(categoryRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("자식 카테고리 등록 실패 - 부모가 이미 자식이면(3단계) 400")
+    void create_child_threeLevel() {
+        given(categoryRepository.existsByName("반팔")).willReturn(false);
+        given(categoryRepository.findById(2L)).willReturn(Optional.of(childCategory(2L, "티셔츠", 1L)));
+
+        assertThatThrownBy(() -> categoryService.create(new CategoryCreateRequest("반팔", 2L)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("2단계");
+        verify(categoryRepository, never()).save(any());
     }
 }
