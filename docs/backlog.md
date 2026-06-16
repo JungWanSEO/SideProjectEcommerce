@@ -7,7 +7,7 @@
 ## READY (결정 완료 · 외부 무관 · 자율 진행 가능 · 위에서부터)
 - [x] **상품 수정 API (PUT)** (BE) — `PUT /api/products/{id}`(ADMIN): name/price/description/imageUrl/categoryId/brandId 수정. `Product.updateBasics`·카테고리/브랜드 존재 검증·SecurityConfig PUT `/api/products/*` ADMIN. 마이그레이션 0. ✅ dev 병합(332 tests·정적 완결).
 - [x] **어드민 상품 이미지·상태 관리 UI** (FE) — `/admin/products`에 상태 드롭다운(상태 API·apiPatch 추가)+이미지 갤러리 추가/삭제(이미지 API)를 옵션 관리와 함께. ✅ dev 병합(FE tsc/lint 0). 브라우저 확인은 사용자.
-- [ ] **어드민 상품 등록·수정 폼** (FE · 위 "상품 수정 API" 뒤) — `/admin/products`에 새 상품 등록 폼 + 기본정보 수정(PUT 연동). 옵션은 등록 후 옵션 관리로. 카테고리/브랜드는 평면 선택(계층화는 별도). 브라우저 확인은 사용자.
+- [x] **어드민 상품 등록·수정 폼** (FE) — `/admin/products`에 새 상품 등록 폼(POST·옵션 1개·카테고리/브랜드 셀렉트) + 선택 상품 기본정보 수정(PUT 연동·선택 시 자동 채움). ✅ dev 병합(FE tsc/lint 0). 브라우저 확인은 사용자.
 - [ ] **카테고리 계층화 (2단계)** (BE+FE) — `category.parent_id`(self-ref ID, nullable)+Flyway V33, `CategoryResponse.parentId`, 카테고리 목록 부모→자식 구조 노출, FE 2단계 표시. 상품 필터는 exact(부모 선택 시 자식 포함 expansion은 후속). ⚠️V33 스키마 → MySQL 런타임 스모크는 사용자 복귀 후.
 
 ## 함께 (외부 연동 · 학습 — 자율 금지)
