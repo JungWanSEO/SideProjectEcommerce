@@ -5,8 +5,7 @@
 > 외부 프로그램 연동(RabbitMQ·외부 API·새 외부 도구)은 자율 금지 → "함께(학습)"에서 사용자와 직접.
 
 ## READY (결정 완료 · 외부 무관 · 자율 진행 가능 · 위에서부터)
-- [ ] **어드민 카테고리 관리 화면** (FE) — `/admin/categories` 신설 + 어드민 사이드바(`admin/layout.tsx` NAV)에 "카테고리" 링크. **생성 폼**: 이름 + 부모 select(**최상위 카테고리만**[parentId==null], 비우면 최상위) → `POST /api/categories`(name, parentId). **목록**: 부모→자식 그룹(들여쓰기, 기존 /admin 그레이 톤). 기존 카테고리 API(GET parentId 포함·POST) 연동. 수정/삭제는 API 없어 후속. tsc/lint까지 자율, 브라우저 확인은 사용자.
-- [ ] **어드민 브랜드 관리 화면** (FE) — `/admin/brands` 신설 + 사이드바 "브랜드" 링크. **생성 폼**: 이름 → `POST /api/brands`(BrandCreateRequest=이름). **목록**: 브랜드명(+셀러 귀속은 표시만, 변경은 기존 `PUT /api/brands/{id}/seller`로 후속). 카테고리 화면과 대칭·동일 톤. tsc/lint까지 자율, 브라우저 확인은 사용자.
+- (비어 있음) — 다음 `자율진행`은 멈춰 "백로그 채우기 필요" 보고. 후보는 "결정 필요"에서 결정 후 올리거나 "함께(외부)" 학습.
 
 ## 함께 (외부 연동 · 학습 — 자율 금지)
 - 아웃박스 P2b 실제 RabbitMQ (메시지 브로커)
@@ -28,4 +27,6 @@
 - [x] 어드민 상품 등록·수정 폼 — `fa7d30d` (FE 0)
 - [x] 카테고리 2단계 계층화 (`category.parent_id`·**V33**) — `3a1bc10` (335 tests). ⚠️V33 MySQL 스모크 복귀 후
 - [x] CI (GitHub Actions) — `c55d728` (첫 런 초록불 확인)
-- ⚠️ 공통 남음: 위 어드민 FE들 **브라우저 확인** · **V32·V33 MySQL 런타임 스모크**(복귀 후)
+- [x] 어드민 카테고리 관리 화면 (`/admin/categories`) — `b84a040` (tsc/lint 0, BE 무변경)
+- [x] 어드민 브랜드 관리 화면 (`/admin/brands`) — `b84a040` (tsc/lint 0, BE 무변경)
+- ⚠️ 공통 남음: 위 어드민 FE들(상품·카테고리·브랜드) **브라우저 확인** · **V32·V33 MySQL 런타임 스모크**(복귀 후)
