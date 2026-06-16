@@ -24,6 +24,7 @@ export type ProductStatus = "ON_SALE" | "SOLD_OUT" | "DISCONTINUED";
 export interface Category {
   id: number;
   name: string;
+  parentId: number | null; // 부모 카테고리 ID(null=최상위) — 2단계 계층
 }
 export interface Brand {
   id: number;
