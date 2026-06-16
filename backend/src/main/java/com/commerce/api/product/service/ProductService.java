@@ -9,6 +9,7 @@ import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.product.dto.ProductCreateRequest;
 import com.commerce.api.product.dto.ProductOptionUpsertRequest;
 import com.commerce.api.product.dto.ProductResponse;
+import com.commerce.api.product.dto.ProductStatusUpdateRequest;
 import com.commerce.api.product.dto.ProductSearchCondition;
 import com.commerce.api.product.entity.Product;
 import com.commerce.api.product.entity.ProductOption;
@@ -116,6 +117,14 @@ public class ProductService {
     public ProductResponse removeOption(Long productId, Long optionId) {
         Product product = findProduct(productId);
         product.removeOption(optionId);
+        return enrich(product);
+    }
+
+    /** 상품 상태 변경 (ADMIN). 없는 상품 404. 더티체킹으로 반영. */
+    @Transactional
+    public ProductResponse changeStatus(Long id, ProductStatusUpdateRequest request) {
+        Product product = findProduct(id);
+        product.changeStatus(request.status());
         return enrich(product);
     }
 

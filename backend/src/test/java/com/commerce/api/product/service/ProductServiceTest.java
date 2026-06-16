@@ -14,6 +14,7 @@ import com.commerce.api.product.dto.ProductCreateRequest;
 import com.commerce.api.product.dto.ProductOptionUpsertRequest;
 import com.commerce.api.product.dto.ProductResponse;
 import com.commerce.api.product.dto.ProductSearchCondition;
+import com.commerce.api.product.dto.ProductStatusUpdateRequest;
 import com.commerce.api.product.dto.ProductCreateRequest.ProductOptionRequest;
 import com.commerce.api.product.entity.Product;
 import com.commerce.api.product.entity.ProductOption;
@@ -209,5 +210,27 @@ class ProductServiceTest {
         assertThatThrownBy(() -> productService.removeOption(1L, 999L))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("옵션을 찾을 수 없습니다");
+    }
+
+    @Test
+    @DisplayName("상품 상태 변경 성공 - status가 바뀐다")
+    void changeStatus_success() {
+        given(productRepository.findById(1L)).willReturn(Optional.of(productWithId(1L)));
+
+        ProductResponse response =
+                productService.changeStatus(1L, new ProductStatusUpdateRequest(ProductStatus.DISCONTINUED));
+
+        assertThat(response.status()).isEqualTo(ProductStatus.DISCONTINUED);
+    }
+
+    @Test
+    @DisplayName("상품 상태 변경 실패 - 없는 상품이면 404")
+    void changeStatus_notFound() {
+        given(productRepository.findById(999L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() ->
+                productService.changeStatus(999L, new ProductStatusUpdateRequest(ProductStatus.SOLD_OUT)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("상품을 찾을 수 없습니다");
     }
 }
