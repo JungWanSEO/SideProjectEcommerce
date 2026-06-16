@@ -76,6 +76,12 @@ public class ProductOption extends BaseEntity {
         this.stock += quantity;
     }
 
+    /** 옵션 정보 수정 (사이즈/재고 절대값). 관리자 옵션 수정용. */
+    public void update(String size, int stock) {
+        this.size = size;
+        this.stock = stock;
+    }
+
     /** 품절 여부(사이즈별 품절 표시용). */
     public boolean isSoldOut() {
         return this.stock <= 0;

@@ -83,6 +83,10 @@ public class SecurityConfig {
                                 "/v3/api-docs/**", "/actuator/health").permitAll()
                         // 관리자
                         .requestMatchers(HttpMethod.POST, "/api/products").hasRole("ADMIN")
+                        // 상품 옵션(사이즈/재고) 추가·수정·삭제는 운영 업무 → ADMIN (GET /api/products/** 는 위에서 공개)
+                        .requestMatchers(HttpMethod.POST, "/api/products/*/options").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PUT, "/api/products/*/options/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/products/*/options/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/categories", "/api/brands").hasRole("ADMIN")
                         // 브랜드 변경(셀러 귀속 등)은 ADMIN (GET /api/brands/** 는 위에서 공개)
                         .requestMatchers(HttpMethod.PUT, "/api/brands/**").hasRole("ADMIN")

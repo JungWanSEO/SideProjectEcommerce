@@ -3,6 +3,7 @@ package com.commerce.api.product.controller;
 import com.commerce.api.global.common.ApiResponse;
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.product.dto.ProductCreateRequest;
+import com.commerce.api.product.dto.ProductOptionUpsertRequest;
 import com.commerce.api.product.dto.ProductResponse;
 import com.commerce.api.product.dto.ProductSearchCondition;
 import com.commerce.api.product.service.ProductService;
@@ -16,9 +17,11 @@ import org.springframework.data.domain.Sort.Direction;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -71,5 +74,36 @@ public class ProductController {
     public ResponseEntity<ApiResponse<ProductResponse>> getProduct(@PathVariable Long id) {
         ProductResponse response = productService.getProduct(id);
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @Operation(summary = "옵션 추가 (ADMIN)",
+            description = "상품에 사이즈 옵션을 추가한다. 같은 사이즈가 이미 있으면 409. 갱신된 상품을 반환.")
+    @PostMapping("/{productId}/options")
+    public ResponseEntity<ApiResponse<ProductResponse>> addOption(
+            @PathVariable Long productId,
+            @Valid @RequestBody ProductOptionUpsertRequest request) {
+        ProductResponse response = productService.addOption(productId, request);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success("옵션이 추가되었습니다.", response));
+    }
+
+    @Operation(summary = "옵션 수정 (ADMIN)",
+            description = "옵션의 사이즈/재고를 수정한다. 없는 옵션이면 404, 다른 옵션과 사이즈가 겹치면 409.")
+    @PutMapping("/{productId}/options/{optionId}")
+    public ResponseEntity<ApiResponse<ProductResponse>> updateOption(
+            @PathVariable Long productId,
+            @PathVariable Long optionId,
+            @Valid @RequestBody ProductOptionUpsertRequest request) {
+        ProductResponse response = productService.updateOption(productId, optionId, request);
+        return ResponseEntity.ok(ApiResponse.success("옵션이 수정되었습니다.", response));
+    }
+
+    @Operation(summary = "옵션 삭제 (ADMIN)", description = "옵션을 삭제한다. 없는 옵션이면 404.")
+    @DeleteMapping("/{productId}/options/{optionId}")
+    public ResponseEntity<ApiResponse<ProductResponse>> removeOption(
+            @PathVariable Long productId,
+            @PathVariable Long optionId) {
+        ProductResponse response = productService.removeOption(productId, optionId);
+        return ResponseEntity.ok(ApiResponse.success("옵션이 삭제되었습니다.", response));
     }
 }

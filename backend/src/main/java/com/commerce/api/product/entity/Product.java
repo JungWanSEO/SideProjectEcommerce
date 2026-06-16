@@ -112,6 +112,36 @@ public class Product extends BaseEntity {
         option.assignProduct(this);
     }
 
+    /** 옵션 추가(관리자). 같은 사이즈가 이미 있으면 409. 추가된 옵션을 반환한다. */
+    public ProductOption addOption(String size, int stock) {
+        if (hasOptionSize(size)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "이미 존재하는 사이즈입니다. (사이즈: " + size + ")");
+        }
+        ProductOption option = ProductOption.create(size, stock);
+        addOption(option);
+        return option;
+    }
+
+    /** 옵션 수정(관리자). 없는 옵션이면 404, 다른 옵션과 사이즈가 겹치면 409. */
+    public void updateOption(Long optionId, String size, int stock) {
+        ProductOption target = findOption(optionId);
+        boolean dup = options.stream()
+                .anyMatch(o -> !o.getId().equals(optionId) && o.getSize().equals(size));
+        if (dup) {
+            throw new BusinessException(HttpStatus.CONFLICT, "이미 존재하는 사이즈입니다. (사이즈: " + size + ")");
+        }
+        target.update(size, stock);
+    }
+
+    /** 옵션 삭제(관리자). 없는 옵션이면 404. orphanRemoval로 행이 삭제된다. */
+    public void removeOption(Long optionId) {
+        options.remove(findOption(optionId));
+    }
+
+    private boolean hasOptionSize(String size) {
+        return options.stream().anyMatch(o -> o.getSize().equals(size));
+    }
+
     /** 특정 옵션 재고 차감 (주문 시). 애그리거트 루트를 통해 옵션에 위임. */
     public void decreaseStock(Long optionId, int quantity) {
         findOption(optionId).decreaseStock(quantity);
