@@ -29,6 +29,18 @@ export interface Category {
 export interface Brand {
   id: number;
   name: string;
+  sellerId: number | null; // 귀속 셀러 ID(null=미귀속) — 어드민 표시용
+}
+
+/** 카테고리 등록 입력 — POST /api/categories (parentId 비우면 최상위) */
+export interface CategoryCreateInput {
+  name: string;
+  parentId: number | null;
+}
+
+/** 브랜드 등록 입력 — POST /api/brands */
+export interface BrandCreateInput {
+  name: string;
 }
 
 /** 상품 옵션(사이즈) — 재고/품절은 옵션 단위 */
