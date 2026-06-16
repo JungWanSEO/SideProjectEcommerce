@@ -13,7 +13,7 @@
 ## 함께 (외부 연동 · 학습 — 자율 금지)
 - 아웃박스 P2b 실제 RabbitMQ (메시지 브로커)
 - 우편번호 검색 API (Daum/Kakao 외부 API)
-- CI (GitHub Actions — 새 외부 도구, 학습 가치)
+- ✅ CI (GitHub Actions) — `.github/workflows/ci.yml`(백엔드 gradle test·H2 + FE tsc/lint, push/PR→dev/main). 첫 런은 GitHub Actions 탭. **다음=스케줄 무인 운영(이 위에)**. (후속: Testcontainers 실DB 통합·브랜치 보호 규칙.)
 
 ## 결정 필요 (외부 무관이나 결정 미정 — 정하면 READY로)
 - 대사 일자별 윈도우 — 설계 결정

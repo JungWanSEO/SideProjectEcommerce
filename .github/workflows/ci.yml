@@ -1,0 +1,53 @@
+# CI — push/PR마다 GitHub 러너에서 백엔드 테스트 + 프론트 타입검사/린트를 자동 실행한다.
+#  · 백엔드 테스트는 H2(인메모리)라 MySQL/시크릿 env 없이 동작한다(로컬 ./gradlew test와 동일).
+#  · backend / frontend 두 job을 병렬로 — 한쪽이 깨져도 다른 쪽 결과를 본다.
+#  · 다음 단계(스케줄 무인 운영)의 "초록불 검증 토대". 실DB 통합검증(Testcontainers)은 후속.
+name: CI
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main]
+
+jobs:
+  backend:
+    name: Backend (Gradle test · H2)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+      # Windows에서 커밋된 gradlew는 실행권한(+x)이 없어 Linux 러너에서 chmod 필요.
+      - name: gradlew 실행권한 부여
+        run: chmod +x gradlew
+      - name: Test
+        run: ./gradlew test --no-daemon
+
+  frontend:
+    name: Frontend (tsc + lint)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install (npm ci)
+        run: npm ci
+      - name: Type check (tsc)
+        run: npx tsc --noEmit
+      - name: Lint (next lint)
+        run: npm run lint
