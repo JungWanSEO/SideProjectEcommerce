@@ -15,6 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.exception.BusinessException;
+import com.commerce.api.product.dto.ProductImageResponse;
 import com.commerce.api.product.dto.ProductOptionResponse;
 import com.commerce.api.product.dto.ProductResponse;
 import com.commerce.api.product.dto.ProductSearchCondition;
@@ -259,5 +260,35 @@ class ProductControllerTest {
                         .content("{}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    @DisplayName("POST /api/products/{id}/images - 이미지 추가 성공 시 201")
+    void addImage_success() throws Exception {
+        given(productService.addImage(eq(1L), any())).willReturn(
+                new ProductResponse(1L, "반팔티셔츠", 29000L, "면 100%", "/products/1.svg",
+                        ProductStatus.ON_SALE, 1L, "상의", 1L, "Nike",
+                        List.of(), 0, 0.0, 0, LocalDateTime.now(),
+                        List.of(new ProductImageResponse(50L, "/products/2.svg", 0))));
+
+        mockMvc.perform(post("/api/products/1/images")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"url":"/products/2.svg"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.images[0].url").value("/products/2.svg"));
+    }
+
+    @Test
+    @DisplayName("DELETE /api/products/{id}/images/{imageId} - 이미지 삭제 성공 시 200")
+    void removeImage_success() throws Exception {
+        given(productService.removeImage(eq(1L), eq(50L))).willReturn(productWithOptions());
+
+        mockMvc.perform(delete("/api/products/1/images/50"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.images").isEmpty());
     }
 }

@@ -11,6 +11,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import java.util.ArrayList;
 import java.util.List;
@@ -83,6 +84,11 @@ public class Product extends BaseEntity {
     @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<ProductOption> options = new ArrayList<>();
 
+    /** 이미지 갤러리(애그리거트 내부). 대표 1장은 imageUrl, 추가 이미지는 여기. sortOrder 오름차순. */
+    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("sortOrder asc")
+    private List<ProductImage> images = new ArrayList<>();
+
     @Builder
     private Product(String name, long price, String description, String imageUrl, ProductStatus status,
                     Long categoryId, Long brandId) {
@@ -145,6 +151,25 @@ public class Product extends BaseEntity {
 
     private boolean hasOptionSize(String size) {
         return options.stream().anyMatch(o -> o.getSize().equals(size));
+    }
+
+    /** 이미지 추가(관리자). 맨 뒤 순서로 붙인다. 추가된 이미지를 반환. */
+    public ProductImage addImage(String url) {
+        int next = images.stream().mapToInt(ProductImage::getSortOrder).max().orElse(-1) + 1;
+        ProductImage image = ProductImage.create(url, next);
+        images.add(image);
+        image.assignProduct(this);
+        return image;
+    }
+
+    /** 이미지 삭제(관리자). 없는 이미지면 404. orphanRemoval로 행 삭제. */
+    public void removeImage(Long imageId) {
+        ProductImage target = images.stream()
+                .filter(i -> i.getId().equals(imageId))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(
+                        HttpStatus.NOT_FOUND, "이미지를 찾을 수 없습니다. (id: " + imageId + ")"));
+        images.remove(target);
     }
 
     /** 특정 옵션 재고 차감 (주문 시). 애그리거트 루트를 통해 옵션에 위임. */

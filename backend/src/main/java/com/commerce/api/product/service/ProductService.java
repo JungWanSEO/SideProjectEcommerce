@@ -7,6 +7,7 @@ import com.commerce.api.category.repository.CategoryRepository;
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.product.dto.ProductCreateRequest;
+import com.commerce.api.product.dto.ProductImageCreateRequest;
 import com.commerce.api.product.dto.ProductOptionUpsertRequest;
 import com.commerce.api.product.dto.ProductResponse;
 import com.commerce.api.product.dto.ProductStatusUpdateRequest;
@@ -125,6 +126,23 @@ public class ProductService {
     public ProductResponse changeStatus(Long id, ProductStatusUpdateRequest request) {
         Product product = findProduct(id);
         product.changeStatus(request.status());
+        return enrich(product);
+    }
+
+    /** 이미지(갤러리) 추가 (ADMIN). 새 이미지 id를 응답에 채우려 saveAndFlush. */
+    @Transactional
+    public ProductResponse addImage(Long productId, ProductImageCreateRequest request) {
+        Product product = findProduct(productId);
+        product.addImage(request.url());
+        productRepository.saveAndFlush(product);
+        return enrich(product);
+    }
+
+    /** 이미지(갤러리) 삭제 (ADMIN). 없는 이미지 404. orphanRemoval로 행 삭제. */
+    @Transactional
+    public ProductResponse removeImage(Long productId, Long imageId) {
+        Product product = findProduct(productId);
+        product.removeImage(imageId);
         return enrich(product);
     }
 
