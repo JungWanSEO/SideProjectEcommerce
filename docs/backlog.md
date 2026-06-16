@@ -29,4 +29,6 @@
 - [x] CI (GitHub Actions) — `c55d728` (첫 런 초록불 확인)
 - [x] 어드민 카테고리 관리 화면 (`/admin/categories`) — `b84a040` (tsc/lint 0, BE 무변경)
 - [x] 어드민 브랜드 관리 화면 (`/admin/brands`) — `b84a040` (tsc/lint 0, BE 무변경)
-- ⚠️ 공통 남음: 위 어드민 FE들(상품·카테고리·브랜드) **브라우저 확인** · **V32·V33 MySQL 런타임 스모크**(복귀 후)
+- [x] 추천 배치 멱등(중복키) 버그 수정 — `df61e19` (deleteByMemberId 벌크 DELETE화; dev 서버 기동 복구)
+- [x] **V32·V33 MySQL 런타임 스모크 PASS** — `06-17` 재기동 시 Flyway v33 validate·`GET /api/categories` 200(parent_id)·product_image validate
+- ⚠️ 공통 남음: 위 어드민 FE들(상품·카테고리·브랜드) **브라우저 확인**(서버 기동 완료 — http://localhost:3000/admin)
