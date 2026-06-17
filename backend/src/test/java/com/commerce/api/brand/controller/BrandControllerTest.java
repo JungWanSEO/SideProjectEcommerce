@@ -3,6 +3,7 @@ package com.commerce.api.brand.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -81,5 +82,37 @@ class BrandControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.sellerId").value(7));
+    }
+
+    @Test
+    @DisplayName("PUT /api/brands/{id} - 수정 성공 200")
+    void update_success() throws Exception {
+        given(brandService.update(eq(1L), any()))
+                .willReturn(new BrandResponse(1L, "Nike Korea", null));
+
+        mockMvc.perform(put("/api/brands/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Nike Korea\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.name").value("Nike Korea"));
+    }
+
+    @Test
+    @DisplayName("PUT /api/brands/{id} - 이름이 비면 400")
+    void update_validationFail() throws Exception {
+        mockMvc.perform(put("/api/brands/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    @DisplayName("DELETE /api/brands/{id} - 삭제 성공 200")
+    void delete_success() throws Exception {
+        mockMvc.perform(delete("/api/brands/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
     }
 }

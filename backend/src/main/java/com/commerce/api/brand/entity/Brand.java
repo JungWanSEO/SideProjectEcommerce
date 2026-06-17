@@ -45,6 +45,11 @@ public class Brand extends BaseEntity {
         return new Brand(name);
     }
 
+    /** 이름 수정(중복 검증은 서비스가 담당). 영속 엔티티에서 호출하면 dirty checking으로 flush된다. */
+    public void rename(String name) {
+        this.name = name;
+    }
+
     /** 셀러에 귀속(또는 null로 귀속 해제). */
     public void assignSeller(Long sellerId) {
         this.sellerId = sellerId;

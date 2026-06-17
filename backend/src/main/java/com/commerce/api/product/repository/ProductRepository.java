@@ -25,6 +25,12 @@ public interface ProductRepository extends JpaRepository<Product, Long>, Product
     @Query("select p from Product p join p.options o where o.id = :optionId")
     Optional<Product> findByOptionId(@Param("optionId") Long optionId);
 
+    /** 이 카테고리를 참조하는 상품이 하나라도 있는지 — 카테고리 삭제 가드(참조 중이면 409). */
+    boolean existsByCategoryId(Long categoryId);
+
+    /** 이 브랜드를 참조하는 상품이 하나라도 있는지 — 브랜드 삭제 가드(참조 중이면 409). */
+    boolean existsByBrandId(Long brandId);
+
     /**
      * 인기 상품 상위 12개 — 추천 콜드스타트 폴백(행동 이력이 없는 회원/비로그인은 전체 인기순으로 채운다).
      * 인기 = 찜 수 우선, 동률은 리뷰 수. ON_SALE만.

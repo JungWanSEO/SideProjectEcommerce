@@ -1,9 +1,12 @@
 package com.commerce.api.category.controller;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -65,5 +68,36 @@ class CategoryControllerTest {
                         .content("{\"name\":\"\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    @DisplayName("PUT /api/categories/{id} - 수정 성공 200")
+    void update_success() throws Exception {
+        given(categoryService.update(eq(1L), any())).willReturn(new CategoryResponse(1L, "아우터"));
+
+        mockMvc.perform(put("/api/categories/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"아우터\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.name").value("아우터"));
+    }
+
+    @Test
+    @DisplayName("PUT /api/categories/{id} - 이름이 비면 400")
+    void update_validationFail() throws Exception {
+        mockMvc.perform(put("/api/categories/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    @DisplayName("DELETE /api/categories/{id} - 삭제 성공 200")
+    void delete_success() throws Exception {
+        mockMvc.perform(delete("/api/categories/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
     }
 }
