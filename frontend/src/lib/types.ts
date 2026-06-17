@@ -38,8 +38,19 @@ export interface CategoryCreateInput {
   parentId: number | null;
 }
 
+/** 카테고리 수정 입력 — PUT /api/categories/{id} (parentId 비우면 최상위로 이동) */
+export interface CategoryUpdateInput {
+  name: string;
+  parentId: number | null;
+}
+
 /** 브랜드 등록 입력 — POST /api/brands */
 export interface BrandCreateInput {
+  name: string;
+}
+
+/** 브랜드 수정 입력 — PUT /api/brands/{id} (이름만; 셀러 귀속은 별도) */
+export interface BrandUpdateInput {
   name: string;
 }
 

@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { apiGet, apiPost } from "@/lib/api";
-import { Brand, BrandCreateInput, Seller } from "@/lib/types";
+import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/api";
+import { Brand, BrandCreateInput, BrandUpdateInput, Seller } from "@/lib/types";
 
 /**
  * 브랜드 관리 화면 (/admin/brands, ADMIN).
- * 브랜드를 등록하고 목록(셀러 귀속은 표시만)을 본다. 카테고리 화면과 대칭·동일 톤.
- * 셀러 귀속 변경은 기존 PUT /api/brands/{id}/seller 로 후속 — 여기선 현황만 노출.
+ * 브랜드를 등록하고 목록을 본다. 각 행은 인라인 이름 수정·삭제(confirm) 가능 — 카테고리 화면과 동일 패턴.
+ * 삭제는 상품이 참조 중이면 백엔드가 409로 막고 메시지를 띄운다. 셀러 귀속(표시만)은 별도 API.
  */
 export default function AdminBrandsPage() {
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -18,6 +18,10 @@ export default function AdminBrandsPage() {
 
   // 생성 폼 상태
   const [name, setName] = useState("");
+
+  // 인라인 수정 상태 (편집 중인 브랜드 1개)
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editName, setEditName] = useState("");
 
   const load = useCallback(() => {
     setLoading(true);
@@ -62,12 +66,53 @@ export default function AdminBrandsPage() {
     }
   };
 
+  const startEdit = (b: Brand) => {
+    setEditingId(b.id);
+    setEditName(b.name);
+    setError(null);
+  };
+
+  const cancelEdit = () => setEditingId(null);
+
+  const saveEdit = async (id: number) => {
+    if (!editName.trim()) {
+      setError("브랜드명은 필수입니다.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    const body: BrandUpdateInput = { name: editName.trim() };
+    try {
+      await apiPut<Brand>(`/api/brands/${id}`, body);
+      setEditingId(null);
+      load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (id: number, label: string) => {
+    if (!confirm(`'${label}' 브랜드를 삭제할까요?\n이 브랜드를 쓰는 상품이 있으면 삭제할 수 없습니다.`)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await apiDelete<void>(`/api/brands/${id}`);
+      load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div>
       <div className="mb-6">
         <h1 className="text-xl font-bold">브랜드 관리</h1>
         <p className="text-sm text-gray-500">
-          브랜드를 등록합니다. 셀러 귀속은 현황만 표시하며, 변경은 후속(PUT /api/brands/{`{id}`}/seller) 예정.
+          브랜드를 등록·수정·삭제합니다. 셀러 귀속은 현황만 표시하며, 변경은 별도(PUT /api/brands/{`{id}`}/seller) 예정.
         </p>
       </div>
 
@@ -120,18 +165,19 @@ export default function AdminBrandsPage() {
               <th className="px-4 py-3">ID</th>
               <th className="px-4 py-3">브랜드명</th>
               <th className="px-4 py-3">셀러 귀속</th>
+              <th className="px-4 py-3 text-right">관리</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {loading ? (
               <tr>
-                <td colSpan={3} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={4} className="px-4 py-8 text-center text-gray-400">
                   불러오는 중…
                 </td>
               </tr>
             ) : brands.length === 0 ? (
               <tr>
-                <td colSpan={3} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={4} className="px-4 py-8 text-center text-gray-400">
                   브랜드가 없습니다. 위에서 등록하세요.
                 </td>
               </tr>
@@ -139,12 +185,57 @@ export default function AdminBrandsPage() {
               brands.map((b) => (
                 <tr key={b.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3 text-gray-400">#{b.id}</td>
-                  <td className="px-4 py-3 font-medium text-gray-900">{b.name}</td>
+                  <td className="px-4 py-3 font-medium text-gray-900">
+                    {editingId === b.id ? (
+                      <input
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        className="w-40 rounded border border-gray-300 px-2 py-1 text-sm"
+                      />
+                    ) : (
+                      b.name
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-gray-600">
                     {b.sellerId !== null ? (
                       sellerName.get(b.sellerId) ?? `셀러 #${b.sellerId}`
                     ) : (
                       <span className="text-gray-300">미귀속</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {editingId === b.id ? (
+                      <span className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => saveEdit(b.id)}
+                          disabled={busy}
+                          className="rounded bg-gray-900 px-3 py-1 text-xs text-white hover:bg-gray-700 disabled:opacity-50"
+                        >
+                          저장
+                        </button>
+                        <button
+                          onClick={cancelEdit}
+                          className="rounded border border-gray-300 px-3 py-1 text-xs hover:bg-gray-100"
+                        >
+                          취소
+                        </button>
+                      </span>
+                    ) : (
+                      <span className="flex items-center justify-end gap-3">
+                        <button
+                          onClick={() => startEdit(b)}
+                          className="text-xs text-gray-500 hover:text-gray-900"
+                        >
+                          수정
+                        </button>
+                        <button
+                          onClick={() => remove(b.id, b.name)}
+                          disabled={busy}
+                          className="text-xs text-gray-500 hover:text-red-600 disabled:opacity-50"
+                        >
+                          삭제
+                        </button>
+                      </span>
                     )}
                   </td>
                 </tr>
