@@ -68,12 +68,25 @@ class ReconciliationServiceTest {
                 LocalDate.now().plusDays(2));
     }
 
+    // 전체 대사 테스트는 정산일을 보지 않으므로 임의 고정일을 쓴다(윈도우 테스트만 명시 날짜 사용).
+    private static final LocalDate ANY_DAY = LocalDate.of(2026, 6, 15);
+
     private PgSettlementRecord pg(String pgTx, long amount, PgSettlementStatus status) {
         return pg("TOSS", pgTx, amount, status);
     }
 
     private PgSettlementRecord pg(String provider, String pgTx, long amount, PgSettlementStatus status) {
-        return new PgSettlementRecord(provider, pgTx, amount, status);
+        return new PgSettlementRecord(provider, pgTx, amount, status, ANY_DAY);
+    }
+
+    /** 정산일을 지정한 PG 리포트 — 일자별 윈도우 테스트용. */
+    private PgSettlementRecord pgOn(String pgTx, long amount, PgSettlementStatus status, LocalDate settledOn) {
+        return new PgSettlementRecord("TOSS", pgTx, amount, status, settledOn);
+    }
+
+    /** 정산일을 지정한 우리 정산 항목 — 일자별 윈도우 테스트용. */
+    private SettlementEntry ourOn(String pgTx, long gross, LocalDate settledDate) {
+        return SettlementEntry.scheduled(1L, 1L, pgTx, "TOSS", null, gross, 0L, 0.0, 0L, 0.0, settledDate);
     }
 
     // ---------- 대조(분류) ----------
@@ -290,6 +303,57 @@ class ReconciliationServiceTest {
         assertThat(r.missingInPg()).isZero();
         assertThat(r.totalMismatches()).isZero();
         verify(mismatchRepository, never()).save(any());   // 다시 OPEN으로 안 만듦
+    }
+
+    // ---------- 일자별 윈도우 ----------
+
+    @Test
+    @DisplayName("일자별 윈도우 - 윈도우 안 거래만 대조(밖은 제외), OPEN 삭제도 거래키로 스코프")
+    void reconcile_window_onlyInWindow() {
+        LocalDate day = LocalDate.of(2026, 6, 10);
+        // tx1: 윈도우 안·양측 일치 → MATCHED. tx2: 윈도우 밖(5일 전)이라 양측에서 제외돼야 한다.
+        given(settlementRepository.findAll()).willReturn(List.of(
+                ourOn("tx1", 10000, day),
+                ourOn("tx2", 20000, day.minusDays(5))));
+        given(paymentGatewayRouter.fetchAllSettlements()).willReturn(List.of(
+                pgOn("tx1", 10000, PgSettlementStatus.PAID, day),
+                pgOn("tx2", 20000, PgSettlementStatus.PAID, day.minusDays(5))));
+
+        ReconciliationResult r = reconciliationService.reconcile(day, day);
+
+        assertThat(r.matched()).isEqualTo(1);          // tx1만 본다
+        assertThat(r.totalMismatches()).isZero();      // tx2는 윈도우 밖 → 대조 대상 아님
+        verify(mismatchRepository).deleteByStatusAndPgTransactionIdIn(eq(MismatchStatus.OPEN), any());
+        verify(mismatchRepository, never()).deleteByStatus(any());   // 전체 OPEN 삭제는 안 함
+    }
+
+    @Test
+    @DisplayName("일자별 윈도우 - 윈도우 안에서 우리에만 있는 거래는 MISSING_IN_PG로 잡힌다")
+    void reconcile_window_detectsMismatchInWindow() {
+        LocalDate day = LocalDate.of(2026, 6, 10);
+        given(settlementRepository.findAll()).willReturn(List.of(ourOn("tx1", 10000, day)));
+        given(paymentGatewayRouter.fetchAllSettlements()).willReturn(List.of());   // PG엔 없음
+
+        ReconciliationResult r = reconciliationService.reconcile(day, day);
+
+        assertThat(r.missingInPg()).isEqualTo(1);
+        assertThat(r.totalMismatches()).isEqualTo(1);
+        verify(mismatchRepository).save(any());
+    }
+
+    @Test
+    @DisplayName("일자별 윈도우 - 윈도우에 거래가 없으면 OPEN 삭제를 호출하지 않는다(빈 IN 방지)")
+    void reconcile_window_empty() {
+        LocalDate day = LocalDate.of(2026, 6, 10);
+        given(settlementRepository.findAll()).willReturn(List.of(ourOn("tx1", 10000, day.minusDays(5))));
+        given(paymentGatewayRouter.fetchAllSettlements()).willReturn(List.of());
+
+        ReconciliationResult r = reconciliationService.reconcile(day, day);
+
+        assertThat(r.matched()).isZero();
+        assertThat(r.totalMismatches()).isZero();
+        verify(mismatchRepository, never()).deleteByStatusAndPgTransactionIdIn(any(), any());
+        verify(mismatchRepository, never()).deleteByStatus(any());
     }
 
     // ---------- 처리(resolve / ignore) ----------

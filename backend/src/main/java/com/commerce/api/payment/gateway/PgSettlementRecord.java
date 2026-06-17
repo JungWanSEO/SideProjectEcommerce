@@ -1,5 +1,7 @@
 package com.commerce.api.payment.gateway;
 
+import java.time.LocalDate;
+
 /**
  * PG 정산 리포트의 한 줄 — "PG가 통보한 거래".
  *
@@ -10,10 +12,15 @@ package com.commerce.api.payment.gateway;
  * 대조할 때 불일치를 PG별로 분류·표시하기 위함. 거래 ID 프리픽스(예: KAKAO-)와 provider(KAKAOPAY)가
  * 다를 수 있으므로 프리픽스 파싱이 아니라 PG가 직접 알려주는 값을 쓴다.
  *
+ * <p>{@code settledOn}은 PG가 이 거래를 정산한 날짜다 — 대사를 <b>일자별 윈도우</b>로 좁힐 때
+ * 우리 {@code SettlementEntry.settledDate}와 같은 기준으로 양측을 거른다(실무는 매일 전날치만 대조).
+ *
  * @param provider        이 거래를 처리한 PG (예: TOSS, KAKAOPAY)
  * @param pgTransactionId 거래 식별자(조인 키 — 우리 결제의 pgTransactionId와 같은 값)
  * @param amount          PG가 보고한 거래 금액(원)
  * @param status          PG 관점의 상태(PAID/REFUNDED)
+ * @param settledOn       PG 정산일(대사 일자별 윈도우의 PG측 기준)
  */
-public record PgSettlementRecord(String provider, String pgTransactionId, long amount, PgSettlementStatus status) {
+public record PgSettlementRecord(String provider, String pgTransactionId, long amount,
+        PgSettlementStatus status, LocalDate settledOn) {
 }
