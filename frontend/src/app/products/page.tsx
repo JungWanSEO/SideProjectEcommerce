@@ -57,6 +57,27 @@ function distinctSizes(products: Product[]): string[] {
   return [...set];
 }
 
+/**
+ * 카테고리 필터 드롭다운 옵션을 2단계(부모 → 자식)로 펼친다.
+ * 최상위는 그대로, 자식은 부모 바로 아래에 `└ ` 들여쓰기로 — 어드민 상품 폼과 같은 표시 컨벤션.
+ * 부모·자식 모두 선택 가능(선택 시 그 카테고리 id로 필터). 맨 앞에 "전체".
+ */
+function categoryFilterOptions(categories: Category[]): { value: string; label: string }[] {
+  const roots = categories.filter((c) => c.parentId == null);
+  const out = [{ value: "", label: "카테고리 전체" }];
+  for (const r of roots) {
+    out.push({ value: String(r.id), label: r.name });
+    for (const ch of categories.filter((c) => c.parentId === r.id)) {
+      out.push({ value: String(ch.id), label: `└ ${ch.name}` });
+    }
+  }
+  // 부모가 목록에 없는 고아 자식(방어) — 평면으로 뒤에 붙인다.
+  for (const c of categories.filter((c) => c.parentId != null && !roots.some((r) => r.id === c.parentId))) {
+    out.push({ value: String(c.id), label: c.name });
+  }
+  return out;
+}
+
 function priceLabel(min: string, max: string): string {
   const fmt = (v: string) => Number(v).toLocaleString();
   if (min && max) return `${fmt(min)}~${fmt(max)}원`;
@@ -188,10 +209,7 @@ export default function ProductsPage() {
           <Select
             value={query.categoryId}
             onChange={(v) => set({ categoryId: v })}
-            options={[
-              { value: "", label: "카테고리 전체" },
-              ...categories.map((c) => ({ value: String(c.id), label: c.name })),
-            ]}
+            options={categoryFilterOptions(categories)}
           />
           <Select
             value={query.brandId}
