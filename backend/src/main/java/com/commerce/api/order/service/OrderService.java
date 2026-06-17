@@ -10,6 +10,7 @@ import com.commerce.api.order.dto.OrderResponse;
 import com.commerce.api.order.dto.OrderSummaryResponse;
 import com.commerce.api.order.entity.Order;
 import com.commerce.api.order.entity.OrderItem;
+import com.commerce.api.order.entity.OrderStatus;
 import com.commerce.api.order.repository.OrderRepository;
 import com.commerce.api.product.repository.ProductRepository;
 import java.util.List;
@@ -114,6 +115,29 @@ public class OrderService {
         return PageResponse.from(
                 orderRepository.findByMemberId(memberId, pageable)
                         .map(OrderSummaryResponse::from));   // 목록은 요약(상세는 getOrder의 OrderResponse)
+    }
+
+    /**
+     * 전체 주문 목록(ADMIN) — 배송 관리용. status가 주어지면 그 상태만, 없으면 전부.
+     * 회원 스코핑 없이 모든 주문을 본다(어드민 운영 화면 전용 — 인가는 SecurityConfig·컨트롤러가 보장).
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<OrderSummaryResponse> getAllOrders(OrderStatus status, Pageable pageable) {
+        var page = (status == null)
+                ? orderRepository.findAll(pageable)
+                : orderRepository.findByStatus(status, pageable);
+        return PageResponse.from(page.map(OrderSummaryResponse::from));
+    }
+
+    /**
+     * 배송 상태 전진(ADMIN): PAID → SHIPPING → DELIVERED (forward-only). 없으면 404,
+     * 잘못된 전이(건너뛰기·되돌리기·취소/대기 상태)면 409(Order.advanceShipping이 강제).
+     */
+    @Transactional
+    public OrderResponse advanceShipping(Long id, OrderStatus next) {
+        Order order = findOrder(id);
+        order.advanceShipping(next);   // 영속 엔티티 → dirty checking flush
+        return OrderResponse.from(order);
     }
 
     /**

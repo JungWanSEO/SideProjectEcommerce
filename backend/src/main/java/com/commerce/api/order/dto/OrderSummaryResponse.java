@@ -13,6 +13,7 @@ import java.time.LocalDateTime;
  */
 public record OrderSummaryResponse(
         Long id,
+        Long memberId,                     // 주문 회원 ID — 어드민 주문 목록에서 누구 주문인지 식별용
         OrderStatus status,
         long totalPrice,
         LocalDateTime createdAt,
@@ -24,6 +25,7 @@ public record OrderSummaryResponse(
         String representative = items.isEmpty() ? null : items.get(0).getProductName();
         return new OrderSummaryResponse(
                 order.getId(),
+                order.getMemberId(),
                 order.getStatus(),
                 order.getTotalPrice(),
                 order.getCreatedAt(),

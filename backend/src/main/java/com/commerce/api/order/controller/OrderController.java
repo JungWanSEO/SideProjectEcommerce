@@ -8,7 +8,9 @@ import com.commerce.api.order.dto.CouponPreviewRequest;
 import com.commerce.api.order.dto.CouponPreviewResponse;
 import com.commerce.api.order.dto.OrderCreateRequest;
 import com.commerce.api.order.dto.OrderResponse;
+import com.commerce.api.order.dto.OrderStatusUpdateRequest;
 import com.commerce.api.order.dto.OrderSummaryResponse;
+import com.commerce.api.order.entity.OrderStatus;
 import com.commerce.api.order.service.OrderService;
 import com.commerce.api.payment.service.PaymentService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -22,10 +24,12 @@ import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -94,6 +98,19 @@ public class OrderController {
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
+    @Operation(summary = "전체 주문 목록 조회 (ADMIN)",
+            description = "운영자가 모든 회원의 주문을 페이지로 조회한다(배송 관리용). status로 상태 필터(PAID·SHIPPING 등) — "
+                    + "비우면 전체. 기본 정렬은 최신순(createdAt desc), 기본 페이지 크기 20.")
+    @GetMapping("/admin")
+    public ResponseEntity<ApiResponse<PageResponse<OrderSummaryResponse>>> getAllOrders(
+            @RequestParam(required = false) OrderStatus status,
+            @ParameterObject
+            @PageableDefault(size = 20, sort = "createdAt", direction = Direction.DESC)
+            Pageable pageable) {
+        PageResponse<OrderSummaryResponse> response = orderService.getAllOrders(status, pageable);
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
     @Operation(summary = "주문 단건 조회",
             description = "주문 ID로 주문 정보를 조회한다. 본인 주문 또는 ADMIN만 가능(아니면 403). 없으면 404.")
     @GetMapping("/{id}")
@@ -122,5 +139,15 @@ public class OrderController {
         OrderResponse response = paymentService.cancelOrderItem(
                 SecurityUtil.getCurrentMemberId(), orderId, itemId, SecurityUtil.isAdmin());
         return ResponseEntity.ok(ApiResponse.success("주문 항목이 취소(환불)되었습니다.", response));
+    }
+
+    @Operation(summary = "주문 배송 상태 전진 (ADMIN)",
+            description = "주문 배송 상태를 다음 단계로 전진한다(PAID→SHIPPING→DELIVERED, forward-only). "
+                    + "운영자만 가능. 없는 주문이면 404, 잘못된 전이(건너뛰기·되돌리기·취소/대기 상태)면 409.")
+    @PatchMapping("/{id}/status")
+    public ResponseEntity<ApiResponse<OrderResponse>> advanceShipping(
+            @PathVariable Long id, @Valid @RequestBody OrderStatusUpdateRequest request) {
+        OrderResponse response = orderService.advanceShipping(id, request.status());
+        return ResponseEntity.ok(ApiResponse.success("주문 상태가 변경되었습니다.", response));
     }
 }

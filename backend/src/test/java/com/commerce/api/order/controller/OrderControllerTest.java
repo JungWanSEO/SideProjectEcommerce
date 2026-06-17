@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -168,6 +169,36 @@ class OrderControllerTest {
     }
 
     @Test
+    @DisplayName("GET /api/orders/admin - 전체 주문 목록 200(status 필터·memberId 노출)")
+    void getAllOrders_success() throws Exception {
+        PageResponse<OrderSummaryResponse> page = new PageResponse<>(
+                List.of(new OrderSummaryResponse(
+                        5L, 9L, OrderStatus.PAID, 20000L, LocalDateTime.now(), "후드티", 1)),
+                0, 20, 1L, 1, false);
+        given(orderService.getAllOrders(eq(OrderStatus.PAID), any(Pageable.class))).willReturn(page);
+
+        mockMvc.perform(get("/api/orders/admin").param("status", "PAID"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.content[0].memberId").value(9))
+                .andExpect(jsonPath("$.data.content[0].status").value("PAID"));
+    }
+
+    @Test
+    @DisplayName("PATCH /api/orders/{id}/status - 배송 상태 전진 200")
+    void advanceShipping_success() throws Exception {
+        given(orderService.advanceShipping(eq(1L), eq(OrderStatus.SHIPPING)))
+                .willReturn(sampleOrder(OrderStatus.SHIPPING));
+
+        mockMvc.perform(patch("/api/orders/1/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"SHIPPING\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.status").value("SHIPPING"));
+    }
+
+    @Test
     @DisplayName("GET /api/orders/{id} - 없는 주문이면 404")
     void getOrder_notFound() throws Exception {
         given(orderService.getOrder(eq(999L), eq(1L), eq(false)))
@@ -194,7 +225,7 @@ class OrderControllerTest {
     void getMyOrders_success() throws Exception {
         PageResponse<OrderSummaryResponse> page = new PageResponse<>(
                 List.of(new OrderSummaryResponse(
-                        1L, OrderStatus.PENDING, 30000L, LocalDateTime.now(), "반팔티셔츠", 2)),
+                        1L, 1L, OrderStatus.PENDING, 30000L, LocalDateTime.now(), "반팔티셔츠", 2)),
                 0, 20, 1L, 1, false);
         given(orderService.getMyOrders(eq(1L), any(Pageable.class))).willReturn(page);
 
