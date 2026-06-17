@@ -1,5 +1,6 @@
 package com.commerce.api.payment.gateway;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -35,8 +36,10 @@ public abstract class AbstractMockPaymentGateway implements PaymentGateway {
         // 실제 PG라면 외부 API를 호출해 거래 ID를 받지만, 모의에서는 PG별 프리픽스 + 가짜 ID를 생성한다.
         String pgTransactionId = idPrefix() + "-" + UUID.randomUUID();
         // 승인 거래를 원장에 기록(PG 관점 = PAID·자기 provider 표기) → 나중에 대사가 우리 기록과 대조한다.
+        // 정산일은 승인 시점(모의는 동일자 정산). 대사 일자별 윈도우의 PG측 기준이 된다.
         ledger.put(pgTransactionId,
-                new PgSettlementRecord(provider(), pgTransactionId, command.amount(), PgSettlementStatus.PAID));
+                new PgSettlementRecord(provider(), pgTransactionId, command.amount(),
+                        PgSettlementStatus.PAID, LocalDate.now()));
         return PaymentApproval.approved(pgTransactionId);
     }
 
@@ -45,7 +48,8 @@ public abstract class AbstractMockPaymentGateway implements PaymentGateway {
         // 원거래(command.pgTransactionId)를 원장에서 REFUNDED로 갱신 → 대사에서 '정산 후 환불'이
         // 우리 정산 기록(환불 미반영)과 어긋나 STATUS_MISMATCH로 잡힌다.
         ledger.computeIfPresent(command.pgTransactionId(),
-                (id, rec) -> new PgSettlementRecord(rec.provider(), id, rec.amount(), PgSettlementStatus.REFUNDED));
+                (id, rec) -> new PgSettlementRecord(rec.provider(), id, rec.amount(),
+                        PgSettlementStatus.REFUNDED, rec.settledOn()));   // 정산일은 원거래 그대로 유지
         String pgRefundId = idPrefix() + "-REFUND-" + UUID.randomUUID();
         return PaymentRefund.refunded(pgRefundId);
     }

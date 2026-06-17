@@ -10,9 +10,11 @@ import com.commerce.api.settlement.service.ReconciliationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import java.time.LocalDate;
 import lombok.RequiredArgsConstructor;
 import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Pageable;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.data.domain.Sort.Direction;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
@@ -43,11 +45,14 @@ public class ReconciliationController {
 
     @Operation(summary = "대사 실행",
             description = "우리 정산 항목과 PG 정산 리포트를 거래키(pgTransactionId)로 대조해 불일치를 분류·기록한다. "
-                    + "이전 OPEN은 다시 스냅샷하되 이미 처리(RESOLVED/IGNORED)한 거래키는 다시 열지 않는다. "
-                    + "일치/새 불일치/이미 처리 건수를 요약 반환.")
+                    + "from/to(정산일 기준, ISO yyyy-MM-dd, 둘 다 포함)를 주면 그 일자별 윈도우만 대조하고, "
+                    + "비우면 전체를 본다. 이전 OPEN은 다시 스냅샷하되(윈도우면 그 거래키만) 이미 처리(RESOLVED/IGNORED)한 "
+                    + "거래키는 다시 열지 않는다. 일치/새 불일치/이미 처리 건수를 요약 반환.")
     @PostMapping("/run")
-    public ResponseEntity<ApiResponse<ReconciliationResult>> run() {
-        ReconciliationResult result = reconciliationService.reconcile();
+    public ResponseEntity<ApiResponse<ReconciliationResult>> run(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        ReconciliationResult result = reconciliationService.reconcile(from, to);
         return ResponseEntity
                 .status(HttpStatus.CREATED)
                 .body(ApiResponse.success("대사를 실행했습니다.", result));
