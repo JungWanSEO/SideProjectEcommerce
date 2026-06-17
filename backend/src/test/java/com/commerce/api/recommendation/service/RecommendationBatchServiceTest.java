@@ -61,7 +61,7 @@ class RecommendationBatchServiceTest {
     @DisplayName("추천 - 선호 카테고리/브랜드의 미보유 상품만, 무관 상품·찜한 상품은 제외")
     void run_recommendsAffineNonOwned() {
         // member 1: 찜 p1(cat10·brand100, ×2), 조회 p2(cat10·brand200, ×1)
-        given(orderRepository.findByStatus(OrderStatus.PAID)).willReturn(List.of());
+        given(orderRepository.findByStatusIn(OrderStatus.PURCHASED)).willReturn(List.of());
         given(wishlistRepository.findAll()).willReturn(List.of(wish(1L, 1L)));
         given(activityLogRepository.findByCreatedAtAfter(any())).willReturn(List.of(ActivityLog.view(1L, 2L)));
         Product p1 = product(1L, 10L, 100L);   // 찜함 → 제외
@@ -85,7 +85,7 @@ class RecommendationBatchServiceTest {
     @Test
     @DisplayName("신호 없는 회원은 추천을 만들지 않는다(콜드스타트는 읽기에서 폴백)")
     void run_noSignals_noRecommendation() {
-        given(orderRepository.findByStatus(OrderStatus.PAID)).willReturn(List.of());
+        given(orderRepository.findByStatusIn(OrderStatus.PURCHASED)).willReturn(List.of());
         given(wishlistRepository.findAll()).willReturn(List.of());
         given(activityLogRepository.findByCreatedAtAfter(any())).willReturn(List.of());
         given(productRepository.findAll()).willReturn(List.of(product(1L, 10L, 100L)));

@@ -153,8 +153,9 @@ export interface Address {
   createdAt: string;
 }
 
-// 결제 도입 후: 주문은 결제 대기(PENDING) → 결제 완료(PAID) / 취소(CANCELLED)
-export type OrderStatus = "PENDING" | "PAID" | "CANCELLED";
+// 주문 상태머신: 결제 대기(PENDING) → 결제 완료(PAID) → 배송중(SHIPPING) → 배송완료(DELIVERED).
+// 취소(CANCELLED)는 배송 시작 전(PENDING/PAID)까지만. 배송 진행은 forward-only(어드민이 전진).
+export type OrderStatus = "PENDING" | "PAID" | "SHIPPING" | "DELIVERED" | "CANCELLED";
 
 // 결제 상태머신 (백엔드 PaymentStatus). READY→PAID/FAILED, PAID→CANCELLED(환불)
 export type PaymentStatus = "READY" | "PAID" | "FAILED" | "CANCELLED";
@@ -213,11 +214,17 @@ export interface Order {
 /** 주문 목록 요약 (OrderSummaryResponse) — 목록은 가볍게(대표상품명 + 항목수) */
 export interface OrderSummary {
   id: number;
+  memberId: number; // 주문 회원 ID(어드민 목록에서 식별용)
   status: OrderStatus;
   totalPrice: number;
   createdAt: string;
   representativeProductName: string;
   itemCount: number;
+}
+
+/** 주문 배송 상태 전진 입력 — PATCH /api/orders/{id}/status (ADMIN, forward-only) */
+export interface OrderStatusUpdateInput {
+  status: OrderStatus;
 }
 
 // ───────── 셀러(Seller) ─────────

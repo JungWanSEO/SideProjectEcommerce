@@ -169,19 +169,21 @@ public class Order extends BaseEntity {
         return shares;
     }
 
-    /** 주문 취소 (이미 취소된 주문은 불가) */
+    /** 주문 취소 (이미 취소된 주문·배송 시작된 주문은 불가) */
     public void cancel() {
         if (this.status == OrderStatus.CANCELLED) {
             throw new BusinessException(HttpStatus.CONFLICT, "이미 취소된 주문입니다.");
         }
+        ensureCancellable();
         this.status = OrderStatus.CANCELLED;
     }
 
     /**
      * 항목 단위 취소(부분환불). 해당 항목을 CANCELLED로 만들고, 남은 활성 항목이 없으면 주문도 CANCELLED.
-     * 취소된 항목을 반환한다(환불 금액·셀러 식별용). 없는 항목이면 404, 이미 취소면 409.
+     * 취소된 항목을 반환한다(환불 금액·셀러 식별용). 없는 항목이면 404, 이미 취소면 409, 배송 시작됐으면 409.
      */
     public OrderItem cancelItem(Long orderItemId) {
+        ensureCancellable();
         OrderItem target = orderItems.stream()
                 .filter(i -> orderItemId.equals(i.getId()))
                 .findFirst()
@@ -199,6 +201,29 @@ public class Order extends BaseEntity {
             throw new BusinessException(HttpStatus.CONFLICT, "결제 대기 상태의 주문만 결제할 수 있습니다.");
         }
         this.status = OrderStatus.PAID;
+    }
+
+    /**
+     * 배송 상태 전진(ADMIN). 전이는 <b>forward-only</b>로 PAID → SHIPPING → DELIVERED 만 허용한다.
+     * 건너뛰기(PAID→DELIVERED)·되돌리기(SHIPPING→PAID)·그 외 상태(PENDING/CANCELLED 출발·도착)는 409.
+     */
+    public void advanceShipping(OrderStatus next) {
+        boolean allowed =
+                (this.status == OrderStatus.PAID && next == OrderStatus.SHIPPING)
+                || (this.status == OrderStatus.SHIPPING && next == OrderStatus.DELIVERED);
+        if (!allowed) {
+            throw new BusinessException(HttpStatus.CONFLICT,
+                    "배송 상태를 " + this.status + "에서 " + next
+                            + "(으)로 변경할 수 없습니다. (PAID→SHIPPING→DELIVERED 순서만 가능)");
+        }
+        this.status = next;
+    }
+
+    /** 취소 가능 상태인지 — 배송이 시작(SHIPPING)되거나 완료(DELIVERED)된 주문은 취소할 수 없다(409). */
+    private void ensureCancellable() {
+        if (this.status == OrderStatus.SHIPPING || this.status == OrderStatus.DELIVERED) {
+            throw new BusinessException(HttpStatus.CONFLICT, "배송이 시작된 주문은 취소할 수 없습니다.");
+        }
     }
 
     /** 결제 완료(재고가 차감된) 주문인지 — 취소 시 재고 복원 여부 판단에 사용. */

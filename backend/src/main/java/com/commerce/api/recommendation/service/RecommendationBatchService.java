@@ -69,7 +69,7 @@ public class RecommendationBatchService {
         // 1) 회원별 신호 수집: interactions = member -> (product -> 가중치), exclude = member -> 구매∪찜(추천에서 제외)
         Map<Long, Map<Long, Integer>> interactions = new HashMap<>();
         Map<Long, Set<Long>> exclude = new HashMap<>();
-        for (Order order : orderRepository.findByStatus(OrderStatus.PAID)) {
+        for (Order order : orderRepository.findByStatusIn(OrderStatus.PURCHASED)) {
             for (OrderItem item : order.getOrderItems()) {
                 addWeight(interactions, order.getMemberId(), item.getProductId(), PURCHASE_WEIGHT);
                 exclude.computeIfAbsent(order.getMemberId(), k -> new HashSet<>()).add(item.getProductId());

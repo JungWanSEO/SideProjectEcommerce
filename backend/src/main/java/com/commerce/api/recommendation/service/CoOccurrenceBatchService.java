@@ -53,7 +53,7 @@ public class CoOccurrenceBatchService {
     public int run() {
         // 1) PAID 주문에서 쌍 집계: pairs.get(기준).get(함께산) = 함께 담긴 서로 다른 주문 수
         Map<Long, Map<Long, Integer>> pairs = new HashMap<>();
-        for (Order order : orderRepository.findByStatus(OrderStatus.PAID)) {
+        for (Order order : orderRepository.findByStatusIn(OrderStatus.PURCHASED)) {
             // 한 주문 안의 '활성' 항목들의 distinct 상품 ID
             //  - 취소(CANCELLED) 항목 제외, 옵션(사이즈)만 다른 같은 상품은 1개로 — "주문 단위 함께 샀나"가 기준.
             List<Long> productIds = order.getOrderItems().stream()

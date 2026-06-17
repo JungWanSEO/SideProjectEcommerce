@@ -187,4 +187,139 @@ class OrderServiceTest {
                 .hasMessageContaining("본인의 주문");
         assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);   // 취소 막힘 → 상태 그대로
     }
+
+    // ----- 배송 상태 전진 (forward-only) -----
+
+    /** 실제 상태머신을 따라 원하는 상태까지 전진시킨 주문(주인=100번, 항목 1개). */
+    private Order orderInStatus(Long id, OrderStatus status) {
+        Order order = orderWithId(id, 100L, item(1));
+        if (status == OrderStatus.PENDING) {
+            return order;
+        }
+        order.markPaid();                                 // PENDING → PAID
+        if (status == OrderStatus.PAID) {
+            return order;
+        }
+        if (status == OrderStatus.CANCELLED) {
+            order.cancel();
+            return order;
+        }
+        order.advanceShipping(OrderStatus.SHIPPING);      // PAID → SHIPPING
+        if (status == OrderStatus.SHIPPING) {
+            return order;
+        }
+        order.advanceShipping(OrderStatus.DELIVERED);     // SHIPPING → DELIVERED
+        return order;
+    }
+
+    @Test
+    @DisplayName("배송 상태 전진 - PAID→SHIPPING 성공")
+    void advanceShipping_paidToShipping() {
+        Order order = orderInStatus(1L, OrderStatus.PAID);
+        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+
+        OrderResponse response = orderService.advanceShipping(1L, OrderStatus.SHIPPING);
+
+        assertThat(response.status()).isEqualTo(OrderStatus.SHIPPING);
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.SHIPPING);
+    }
+
+    @Test
+    @DisplayName("배송 상태 전진 - SHIPPING→DELIVERED 성공")
+    void advanceShipping_shippingToDelivered() {
+        Order order = orderInStatus(1L, OrderStatus.SHIPPING);
+        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+
+        OrderResponse response = orderService.advanceShipping(1L, OrderStatus.DELIVERED);
+
+        assertThat(response.status()).isEqualTo(OrderStatus.DELIVERED);
+    }
+
+    @Test
+    @DisplayName("배송 상태 전진 실패 - 건너뛰기(PAID→DELIVERED) 409, 상태 불변")
+    void advanceShipping_skipForbidden() {
+        Order order = orderInStatus(1L, OrderStatus.PAID);
+        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+
+        assertThatThrownBy(() -> orderService.advanceShipping(1L, OrderStatus.DELIVERED))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("변경할 수 없습니다");
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.PAID);
+    }
+
+    @Test
+    @DisplayName("배송 상태 전진 실패 - 되돌리기(SHIPPING→PAID) 409")
+    void advanceShipping_reverseForbidden() {
+        Order order = orderInStatus(1L, OrderStatus.SHIPPING);
+        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+
+        assertThatThrownBy(() -> orderService.advanceShipping(1L, OrderStatus.PAID))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("변경할 수 없습니다");
+    }
+
+    @Test
+    @DisplayName("배송 상태 전진 실패 - PENDING(미결제)에서 전진 409")
+    void advanceShipping_fromPendingForbidden() {
+        Order order = orderInStatus(1L, OrderStatus.PENDING);
+        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+
+        assertThatThrownBy(() -> orderService.advanceShipping(1L, OrderStatus.SHIPPING))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("변경할 수 없습니다");
+    }
+
+    @Test
+    @DisplayName("배송 상태 전진 실패 - 없는 주문 404")
+    void advanceShipping_notFound() {
+        given(orderRepository.findById(99L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> orderService.advanceShipping(99L, OrderStatus.SHIPPING))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("찾을 수 없습니다");
+    }
+
+    @Test
+    @DisplayName("주문 취소 실패 - 배송 시작(SHIPPING) 주문은 409, 재고 복원 없음")
+    void cancel_shippingBlocked() {
+        Order order = orderInStatus(1L, OrderStatus.SHIPPING);
+        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+
+        assertThatThrownBy(() -> orderService.cancel(1L, 100L, false))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("배송이 시작된");
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.SHIPPING);
+        verify(productRepository, never()).findByOptionId(any());
+    }
+
+    // ----- 어드민 전체 주문 목록 -----
+
+    @Test
+    @DisplayName("어드민 주문 목록 - status 없으면 findAll(전체)")
+    void getAllOrders_all() {
+        Pageable pageable = PageRequest.of(0, 20);
+        given(orderRepository.findAll(pageable))
+                .willReturn(new PageImpl<>(List.of(orderInStatus(1L, OrderStatus.PAID)), pageable, 1));
+
+        PageResponse<OrderSummaryResponse> response = orderService.getAllOrders(null, pageable);
+
+        assertThat(response.content()).hasSize(1);
+        assertThat(response.content().get(0).status()).isEqualTo(OrderStatus.PAID);
+        verify(orderRepository).findAll(pageable);
+    }
+
+    @Test
+    @DisplayName("어드민 주문 목록 - status 있으면 그 상태만(findByStatus)")
+    void getAllOrders_byStatus() {
+        Pageable pageable = PageRequest.of(0, 20);
+        given(orderRepository.findByStatus(OrderStatus.SHIPPING, pageable))
+                .willReturn(new PageImpl<>(List.of(orderInStatus(1L, OrderStatus.SHIPPING)), pageable, 1));
+
+        PageResponse<OrderSummaryResponse> response =
+                orderService.getAllOrders(OrderStatus.SHIPPING, pageable);
+
+        assertThat(response.content()).hasSize(1);
+        assertThat(response.content().get(0).status()).isEqualTo(OrderStatus.SHIPPING);
+        verify(orderRepository).findByStatus(OrderStatus.SHIPPING, pageable);
+    }
 }

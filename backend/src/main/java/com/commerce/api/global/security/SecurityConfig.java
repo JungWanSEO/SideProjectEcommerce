@@ -94,6 +94,10 @@ public class SecurityConfig {
                         // 상품 이미지(갤러리) 추가·삭제도 운영 업무 → ADMIN
                         .requestMatchers(HttpMethod.POST, "/api/products/*/images").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/products/*/images/**").hasRole("ADMIN")
+                        // 어드민 주문 관리(전체 목록·배송 상태 전진)는 운영 업무 → ADMIN
+                        //  (내 주문 GET /api/orders·POST 등은 아래 anyRequest().authenticated()로 본인 스코핑)
+                        .requestMatchers(HttpMethod.GET, "/api/orders/admin").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PATCH, "/api/orders/*/status").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/categories", "/api/brands").hasRole("ADMIN")
                         // 카테고리 수정·삭제도 운영 업무 → ADMIN (GET /api/categories/** 는 위에서 공개)
                         .requestMatchers(HttpMethod.PUT, "/api/categories/*").hasRole("ADMIN")

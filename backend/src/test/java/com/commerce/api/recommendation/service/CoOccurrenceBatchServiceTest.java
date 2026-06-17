@@ -74,7 +74,7 @@ class CoOccurrenceBatchServiceTest {
     @DisplayName("함께 산 상품 - 같은 주문의 다른 상품을 함께 산 빈도순으로(자기 자신 제외)")
     void run_ranksCoBoughtByFrequency() {
         // order1: p1·p2·p3, order2: p1·p2 → 기준 p1 입장에서 p2는 2회, p3는 1회 함께 샀다
-        given(orderRepository.findByStatus(OrderStatus.PAID))
+        given(orderRepository.findByStatusIn(OrderStatus.PURCHASED))
                 .willReturn(List.of(paidOrder(1L, 1L, 2L, 3L), paidOrder(2L, 1L, 2L)));
         given(productRepository.findAll()).willReturn(List.of(
                 product(1L, ProductStatus.ON_SALE),
@@ -106,7 +106,7 @@ class CoOccurrenceBatchServiceTest {
         cancelled.cancel();
         order.addItem(cancelled);
         order.markPaid();
-        given(orderRepository.findByStatus(OrderStatus.PAID)).willReturn(List.of(order));
+        given(orderRepository.findByStatusIn(OrderStatus.PURCHASED)).willReturn(List.of(order));
         given(productRepository.findAll()).willReturn(List.of(
                 product(1L, ProductStatus.ON_SALE),
                 product(2L, ProductStatus.SOLD_OUT),
@@ -126,7 +126,7 @@ class CoOccurrenceBatchServiceTest {
     @Test
     @DisplayName("단일 항목 주문만 있으면 쌍이 없어 함께 산 상품을 만들지 않는다")
     void run_singleItemOrders_noPairs() {
-        given(orderRepository.findByStatus(OrderStatus.PAID))
+        given(orderRepository.findByStatusIn(OrderStatus.PURCHASED))
                 .willReturn(List.of(paidOrder(1L, 1L), paidOrder(2L, 2L)));
         given(productRepository.findAll()).willReturn(List.of(
                 product(1L, ProductStatus.ON_SALE), product(2L, ProductStatus.ON_SALE)));
