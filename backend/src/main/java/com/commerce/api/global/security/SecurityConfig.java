@@ -95,8 +95,12 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/products/*/images").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/products/*/images/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/categories", "/api/brands").hasRole("ADMIN")
-                        // 브랜드 변경(셀러 귀속 등)은 ADMIN (GET /api/brands/** 는 위에서 공개)
+                        // 카테고리 수정·삭제도 운영 업무 → ADMIN (GET /api/categories/** 는 위에서 공개)
+                        .requestMatchers(HttpMethod.PUT, "/api/categories/*").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/categories/*").hasRole("ADMIN")
+                        // 브랜드 변경(이름 수정·셀러 귀속)·삭제는 ADMIN (GET /api/brands/** 는 위에서 공개)
                         .requestMatchers(HttpMethod.PUT, "/api/brands/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/brands/*").hasRole("ADMIN")
                         // 셀러 관리·정산·대사는 운영 업무 → 전 경로 ADMIN 전용
                         .requestMatchers("/api/sellers/**").hasRole("ADMIN")
                         .requestMatchers("/api/settlements/**").hasRole("ADMIN")

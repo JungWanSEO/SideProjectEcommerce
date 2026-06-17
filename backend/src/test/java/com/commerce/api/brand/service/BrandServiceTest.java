@@ -9,9 +9,11 @@ import static org.mockito.Mockito.verify;
 
 import com.commerce.api.brand.dto.BrandCreateRequest;
 import com.commerce.api.brand.dto.BrandResponse;
+import com.commerce.api.brand.dto.BrandUpdateRequest;
 import com.commerce.api.brand.entity.Brand;
 import com.commerce.api.brand.repository.BrandRepository;
 import com.commerce.api.global.exception.BusinessException;
+import com.commerce.api.product.repository.ProductRepository;
 import com.commerce.api.seller.repository.SellerRepository;
 import java.util.List;
 import java.util.Optional;
@@ -33,6 +35,8 @@ class BrandServiceTest {
     private BrandRepository brandRepository;
     @Mock
     private SellerRepository sellerRepository;
+    @Mock
+    private ProductRepository productRepository;
     @InjectMocks
     private BrandService brandService;
 
@@ -122,5 +126,78 @@ class BrandServiceTest {
         assertThatThrownBy(() -> brandService.assignSeller(99L, 7L))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("브랜드를 찾을 수 없습니다");
+    }
+
+    // ----- 수정(update) -----
+
+    @Test
+    @DisplayName("브랜드 수정 성공 - 이름 변경")
+    void update_success() {
+        Brand brand = brandWithId(1L, "Nike");
+        given(brandRepository.findById(1L)).willReturn(Optional.of(brand));
+        given(brandRepository.existsByNameAndIdNot("Nike Korea", 1L)).willReturn(false);
+
+        BrandResponse response = brandService.update(1L, new BrandUpdateRequest("Nike Korea"));
+
+        assertThat(response.name()).isEqualTo("Nike Korea");
+        assertThat(brand.getName()).isEqualTo("Nike Korea");   // 영속 엔티티가 갱신됨
+    }
+
+    @Test
+    @DisplayName("브랜드 수정 실패 - 없으면 404")
+    void update_notFound() {
+        given(brandRepository.findById(99L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> brandService.update(99L, new BrandUpdateRequest("Nike Korea")))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("찾을 수 없습니다");
+    }
+
+    @Test
+    @DisplayName("브랜드 수정 실패 - 다른 브랜드와 이름 중복이면 409")
+    void update_duplicateName() {
+        given(brandRepository.findById(1L)).willReturn(Optional.of(brandWithId(1L, "Nike")));
+        given(brandRepository.existsByNameAndIdNot("Adidas", 1L)).willReturn(true);
+
+        assertThatThrownBy(() -> brandService.update(1L, new BrandUpdateRequest("Adidas")))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("이미 존재");
+    }
+
+    // ----- 삭제(delete) -----
+
+    @Test
+    @DisplayName("브랜드 삭제 성공 - 참조 상품 없으면 삭제")
+    void delete_success() {
+        Brand brand = brandWithId(1L, "Nike");
+        given(brandRepository.findById(1L)).willReturn(Optional.of(brand));
+        given(productRepository.existsByBrandId(1L)).willReturn(false);
+
+        brandService.delete(1L);
+
+        verify(brandRepository).delete(brand);
+    }
+
+    @Test
+    @DisplayName("브랜드 삭제 실패 - 없으면 404")
+    void delete_notFound() {
+        given(brandRepository.findById(99L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> brandService.delete(99L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("찾을 수 없습니다");
+        verify(brandRepository, never()).delete(any());
+    }
+
+    @Test
+    @DisplayName("브랜드 삭제 실패 - 참조하는 상품이 있으면 409")
+    void delete_referencedByProduct() {
+        given(brandRepository.findById(1L)).willReturn(Optional.of(brandWithId(1L, "Nike")));
+        given(productRepository.existsByBrandId(1L)).willReturn(true);
+
+        assertThatThrownBy(() -> brandService.delete(1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("사용하는 상품이 있어");
+        verify(brandRepository, never()).delete(any());
     }
 }

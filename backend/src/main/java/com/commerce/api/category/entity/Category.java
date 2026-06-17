@@ -47,4 +47,13 @@ public class Category extends BaseEntity {
     public static Category create(String name, Long parentId) {
         return new Category(name, parentId);
     }
+
+    /**
+     * 이름·부모를 수정(2단계 제약·중복 등 검증은 서비스가 담당). parentId=null이면 최상위로 올린다.
+     * 영속 엔티티에서 호출하면 dirty checking으로 flush된다.
+     */
+    public void update(String name, Long parentId) {
+        this.name = name;
+        this.parentId = parentId;
+    }
 }
