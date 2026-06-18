@@ -18,6 +18,9 @@
 
 ## 📅 타임라인 — 2026-06 · [상세 →](dev-log/2026-06.md)
 
+**17일차 (06-19)**
+- **아웃박스 P2b: 실제 RabbitMQ 발행/소비 (함께·외부)** — "함께(외부)" 첫 항목. in-process였던 발행을 실제 메시지 브로커로. **사용자 결정=병행(opt-in)**: `outbox.publisher`(in-process 기본 ↔ rabbit) 스위치, 결제·폴러는 `EventPublisher` 포트만 의존(변경 0). `EventDispatcher`(공유 디스패치)·`RabbitEventPublisher`·`OutboxEventConsumer`(@RabbitListener)·`RabbitConfig`(익스체인지 `commerce.events`·큐 `commerce.notifications`·JSON 컨버터)·`OutboxMessage`. docker-compose rabbitmq(관리 UI 15672)·amqp 스타터·테스트는 RabbitAutoConfiguration 제외. **377 tests**(+4 단위). **🟢 런타임 PASS**: rabbit 모드 기동→토폴로지 선언(consumers=1)→결제 #53 E2E→outbox PUBLISHED→소비→`notification_log` event_id=26. 머지 `feature/outbox-rabbitmq`→dev `--no-ff`. ⚠️함정: `docker exec mysql -e`에 한글 LIKE는 UTF-8 깨짐→숫자 id 조회. 후속=Testcontainers·DLQ·배포 시 브로커.
+
 **16일차 (06-17)**
 - **대사 일자별 윈도우 (선택적 from/to)** — "결정 필요"였던 항목. `ReconciliationService` 주석의 단순화("실무는 일자별이지만 전체를 본다")를 품. **사용자 결정(AskUserQuestion)=선택적 [from,to] 범위**(무인자=전체·기존 호환). 윈도우 기준=정산일(우리 `SettlementEntry.settledDate`·PG 신규 `PgSettlementRecord.settledOn`). `reconcile(from,to)`가 양측을 정산일로 필터; OPEN 삭제는 윈도우 거래키로 스코프(`deleteByStatusAndPgTransactionIdIn`·다른 날짜 OPEN 보존), 전체는 기존 `deleteByStatus`. `POST /run?from=&to=`. **PG 게이트웨이 계약 변경**(PgSettlementRecord에 settledOn·approve가 now 기록) 수용. 마이그0·**373 tests**(+3). 머지 `feature/reconciliation-daily-window`→dev `--no-ff`. ⚠️모의 PG는 인메모리·동일자라 멀티데이 데모 한계(코드는 정확).
 - **PLP 카테고리 필터 2단계 표시 (FE)** — "결정 필요"였던 항목을 사용자가 지시. `/products` 카테고리 드롭다운을 **부모→자식(`└ ` 들여쓰기)** 2단계로(`categoryFilterOptions` 헬퍼) — 어드민 상품 폼과 같은 표시 컨벤션·`Select`(Headless Listbox) 무변경. FE 전용·BE 무변경(**370 tests** 유지)·tsc/lint 0. 머지 `feature/plp-category-2level`→dev `--no-ff`. 자식 없으면 최상위 평면 degrade·부모 선택은 부모 직속 상품만(자식 합산은 범위 밖). ⚠️브라우저 확인=사용자.
