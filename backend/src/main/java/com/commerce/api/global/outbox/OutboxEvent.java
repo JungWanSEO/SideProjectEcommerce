@@ -74,6 +74,17 @@ public class OutboxEvent extends BaseEntity {
         return new OutboxEvent(eventType, aggregateType, aggregateId, payload);
     }
 
+    /**
+     * 브로커에서 받은 메시지({@link OutboxMessage})를 핸들러에 넘기기 위한 <b>비영속 복원</b>(소비자 측).
+     * id는 발행자의 outbox 행 id 그대로 — 핸들러가 멱등 키로 쓴다. DB에 저장하지 않는다.
+     */
+    public static OutboxEvent received(Long id, String eventType, String aggregateType,
+                                       String aggregateId, String payload) {
+        OutboxEvent event = new OutboxEvent(eventType, aggregateType, aggregateId, payload);
+        event.id = id;
+        return event;
+    }
+
     /** 발행 성공 → PUBLISHED. */
     public void markPublished() {
         this.status = OutboxStatus.PUBLISHED;

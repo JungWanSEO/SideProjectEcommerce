@@ -24,6 +24,9 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-web'
 	implementation 'org.springframework.boot:spring-boot-starter-security'
 	implementation 'org.springframework.boot:spring-boot-starter-aop'
+	// 메시지 브로커(RabbitMQ) 연동 — 아웃박스 P2b. outbox.publisher=rabbit 일 때만 실제 사용.
+	// (Spring AMQP: RabbitTemplate 발행 + @RabbitListener 소비)
+	implementation 'org.springframework.boot:spring-boot-starter-amqp'
 	implementation 'org.springframework.retry:spring-retry'
 	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.6'
 	implementation 'io.jsonwebtoken:jjwt-api:0.12.6'

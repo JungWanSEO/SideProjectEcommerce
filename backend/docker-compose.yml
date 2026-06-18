@@ -37,5 +37,27 @@ services:
       mysql:
         condition: service_healthy
 
+  # 메시지 브로커(RabbitMQ) — 아웃박스 P2b: 폴러가 in-process 대신 RabbitMQ로 발행하고
+  # 소비자(@RabbitListener)가 분리 수신한다. '-management' 태그라 관리 웹 UI 플러그인이 켜져 있다.
+  #  · 5672  = AMQP 포트(앱이 연결)
+  #  · 15672 = 관리 웹 UI (http://localhost:15672, 기본 계정 guest / guest)
+  # 기본 계정 guest는 localhost에서만 로그인 가능 → 127.0.0.1 바인딩과 맞아 추가 계정 설정 불필요.
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: commerce-rabbitmq
+    ports:
+      - "127.0.0.1:5672:5672"     # AMQP — 앱이 연결
+      - "127.0.0.1:15672:15672"   # 관리 웹 UI
+    environment:
+      TZ: Asia/Seoul
+    volumes:
+      - commerce-rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
 volumes:
   commerce-mysql-data:
+  commerce-rabbitmq-data:
