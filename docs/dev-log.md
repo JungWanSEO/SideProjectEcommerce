@@ -18,6 +18,9 @@
 
 ## 📅 타임라인 — 2026-06 · [상세 →](dev-log/2026-06.md)
 
+**18일차 (06-24)**
+- **배포 준비 ($0 라이브 데모용 세팅)** — "RabbitMQ→배포" 흐름의 배포 차례, 사용자 결정=**$0 경로 + MySQL 유지**(무료 MySQL 호스트라 Flyway 무수정). 이번엔 **플랫폼 안 가리는 공통 준비**만(계정·실배포는 사용자). 코드 하드코딩(localhost·포트·CORS·쿠키)을 **환경변수화**(전부 로컬 기본값 보존→테스트·로컬 무변화): `SecurityConfig` CORS→`app.cors.allowed-origins`, `AuthCookieManager` secure/sameSite→`app.cookie.*`(운영 None/Secure=크로스도메인), `application.yml` `server.port=${PORT:8080}`·datasource url env우선. **`backend/Dockerfile`**(멀티스테이지)+`.dockerignore`, **`docs/deploy.md`**($0 플랫폼·env표·쿠키 함정·단계). 검증=**377 tests 그대로**+**docker build 성공**(393MB). 머지 `feature/deploy-prep`→dev `--no-ff`. 다음=(사용자) MySQL호스트→Render(BE)→Vercel(FE) 배포.
+
 **17일차 (06-19)**
 - **아웃박스 P2b: 실제 RabbitMQ 발행/소비 (함께·외부)** — "함께(외부)" 첫 항목. in-process였던 발행을 실제 메시지 브로커로. **사용자 결정=병행(opt-in)**: `outbox.publisher`(in-process 기본 ↔ rabbit) 스위치, 결제·폴러는 `EventPublisher` 포트만 의존(변경 0). `EventDispatcher`(공유 디스패치)·`RabbitEventPublisher`·`OutboxEventConsumer`(@RabbitListener)·`RabbitConfig`(익스체인지 `commerce.events`·큐 `commerce.notifications`·JSON 컨버터)·`OutboxMessage`. docker-compose rabbitmq(관리 UI 15672)·amqp 스타터·테스트는 RabbitAutoConfiguration 제외. **377 tests**(+4 단위). **🟢 런타임 PASS**: rabbit 모드 기동→토폴로지 선언(consumers=1)→결제 #53 E2E→outbox PUBLISHED→소비→`notification_log` event_id=26. 머지 `feature/outbox-rabbitmq`→dev `--no-ff`. ⚠️함정: `docker exec mysql -e`에 한글 LIKE는 UTF-8 깨짐→숫자 id 조회. 후속=Testcontainers·DLQ·배포 시 브로커.
 

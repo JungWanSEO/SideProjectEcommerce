@@ -8,6 +8,7 @@
 - (비어 있음) — 다음 `자율진행`은 멈춰 "백로그 채우기 필요" 보고. 후보는 "결정 필요"에서 결정 후 올리거나 "함께(외부)" 학습.
 
 ## 함께 (외부 연동 · 학습 — 자율 금지)
+- 🚧 **배포 ($0 라이브 데모)** — **준비 완료**(`feature/deploy-prep`→dev): env화(CORS·쿠키·포트·DB주소)·`backend/Dockerfile`·`docs/deploy.md`. **다음=사용자 계정 단계**: MySQL 무료호스트→Render(BE)→Vercel(FE) 배포 + env 입력 + 크로스도메인 로그인 확인. (가이드=docs/deploy.md)
 - ✅ 아웃박스 P2b 실제 RabbitMQ (메시지 브로커) — `feature/outbox-rabbitmq`→dev (377 tests·**런타임 PASS**). 병행 opt-in(`outbox.publisher=in-process|rabbit`)·EventPublisher 포트 어댑터·@RabbitListener 소비·docker-compose rabbitmq(15672). 후속: Testcontainers 실브로커 통합·DLQ.
 - 우편번호 검색 API (Daum/Kakao 외부 API)
 - ✅ CI (GitHub Actions, `.github/workflows/ci.yml`) — 도입 완료. **다음=스케줄 무인 운영(이 위에)**. 후속: Testcontainers 실DB 통합·브랜치 보호 규칙.
