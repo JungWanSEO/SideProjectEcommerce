@@ -1,7 +1,9 @@
 package com.commerce.api.global.security;
 
+import java.util.Arrays;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -37,17 +39,22 @@ public class SecurityConfig {
     }
 
     /**
-     * CORS 설정: 프론트엔드 dev 서버에서의 브라우저 호출을 허용한다.
+     * CORS 설정: 프론트엔드(다른 origin)에서의 브라우저 호출을 허용한다.
      * (CORS는 브라우저 보호 정책 — 다른 origin의 JS가 우리 API를 부를 때 서버가 명시 허용해야 함)
-     * TODO(운영): 허용 origin을 환경변수/프로파일로 분리(배포 도메인).
+     *
+     * <p>허용 origin은 {@code app.cors.allowed-origins}(콤마 구분)로 외부화한다 — 로컬 기본은
+     * Next.js dev 서버, 운영은 env(예: {@code APP_CORS_ALLOWED_ORIGINS=https://xxx.vercel.app})로 덮어쓴다.
+     * 쿠키 인증({@code allowCredentials=true})이라 {@code *} 와일드카드는 못 쓰고 origin을 명시해야 한다.
      */
     @Bean
-    public CorsConfigurationSource corsConfigurationSource() {
+    public CorsConfigurationSource corsConfigurationSource(
+            @Value("${app.cors.allowed-origins:http://localhost:3000}") String allowedOrigins) {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(List.of("http://localhost:3000"));   // Next.js dev 서버
+        config.setAllowedOrigins(Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim).filter(s -> !s.isEmpty()).toList());
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));                       // Authorization·Content-Type 등
-        config.setAllowCredentials(true);                             // 추후 쿠키 기반 인증 대비
+        config.setAllowCredentials(true);                             // httpOnly 쿠키 기반 인증
         config.setMaxAge(3600L);                                      // preflight 결과 캐시(초)
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
@@ -56,10 +63,11 @@ public class SecurityConfig {
     }
 
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain filterChain(
+            HttpSecurity http, CorsConfigurationSource corsConfigurationSource) throws Exception {
         http
                 // 프론트엔드(다른 origin)에서의 브라우저 호출 허용. preflight(OPTIONS)는 Spring이 자동 처리.
-                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                .cors(cors -> cors.configurationSource(corsConfigurationSource))
                 .csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
