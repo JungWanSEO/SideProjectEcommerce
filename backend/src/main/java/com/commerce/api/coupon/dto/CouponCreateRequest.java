@@ -63,6 +63,17 @@ public record CouponCreateRequest(
 
         @Schema(description = "유효 종료 일시", example = "2026-12-31T23:59:59")
         @NotNull(message = "유효 종료 일시는 필수입니다.")
-        LocalDateTime validUntil
+        LocalDateTime validUntil,
+
+        @Schema(description = "선착순 발급 한도(장, 선택). 비우면 무제한. 회원 직접 받기(claim)용.", example = "100")
+        @Positive(message = "발급 한도는 0보다 커야 합니다.")
+        Integer totalQuantity
 ) {
+    /** totalQuantity 없는 호출용 편의 생성자(무제한). 기존 호출부 호환. */
+    public CouponCreateRequest(String code, String name, DiscountType discountType, long discountValue,
+            Long maxDiscountAmount, long minOrderAmount, CouponFundedBy fundedBy, CouponIssueType issueType,
+            Long sellerId, LocalDateTime validFrom, LocalDateTime validUntil) {
+        this(code, name, discountType, discountValue, maxDiscountAmount, minOrderAmount, fundedBy,
+                issueType, sellerId, validFrom, validUntil, null);
+    }
 }

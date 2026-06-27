@@ -41,7 +41,8 @@ public class CouponService {
         Coupon coupon = Coupon.create(
                 code, request.name(), request.discountType(), request.discountValue(),
                 request.maxDiscountAmount(), request.minOrderAmount(), request.fundedBy(),
-                request.sellerId(), request.issueType(), request.validFrom(), request.validUntil());
+                request.sellerId(), request.issueType(), request.validFrom(), request.validUntil(),
+                request.totalQuantity());
         return CouponResponse.from(couponRepository.save(coupon));
     }
 
