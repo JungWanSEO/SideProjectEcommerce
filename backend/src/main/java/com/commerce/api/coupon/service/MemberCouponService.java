@@ -71,6 +71,39 @@ public class MemberCouponService {
         return issued;
     }
 
+    /**
+     * 선착순 쿠폰 받기(회원 직접) — 한도 내에서 회원당 1장 발급한다. 동시에 몰려도 초과 발급이 없다.
+     *
+     * <p><b>동시성 제어(핵심):</b>
+     * <ol>
+     *   <li><b>원자적 조건부 증가</b> {@code incrementIssuedCount} — 한도 내일 때만 DB가 행 단위로 +1.
+     *       1이면 발급, 0이면 마감(409). 애플리케이션 락 없이 lost update를 구조적으로 차단.</li>
+     *   <li><b>member_coupon UNIQUE</b>(회원·쿠폰) — 같은 회원 중복 발급 차단.</li>
+     *   <li><b>한 트랜잭션</b> — 카운터 증가와 발급 저장이 원자적. 발급 저장이 실패하면(예: 중복)
+     *       증가도 롤백되어 카운터와 실제 발급 수가 어긋나지 않는다.</li>
+     * </ol>
+     * 없는 쿠폰 404 · 발급형 아님/기간 외/비활성 400 · 이미 받음/마감 409.
+     */
+    @Transactional
+    public MemberCouponResponse claim(Long memberId, Long couponId) {
+        Coupon coupon = couponRepository.findById(couponId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "쿠폰을 찾을 수 없습니다."));
+        if (!coupon.isIssued()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "발급형(ISSUED) 쿠폰만 받을 수 있습니다.");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        coupon.ensureClaimable(now);   // 활성 + 기간 내(수량은 아래 원자적 증가가 가드)
+        if (memberCouponRepository.existsByMemberIdAndCouponId(memberId, couponId)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "이미 받은 쿠폰입니다.");
+        }
+        // ★ 동시성 핵심: 한도 내에서만 원자적으로 +1. 0이면 선착순 마감.
+        if (couponRepository.incrementIssuedCount(couponId) == 0) {
+            throw new BusinessException(HttpStatus.CONFLICT, "선착순 마감되었습니다. (쿠폰이 모두 소진됨)");
+        }
+        MemberCoupon issued = memberCouponRepository.save(MemberCoupon.issue(memberId, couponId));
+        return MemberCouponResponse.of(issued, coupon, now);
+    }
+
     /** 내 쿠폰함(최신 발급 먼저) — 쿠폰 상세 enrich + 사용 가능 여부(usable). */
     public List<MemberCouponResponse> getMyWallet(Long memberId) {
         List<MemberCoupon> wallet = memberCouponRepository.findByMemberIdOrderByIdDesc(memberId);

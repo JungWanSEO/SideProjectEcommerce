@@ -15,6 +15,7 @@ import com.commerce.api.coupon.dto.CouponIssueRequest;
 import com.commerce.api.coupon.entity.Coupon;
 import com.commerce.api.coupon.entity.CouponFundedBy;
 import com.commerce.api.coupon.entity.CouponIssueType;
+import com.commerce.api.coupon.entity.CouponStatus;
 import com.commerce.api.coupon.entity.DiscountType;
 import com.commerce.api.coupon.entity.MemberCoupon;
 import com.commerce.api.coupon.entity.MemberCouponStatus;
@@ -153,6 +154,83 @@ class MemberCouponServiceTest {
         assertThatThrownBy(() -> memberCouponService.issue(8L, new CouponIssueRequest(true, null)))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("발급형(ISSUED)");
+    }
+
+    // ----- 선착순 받기(claim) -----
+
+    @Test
+    @DisplayName("선착순 받기 성공 - 한도 내(원자적 증가=1)면 발급")
+    void claim_success() {
+        Coupon c = coupon(7L, CouponIssueType.ISSUED);
+        given(couponRepository.findById(7L)).willReturn(Optional.of(c));
+        given(memberCouponRepository.existsByMemberIdAndCouponId(100L, 7L)).willReturn(false);
+        given(couponRepository.incrementIssuedCount(7L)).willReturn(1);   // 한도 내
+        given(memberCouponRepository.save(any(MemberCoupon.class))).willAnswer(inv -> inv.getArgument(0));
+
+        var response = memberCouponService.claim(100L, 7L);
+
+        assertThat(response).isNotNull();
+        verify(memberCouponRepository).save(any(MemberCoupon.class));
+    }
+
+    @Test
+    @DisplayName("선착순 받기 실패 - 마감(원자적 증가=0)이면 409, 발급 저장 안 함")
+    void claim_soldOut() {
+        Coupon c = coupon(7L, CouponIssueType.ISSUED);
+        given(couponRepository.findById(7L)).willReturn(Optional.of(c));
+        given(memberCouponRepository.existsByMemberIdAndCouponId(100L, 7L)).willReturn(false);
+        given(couponRepository.incrementIssuedCount(7L)).willReturn(0);   // 소진
+
+        assertThatThrownBy(() -> memberCouponService.claim(100L, 7L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("마감");
+        verify(memberCouponRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("선착순 받기 실패 - 이미 받았으면 409, 카운터 증가 안 함")
+    void claim_alreadyClaimed() {
+        Coupon c = coupon(7L, CouponIssueType.ISSUED);
+        given(couponRepository.findById(7L)).willReturn(Optional.of(c));
+        given(memberCouponRepository.existsByMemberIdAndCouponId(100L, 7L)).willReturn(true);
+
+        assertThatThrownBy(() -> memberCouponService.claim(100L, 7L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("이미 받은");
+        verify(couponRepository, never()).incrementIssuedCount(anyLong());
+    }
+
+    @Test
+    @DisplayName("선착순 받기 실패 - 공개형(PUBLIC)은 직접 받기 불가 400")
+    void claim_publicRejected() {
+        given(couponRepository.findById(8L)).willReturn(Optional.of(coupon(8L, CouponIssueType.PUBLIC)));
+
+        assertThatThrownBy(() -> memberCouponService.claim(100L, 8L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("발급형(ISSUED)");
+    }
+
+    @Test
+    @DisplayName("선착순 받기 실패 - 없는 쿠폰 404")
+    void claim_notFound() {
+        given(couponRepository.findById(99L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> memberCouponService.claim(100L, 99L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("찾을 수 없습니다");
+    }
+
+    @Test
+    @DisplayName("선착순 받기 실패 - 비활성 쿠폰이면 400(claimable 아님)")
+    void claim_disabled() {
+        Coupon c = coupon(7L, CouponIssueType.ISSUED);
+        ReflectionTestUtils.setField(c, "status", CouponStatus.DISABLED);
+        given(couponRepository.findById(7L)).willReturn(Optional.of(c));
+
+        assertThatThrownBy(() -> memberCouponService.claim(100L, 7L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("받을 수 없는");
+        verify(couponRepository, never()).incrementIssuedCount(anyLong());
     }
 
     @Test

@@ -86,9 +86,18 @@ public class Coupon extends BaseEntity {
     @Column(nullable = false, length = 20)
     private CouponStatus status;
 
+    /** 선착순 발급 한도(장). null = 무제한. 회원이 직접 받는(claim) ISSUED 쿠폰에서 의미를 가진다. */
+    @Column(name = "total_quantity")
+    private Integer totalQuantity;
+
+    /** 지금까지 발급된 수. 원자적 조건부 증가로만 올린다(동시 발급 시 초과 발급 방지). */
+    @Column(name = "issued_count", nullable = false)
+    private int issuedCount;
+
     private Coupon(String code, String name, DiscountType discountType, long discountValue,
             Long maxDiscountAmount, long minOrderAmount, CouponFundedBy fundedBy, Long sellerId,
-            CouponIssueType issueType, LocalDateTime validFrom, LocalDateTime validUntil) {
+            CouponIssueType issueType, LocalDateTime validFrom, LocalDateTime validUntil,
+            Integer totalQuantity) {
         // 한 쿠폰 안에서 닫히는 불변식은 엔티티가 지킨다(교차필드라 DTO 어노테이션으로 표현하기 어려운 것들).
         if (validUntil.isBefore(validFrom)) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "쿠폰 유효기간이 올바르지 않습니다(시작 > 종료).");
@@ -111,14 +120,25 @@ public class Coupon extends BaseEntity {
         this.validFrom = validFrom;
         this.validUntil = validUntil;
         this.status = CouponStatus.ACTIVE;   // 발급 시 활성
+        this.totalQuantity = totalQuantity;  // null = 무제한
+        this.issuedCount = 0;
     }
 
-    /** 신규 쿠폰 발급(상태=ACTIVE). 코드 유일성은 CouponService가 보장. */
+    /** 신규 쿠폰 발급(상태=ACTIVE, 수량 무제한). 기존 호출부 호환. 코드 유일성은 CouponService가 보장. */
     public static Coupon create(String code, String name, DiscountType discountType, long discountValue,
             Long maxDiscountAmount, long minOrderAmount, CouponFundedBy fundedBy, Long sellerId,
             CouponIssueType issueType, LocalDateTime validFrom, LocalDateTime validUntil) {
+        return create(code, name, discountType, discountValue, maxDiscountAmount, minOrderAmount,
+                fundedBy, sellerId, issueType, validFrom, validUntil, null);
+    }
+
+    /** 신규 쿠폰 발급 — 선착순 한정 수량(totalQuantity, null=무제한) 지정. */
+    public static Coupon create(String code, String name, DiscountType discountType, long discountValue,
+            Long maxDiscountAmount, long minOrderAmount, CouponFundedBy fundedBy, Long sellerId,
+            CouponIssueType issueType, LocalDateTime validFrom, LocalDateTime validUntil,
+            Integer totalQuantity) {
         return new Coupon(code, name, discountType, discountValue, maxDiscountAmount, minOrderAmount,
-                fundedBy, sellerId, issueType, validFrom, validUntil);
+                fundedBy, sellerId, issueType, validFrom, validUntil, totalQuantity);
     }
 
     /** 발급형(ISSUED) 쿠폰인지 — 지갑 보유·단일 사용이 필요한 쿠폰. */
@@ -155,5 +175,18 @@ public class Coupon extends BaseEntity {
     /** 적용 대상 금액에 대해 깎을 금액(원)을 계산한다. 0 이상, applicableAmount 이하. */
     public long calculateDiscount(long applicableAmount) {
         return discountType.discountFor(applicableAmount, discountValue, maxDiscountAmount);
+    }
+
+    /**
+     * 선착순 받기(claim) 가능 상태인지 — 활성 + 발급 기간 내. 아니면 400.
+     * (수량 한도 가드는 원자적 조건부 증가가 담당하므로 여기선 상태/기간만 본다.)
+     */
+    public void ensureClaimable(LocalDateTime now) {
+        if (status != CouponStatus.ACTIVE) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "받을 수 없는 쿠폰입니다.");
+        }
+        if (now.isBefore(validFrom) || now.isAfter(validUntil)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "쿠폰 발급 기간이 아닙니다.");
+        }
     }
 }

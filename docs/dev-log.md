@@ -19,6 +19,7 @@
 ## 📅 타임라인 — 2026-06 · [상세 →](dev-log/2026-06.md)
 
 **18일차 (06-24)**
+- **선착순 한정수량 쿠폰 (동시성 제어)** — 면접 1순위 주제. 기존 쿠폰에 **회원 직접 받기 선착순**을 얹어 동시에 몰려도 초과 발급 0. **핵심=원자적 조건부 UPDATE**(`incrementIssuedCount`: 한도 내일 때만 +1, DB 행 락으로 직렬화·앱 락 없음) + `member_coupon` UNIQUE(1인1장) + 트랜잭션 롤백(정합). `Coupon.totalQuantity/issuedCount`(**V35**)·`create` 12-인자 오버로드(11-인자 보존)·`ensureClaimable`·`MemberCouponService.claim`·`POST /api/member-coupons/claim/{id}`. **384 tests**(+7) — **🟢 동시성 통합테스트**(30명 동시 claim→정확히 10장·초과 0). 머지 `feature/coupon-claim-concurrency`→dev `--no-ff`. 재고 낙관락과 대조되는 전략 스토리. 후속=잔여수량 노출·FE 버튼·Redis 분산락.
 - **배포 준비 ($0 라이브 데모용 세팅)** — "RabbitMQ→배포" 흐름의 배포 차례, 사용자 결정=**$0 경로 + MySQL 유지**(무료 MySQL 호스트라 Flyway 무수정). 이번엔 **플랫폼 안 가리는 공통 준비**만(계정·실배포는 사용자). 코드 하드코딩(localhost·포트·CORS·쿠키)을 **환경변수화**(전부 로컬 기본값 보존→테스트·로컬 무변화): `SecurityConfig` CORS→`app.cors.allowed-origins`, `AuthCookieManager` secure/sameSite→`app.cookie.*`(운영 None/Secure=크로스도메인), `application.yml` `server.port=${PORT:8080}`·datasource url env우선. **`backend/Dockerfile`**(멀티스테이지)+`.dockerignore`, **`docs/deploy.md`**($0 플랫폼·env표·쿠키 함정·단계). 검증=**377 tests 그대로**+**docker build 성공**(393MB). 머지 `feature/deploy-prep`→dev `--no-ff`. 다음=(사용자) MySQL호스트→Render(BE)→Vercel(FE) 배포.
 
 **17일차 (06-19)**

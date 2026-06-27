@@ -33,5 +33,6 @@
 - [x] 주문 배송 상태 (PAID→SHIPPING→DELIVERED, forward-only·**V34**) — `feature/order-shipping-status`→dev (370 tests·tsc/lint 0). `Order.advanceShipping` 전이가드(건너뛰기/되돌리기 409)·`PATCH /api/orders/{id}/status`·`GET /api/orders/admin`·FE `/admin/orders`. 파생: 배송후 취소 차단·구매기준 `OrderStatus.PURCHASED`로 확장(리뷰/추천). ⚠️V34 MySQL 스모크 사용자 복귀 후
 - [x] PLP 카테고리 필터 2단계 표시 (FE) — `feature/plp-category-2level`→dev (tsc/lint 0·BE 370 유지). `/products` 카테고리 드롭다운 부모→자식 `└ ` 들여쓰기(`categoryFilterOptions`)·어드민 폼 컨벤션·Select 무변경
 - [x] 대사 일자별 윈도우 (선택적 from/to) — `feature/reconciliation-daily-window`→dev (373 tests·마이그0). 윈도우 기준=정산일(우리 settledDate·PG 신규 settledOn)·`reconcile(from,to)`(무인자=전체)·OPEN 삭제 윈도우 키로 스코프·`POST /run?from=&to=`. PG 게이트웨이 계약(PgSettlementRecord.settledOn) 변경 수용
+- [x] 선착순 한정수량 쿠폰 (동시성 제어·**V35**) — `feature/coupon-claim-concurrency`→dev (384 tests). 원자적 조건부 UPDATE(`incrementIssuedCount` 한도 내만 +1·DB 행 락)+member_coupon UNIQUE+트랜잭션 롤백. `POST /api/member-coupons/claim/{id}`·**동시성 통합테스트(30명 동시→정확히 10장·초과 0)**. 후속=잔여수량 노출·FE 버튼·Redis 분산락
 - [x] **V32·V33 MySQL 런타임 스모크 PASS** — `06-17` 재기동 시 Flyway v33 validate·`GET /api/categories` 200(parent_id)·product_image validate
 - ⚠️ 공통 남음: 위 어드민 FE들(상품·카테고리·브랜드) **브라우저 확인**(서버 기동 완료 — http://localhost:3000/admin)
