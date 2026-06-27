@@ -1,6 +1,7 @@
 package com.commerce.api.review.service;
 
 import com.commerce.api.global.common.PageResponse;
+import com.commerce.api.global.config.CacheConfig;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.member.entity.Member;
 import com.commerce.api.member.repository.MemberRepository;
@@ -16,6 +17,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
@@ -44,6 +46,8 @@ public class ReviewService {
     private final MemberRepository memberRepository;
 
     /** 리뷰 작성: 상품 존재 → 구매(PAID) 검증 → 중복 검증 → 저장 + 상품 평점 카운터 증가. */
+    // 평점 카운터가 바뀌므로 상품 상세 캐시를 무효화(이 상품 key — 교차 도메인 무효화).
+    @CacheEvict(value = CacheConfig.PRODUCT_DETAIL, key = "#productId")
     @Transactional
     public ReviewResponse create(Long memberId, Long productId, ReviewCreateRequest request) {
         if (!productRepository.existsById(productId)) {
@@ -81,6 +85,8 @@ public class ReviewService {
     }
 
     /** 리뷰 삭제: 본인 또는 ADMIN만(아니면 403). 삭제 시 상품 평점 카운터도 감소. */
+    // 파라미터에 productId가 없어(reviewId만) 어느 상품인지 모른다 → 상품 상세 캐시 전체 무효화(삭제는 드묾).
+    @CacheEvict(value = CacheConfig.PRODUCT_DETAIL, allEntries = true)
     @Transactional
     public void delete(Long reviewId, Long memberId, boolean admin) {
         Review review = reviewRepository.findById(reviewId)
@@ -96,6 +102,8 @@ public class ReviewService {
      * 리뷰 수정: 작성자 <b>본인만</b>(아니면 403). 평점이 바뀌면 상품 평점 합계를 델타만큼 조정(개수는 그대로).
      * (삭제는 ADMIN도 가능하지만 내용 수정은 작성자만 — 남의 글을 고쳐 쓰지 않는다.)
      */
+    // 평점이 바뀌면 상품 평점 평균이 달라진다. productId가 파라미터에 없어 전체 무효화(수정도 드묾).
+    @CacheEvict(value = CacheConfig.PRODUCT_DETAIL, allEntries = true)
     @Transactional
     public ReviewResponse update(Long reviewId, Long memberId, ReviewCreateRequest request) {
         Review review = reviewRepository.findById(reviewId)

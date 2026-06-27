@@ -1,6 +1,7 @@
 package com.commerce.api.wishlist.service;
 
 import com.commerce.api.global.common.PageResponse;
+import com.commerce.api.global.config.CacheConfig;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.product.dto.ProductResponse;
 import com.commerce.api.product.repository.ProductRepository;
@@ -11,6 +12,7 @@ import com.commerce.api.wishlist.repository.WishlistRepository;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
@@ -40,6 +42,8 @@ public class WishlistService {
     private final ProductService productService;
 
     /** 찜 추가: 상품 존재(404) → 중복(409) 검증 → 저장 + 상품 찜 카운터 증가. */
+    // 찜 카운터(wishlistCount)가 바뀌므로 그 상품 상세 캐시를 무효화.
+    @CacheEvict(value = CacheConfig.PRODUCT_DETAIL, key = "#productId")
     @Transactional
     public WishlistResponse add(Long memberId, Long productId) {
         if (!productRepository.existsById(productId)) {
@@ -61,6 +65,7 @@ public class WishlistService {
     }
 
     /** 찜 해제: 내 찜 행을 찾아(없으면 404) 삭제 + 상품 찜 카운터 감소. */
+    @CacheEvict(value = CacheConfig.PRODUCT_DETAIL, key = "#productId")
     @Transactional
     public void remove(Long memberId, Long productId) {
         Wishlist wishlist = wishlistRepository.findByMemberIdAndProductId(memberId, productId)
