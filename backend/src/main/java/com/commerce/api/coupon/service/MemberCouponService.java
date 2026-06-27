@@ -1,5 +1,6 @@
 package com.commerce.api.coupon.service;
 
+import com.commerce.api.coupon.dto.ClaimableCouponResponse;
 import com.commerce.api.coupon.dto.CouponApplyResult;
 import com.commerce.api.coupon.dto.CouponIssueRequest;
 import com.commerce.api.coupon.dto.MemberCouponResponse;
@@ -13,6 +14,7 @@ import com.commerce.api.member.repository.MemberRepository;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -102,6 +104,23 @@ public class MemberCouponService {
         }
         MemberCoupon issued = memberCouponRepository.save(MemberCoupon.issue(memberId, couponId));
         return MemberCouponResponse.of(issued, coupon, now);
+    }
+
+    /**
+     * 받을 수 있는(claimable) 선착순 쿠폰 목록 — 발급형 + 활성 + 기간 내 쿠폰을 회원 관점으로 내려준다.
+     * 소진/이미받음도 거르지 않고 다 내리되(화면에서 '마감'·'받음' 비활성), 각 쿠폰에 이 회원의
+     * {@code alreadyClaimed}를 표시한다. (보유 여부는 한 번의 in-조회로 모아 N+1을 피한다.)
+     */
+    public List<ClaimableCouponResponse> getClaimableCoupons(Long memberId) {
+        List<Coupon> claimable = couponRepository.findClaimable(LocalDateTime.now());
+        // 이 회원이 이미 보유한 쿠폰 ID 집합 — claimable 후보만 모아 한 번에 조회(쿠폰마다 exists 쿼리 X).
+        Set<Long> ownedCouponIds = memberCouponRepository
+                .findByMemberIdOrderByIdDesc(memberId).stream()
+                .map(MemberCoupon::getCouponId)
+                .collect(Collectors.toSet());
+        return claimable.stream()
+                .map(c -> ClaimableCouponResponse.of(c, ownedCouponIds.contains(c.getId())))
+                .toList();
     }
 
     /** 내 쿠폰함(최신 발급 먼저) — 쿠폰 상세 enrich + 사용 가능 여부(usable). */

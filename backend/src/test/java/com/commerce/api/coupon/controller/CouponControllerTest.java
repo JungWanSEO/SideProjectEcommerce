@@ -46,7 +46,7 @@ class CouponControllerTest {
         return new CouponResponse(1L, "WELCOME5000", "신규 5천원", DiscountType.FIXED_AMOUNT, 5000L, null,
                 30000L, CouponFundedBy.PLATFORM, CouponIssueType.PUBLIC, null,
                 LocalDateTime.of(2026, 6, 1, 0, 0), LocalDateTime.of(2026, 12, 31, 23, 59),
-                CouponStatus.ACTIVE, LocalDateTime.now());
+                CouponStatus.ACTIVE, LocalDateTime.now(), null, null);   // 공개형=무제한 → 잔여수량 null
     }
 
     @Test
