@@ -14,6 +14,7 @@ import { useAuth } from "@/lib/auth";
  * 참고: 루트 레이아웃의 스토어 Header는 /admin 경로에서 자기 자신을 숨긴다(Header.tsx).
  */
 const NAV = [
+  { href: "/admin", label: "대시보드" },
   { href: "/admin/products", label: "상품" },
   { href: "/admin/categories", label: "카테고리" },
   { href: "/admin/brands", label: "브랜드" },
@@ -50,7 +51,8 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         </div>
         <nav className="flex flex-col gap-1 px-3">
           {NAV.map((n) => {
-            const active = pathname.startsWith(n.href);
+            // 대시보드("/admin")는 정확히 일치할 때만 활성(다른 /admin/* 경로도 startsWith로 잡히는 것 방지).
+            const active = n.href === "/admin" ? pathname === "/admin" : pathname.startsWith(n.href);
             return (
               <Link
                 key={n.href}

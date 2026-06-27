@@ -19,9 +19,9 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       const u = await login(email, password);
-      // 역할별 랜딩: 관리자=운영 콘솔, 셀러=셀러 콘솔, 일반 사용자=상품 목록
+      // 역할별 랜딩: 관리자=대시보드, 셀러=셀러 콘솔, 일반 사용자=상품 목록
       router.push(
-        u.role === "ADMIN" ? "/admin/settlements" : u.role === "SELLER" ? "/seller" : "/products",
+        u.role === "ADMIN" ? "/admin" : u.role === "SELLER" ? "/seller" : "/products",
       );
     } catch (err) {
       setError((err as Error).message);
