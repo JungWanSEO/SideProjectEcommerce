@@ -1,6 +1,8 @@
 package com.commerce.api.coupon.repository;
 
 import com.commerce.api.coupon.entity.Coupon;
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -28,4 +30,15 @@ public interface CouponRepository extends JpaRepository<Coupon, Long> {
     @Query("update Coupon c set c.issuedCount = c.issuedCount + 1 "
             + "where c.id = :id and (c.totalQuantity is null or c.issuedCount < c.totalQuantity)")
     int incrementIssuedCount(@Param("id") Long id);
+
+    /**
+     * 회원이 직접 받을 수 있는(claimable) 쿠폰 — 발급형(ISSUED) + 활성(ACTIVE) + 발급기간 내. 최신 먼저.
+     * (claim() 가드와 같은 조건. 소진/이미받음은 화면 표시용이라 거르지 않고 다 내려, 호출부가 회원 상태로 판정.)
+     */
+    @Query("select c from Coupon c "
+            + "where c.issueType = com.commerce.api.coupon.entity.CouponIssueType.ISSUED "
+            + "and c.status = com.commerce.api.coupon.entity.CouponStatus.ACTIVE "
+            + "and c.validFrom <= :now and c.validUntil >= :now "
+            + "order by c.id desc")
+    List<Coupon> findClaimable(@Param("now") LocalDateTime now);
 }

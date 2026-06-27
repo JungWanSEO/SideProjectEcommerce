@@ -407,6 +407,8 @@ export interface Coupon {
   validUntil: string;
   status: CouponStatus;
   createdAt: string;
+  totalQuantity: number | null; // 선착순 한도(장). null=무제한
+  remainingQuantity: number | null; // 남은 발급 수(무제한이면 null, 소진 시 0)
 }
 
 /** 쿠폰 생성 요청 (CouponCreateRequest) */
@@ -444,6 +446,27 @@ export interface MemberCoupon {
   status: MemberCouponStatus;
   usedAt: string | null;
   usable: boolean; // 미사용 + 쿠폰 활성 + 기간 내
+}
+
+/**
+ * 받을 수 있는(claimable) 선착순 쿠폰 한 장 (ClaimableCouponResponse) — 회원 관점.
+ * 발급형·활성·기간 내 쿠폰을 잔여수량/마감/이미받음과 함께 내려준다.
+ */
+export interface ClaimableCoupon {
+  id: number; // coupon id (받기 경로의 {couponId})
+  code: string;
+  name: string;
+  discountType: DiscountType;
+  discountValue: number;
+  maxDiscountAmount: number | null;
+  minOrderAmount: number;
+  sellerId: number | null;
+  validFrom: string;
+  validUntil: string;
+  totalQuantity: number | null; // 선착순 한도. null=무제한
+  remainingQuantity: number | null; // 남은 수(무제한이면 null, 소진 시 0)
+  soldOut: boolean; // 선착순 마감(무제한은 항상 false)
+  alreadyClaimed: boolean; // 이 회원이 이미 받음(회원·쿠폰당 1장)
 }
 
 /** 쿠폰 미리보기 응답 (CouponPreviewResponse) — 현재 장바구니 기준 할인·예상 결제액 */

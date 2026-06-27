@@ -1,5 +1,6 @@
 package com.commerce.api.coupon.controller;
 
+import com.commerce.api.coupon.dto.ClaimableCouponResponse;
 import com.commerce.api.coupon.dto.MemberCouponResponse;
 import com.commerce.api.coupon.service.MemberCouponService;
 import com.commerce.api.global.common.ApiResponse;
@@ -20,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
  * 회원 쿠폰함 API — 로그인 사용자 본인의 발급 쿠폰만 조회한다(authenticated, 본인 스코핑).
  * 일괄 발급은 ADMIN(POST /api/coupons/{id}/issue), 적용은 체크아웃에서 자동 처리.
  * - GET  /api/member-coupons/me            내 쿠폰함(최신순, usable 포함)
+ * - GET  /api/member-coupons/claimable     받을 수 있는 선착순 쿠폰(잔여수량·이미받음 포함)
  * - POST /api/member-coupons/claim/{id}    선착순 쿠폰 직접 받기(동시성 제어)
  */
 @Tag(name = "회원 쿠폰함(MemberCoupon)", description = "내 쿠폰함 조회 API")
@@ -35,6 +37,14 @@ public class MemberCouponController {
     public ResponseEntity<ApiResponse<List<MemberCouponResponse>>> getMyWallet() {
         return ResponseEntity.ok(ApiResponse.success(
                 memberCouponService.getMyWallet(SecurityUtil.getCurrentMemberId())));
+    }
+
+    @Operation(summary = "받을 수 있는 쿠폰", description = "회원이 직접 받을 수 있는 발급형(ISSUED)·활성·기간 내 쿠폰을 최신순으로 조회한다. "
+            + "remainingQuantity=남은 수(무제한이면 null)·soldOut=선착순 마감·alreadyClaimed=이미 받음.")
+    @GetMapping("/claimable")
+    public ResponseEntity<ApiResponse<List<ClaimableCouponResponse>>> getClaimable() {
+        return ResponseEntity.ok(ApiResponse.success(
+                memberCouponService.getClaimableCoupons(SecurityUtil.getCurrentMemberId())));
     }
 
     @Operation(summary = "선착순 쿠폰 받기",

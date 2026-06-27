@@ -24,7 +24,9 @@ public record CouponResponse(
         LocalDateTime validFrom,
         LocalDateTime validUntil,
         CouponStatus status,
-        LocalDateTime createdAt
+        LocalDateTime createdAt,
+        Integer totalQuantity,      // 선착순 한도(장). null = 무제한
+        Integer remainingQuantity   // 남은 발급 수(totalQuantity - issuedCount). 무제한이면 null
 ) {
     public static CouponResponse from(Coupon c) {
         return new CouponResponse(
@@ -41,7 +43,17 @@ public record CouponResponse(
                 c.getValidFrom(),
                 c.getValidUntil(),
                 c.getStatus(),
-                c.getCreatedAt()
+                c.getCreatedAt(),
+                c.getTotalQuantity(),
+                remainingOf(c)
         );
+    }
+
+    /** 남은 발급 수 — 무제한(totalQuantity=null)이면 null, 한정이면 0 이상(소진 시 0). */
+    static Integer remainingOf(Coupon c) {
+        if (c.getTotalQuantity() == null) {
+            return null;   // 무제한
+        }
+        return Math.max(0, c.getTotalQuantity() - c.getIssuedCount());
     }
 }
