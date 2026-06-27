@@ -63,6 +63,9 @@ jwt:
 
 # 앱 배포 설정 — 로컬 기본값, 운영은 env로 덮어쓴다.
 app:
+  # 캐시 켜기(운영/로컬 기본). 테스트는 src/test 설정에서 false로 꺼 캐시가 테스트 결정성을 깨지 않게 한다.
+  cache:
+    enabled: true
   cors:
     # 브라우저 호출을 허용할 FE origin(콤마 구분). 운영: APP_CORS_ALLOWED_ORIGINS=https://<your-app>.vercel.app
     allowed-origins: http://localhost:3000

@@ -4,6 +4,7 @@ import com.commerce.api.brand.entity.Brand;
 import com.commerce.api.brand.repository.BrandRepository;
 import com.commerce.api.category.entity.Category;
 import com.commerce.api.category.repository.CategoryRepository;
+import com.commerce.api.global.config.CacheConfig;
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.product.dto.ProductCreateRequest;
@@ -24,6 +25,8 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.repository.CrudRepository;
@@ -89,12 +92,14 @@ public class ProductService {
         return enrich(productRepository.save(product));
     }
 
-    /** 단건 조회 */
+    /** 단건 조회 — 읽기 빈도 최상이라 캐시(productDetail, key=상품 id). 쓰기/리뷰/찜 변동 시 evict로 무효화. */
+    @Cacheable(value = CacheConfig.PRODUCT_DETAIL, key = "#id")
     public ProductResponse getProduct(Long id) {
         return enrich(findProduct(id));
     }
 
     /** 기본정보 수정 (ADMIN). 없는 상품 404, 카테고리/브랜드 id가 있으면 존재 검증(없으면 400). 옵션·이미지·상태는 별도 API. */
+    @CacheEvict(value = CacheConfig.PRODUCT_DETAIL, key = "#id")
     @Transactional
     public ProductResponse update(Long id, ProductUpdateRequest request) {
         Product product = findProduct(id);
@@ -109,6 +114,7 @@ public class ProductService {
      * 옵션(사이즈) 추가 (ADMIN). 같은 사이즈가 이미 있으면 409. 갱신된 상품을 반환한다.
      * 새 옵션의 id를 응답에 채우려면 cascade INSERT를 즉시 반영해야 하므로 saveAndFlush.
      */
+    @CacheEvict(value = CacheConfig.PRODUCT_DETAIL, key = "#productId")
     @Transactional
     public ProductResponse addOption(Long productId, ProductOptionUpsertRequest request) {
         Product product = findProduct(productId);
@@ -118,6 +124,7 @@ public class ProductService {
     }
 
     /** 옵션 수정 (ADMIN). 없는 옵션 404, 다른 옵션과 사이즈 중복 409. 더티체킹으로 반영. */
+    @CacheEvict(value = CacheConfig.PRODUCT_DETAIL, key = "#productId")
     @Transactional
     public ProductResponse updateOption(Long productId, Long optionId, ProductOptionUpsertRequest request) {
         Product product = findProduct(productId);
@@ -126,6 +133,7 @@ public class ProductService {
     }
 
     /** 옵션 삭제 (ADMIN). 없는 옵션 404. orphanRemoval로 행 삭제. */
+    @CacheEvict(value = CacheConfig.PRODUCT_DETAIL, key = "#productId")
     @Transactional
     public ProductResponse removeOption(Long productId, Long optionId) {
         Product product = findProduct(productId);
@@ -134,6 +142,7 @@ public class ProductService {
     }
 
     /** 상품 상태 변경 (ADMIN). 없는 상품 404. 더티체킹으로 반영. */
+    @CacheEvict(value = CacheConfig.PRODUCT_DETAIL, key = "#id")
     @Transactional
     public ProductResponse changeStatus(Long id, ProductStatusUpdateRequest request) {
         Product product = findProduct(id);
@@ -142,6 +151,7 @@ public class ProductService {
     }
 
     /** 이미지(갤러리) 추가 (ADMIN). 새 이미지 id를 응답에 채우려 saveAndFlush. */
+    @CacheEvict(value = CacheConfig.PRODUCT_DETAIL, key = "#productId")
     @Transactional
     public ProductResponse addImage(Long productId, ProductImageCreateRequest request) {
         Product product = findProduct(productId);
@@ -151,6 +161,7 @@ public class ProductService {
     }
 
     /** 이미지(갤러리) 삭제 (ADMIN). 없는 이미지 404. orphanRemoval로 행 삭제. */
+    @CacheEvict(value = CacheConfig.PRODUCT_DETAIL, key = "#productId")
     @Transactional
     public ProductResponse removeImage(Long productId, Long imageId) {
         Product product = findProduct(productId);

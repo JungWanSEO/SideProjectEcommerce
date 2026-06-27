@@ -5,11 +5,14 @@ import com.commerce.api.brand.dto.BrandResponse;
 import com.commerce.api.brand.dto.BrandUpdateRequest;
 import com.commerce.api.brand.entity.Brand;
 import com.commerce.api.brand.repository.BrandRepository;
+import com.commerce.api.global.config.CacheConfig;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.product.repository.ProductRepository;
 import com.commerce.api.seller.repository.SellerRepository;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,12 +31,14 @@ public class BrandService {
     // 삭제 시 "이 브랜드를 쓰는 상품이 있는가" 참조 무결성 검증용.
     private final ProductRepository productRepository;
 
-    /** 전체 브랜드 목록. */
+    /** 전체 브랜드 목록. 거의 안 바뀌어 캐시 — 변경(추가/수정/삭제/셀러 귀속) 시에만 무효화. */
+    @Cacheable(value = CacheConfig.BRAND_LIST)
     public List<BrandResponse> getBrands() {
         return brandRepository.findAll().stream().map(BrandResponse::from).toList();
     }
 
     /** 브랜드 등록(ADMIN). 이름이 이미 있으면 409. */
+    @CacheEvict(value = CacheConfig.BRAND_LIST, allEntries = true)
     @Transactional
     public BrandResponse create(BrandCreateRequest request) {
         if (brandRepository.existsByName(request.name())) {
@@ -46,6 +51,7 @@ public class BrandService {
      * 브랜드 수정(ADMIN) — 이름만 갱신. 없으면 404,
      * 이름이 다른 브랜드와 겹치면 409(자기 자신은 제외 — 이름 그대로 둬도 통과).
      */
+    @CacheEvict(value = CacheConfig.BRAND_LIST, allEntries = true)
     @Transactional
     public BrandResponse update(Long brandId, BrandUpdateRequest request) {
         Brand brand = brandRepository.findById(brandId)
@@ -61,6 +67,7 @@ public class BrandService {
      * 브랜드 삭제(ADMIN). 없으면 404. <b>캐스케이드/소프트삭제 없음</b> —
      * 상품이 참조 중이면 409로 막는다(데이터 정합 우선).
      */
+    @CacheEvict(value = CacheConfig.BRAND_LIST, allEntries = true)
     @Transactional
     public void delete(Long brandId) {
         Brand brand = brandRepository.findById(brandId)
@@ -75,6 +82,7 @@ public class BrandService {
      * 브랜드를 셀러에 귀속(ADMIN). sellerId가 null이면 귀속 해제.
      * 브랜드 없으면 404, null이 아닌데 그 셀러가 없으면 400.
      */
+    @CacheEvict(value = CacheConfig.BRAND_LIST, allEntries = true)
     @Transactional
     public BrandResponse assignSeller(Long brandId, Long sellerId) {
         Brand brand = brandRepository.findById(brandId)
