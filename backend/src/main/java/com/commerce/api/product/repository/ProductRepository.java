@@ -28,6 +28,9 @@ public interface ProductRepository extends JpaRepository<Product, Long>, Product
     /** 이 카테고리를 참조하는 상품이 하나라도 있는지 — 카테고리 삭제 가드(참조 중이면 409). */
     boolean existsByCategoryId(Long categoryId);
 
+    /** 특정 상태 상품 수 — 대시보드 "판매 중 상품" KPI(ON_SALE). */
+    long countByStatus(ProductStatus status);
+
     /** 이 브랜드를 참조하는 상품이 하나라도 있는지 — 브랜드 삭제 가드(참조 중이면 409). */
     boolean existsByBrandId(Long brandId);
 

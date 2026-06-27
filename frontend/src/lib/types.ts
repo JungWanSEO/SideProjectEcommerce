@@ -476,3 +476,33 @@ export interface CouponPreview {
   discountAmount: number;
   payableAmount: number;
 }
+
+// ─── 어드민 대시보드 (DashboardResponse) ───────────────────────────────
+
+/** 상단 요약 카드 (DashboardResponse.Kpi) — 금액은 원(KRW) */
+export interface DashboardKpi {
+  totalOrders: number; // 전체 주문 수
+  paidRevenue: number; // 결제완료 매출 합(PURCHASED)
+  pendingSettlement: number; // 정산 대기 금액(SCHEDULED net 합)
+  memberCount: number;
+  activeProductCount: number; // 판매 중(ON_SALE) 상품 수
+}
+
+/** 주문 상태별 건수 (DashboardResponse.OrderStatusCount) */
+export interface DashboardOrderStatusCount {
+  status: OrderStatus;
+  count: number;
+}
+
+/** 하루치 매출 (DashboardResponse.DailyRevenue) — 빈 날도 0으로 채워진 연속 시계열 */
+export interface DashboardDailyRevenue {
+  date: string; // ISO LocalDate (yyyy-MM-dd)
+  revenue: number;
+}
+
+/** 대시보드 한 화면 (DashboardResponse) — KPI + 상태 분포 + 매출 추이 */
+export interface Dashboard {
+  kpi: DashboardKpi;
+  orderStatusDistribution: DashboardOrderStatusCount[];
+  revenueTrend: DashboardDailyRevenue[];
+}

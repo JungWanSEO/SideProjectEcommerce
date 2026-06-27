@@ -5,6 +5,8 @@ import com.commerce.api.settlement.entity.SettlementStatus;
 import java.time.LocalDate;
 import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface SettlementRepository extends JpaRepository<SettlementEntry, Long>, SettlementRepositoryCustom {
 
@@ -24,4 +26,11 @@ public interface SettlementRepository extends JpaRepository<SettlementEntry, Lon
 
     /** 한 결제의 모든 정산 항목(역분개 상계 diff 계산용 — 정방향 + 기존 역분개 합산). */
     List<SettlementEntry> findByPaymentId(Long paymentId);
+
+    /**
+     * 주어진 상태 정산 항목의 실수령(netAmount) 합 — 대시보드 "정산 대기 금액" KPI(SCHEDULED).
+     * {@code coalesce(...,0)} 으로 항목이 없을 때 0 반환(primitive 언박싱 안전).
+     */
+    @Query("select coalesce(sum(s.netAmount), 0) from SettlementEntry s where s.status = :status")
+    long sumNetAmountByStatus(@Param("status") SettlementStatus status);
 }
