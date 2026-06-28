@@ -60,6 +60,30 @@ TTL이 만료되면, 보유자는 "내가 락을 쥐었다"고 믿는데 다른 
 - 적용: `claim` 임계구역을 락으로 감싸되 **DB 원자 UPDATE는 백스톱으로 유지**(락은 advisory).
 - 한계: watchdog 없음(작업이 lease보다 길면 만료) → claim은 ms 단위라 안전. 운영 장수명 락은 Redisson watchdog 권장.
 
+## 5. 실습: DIY vs Redisson watchdog (실측, 2026-06-28)
+
+DIY의 한계(watchdog 없음 → 작업이 lease보다 길면 만료)를 Redisson watchdog과 대조했다.
+같은 `DistributedLock` 포트 뒤에 `RedissonDistributedLock`(opt-in `app.lock.provider=redisson`,
+`org.redisson:redisson:4.6.1` core)을 추가하고 `LockComparisonTest`로 실측(로컬 Redis 필요·없으면 skip).
+
+**조건**: 같은 키, 2스레드, 임계구역 작업 2초.
+
+| 락 | 설정 | 결과(동시 진입 최대) | 의미 |
+|---|---|---|---|
+| DIY `RedisDistributedLock` | lease 1s | **2** | 1s에 락 만료 → 대기 스레드 진입 → 상호배제 깨짐 |
+| Redisson `RedissonDistributedLock` | watchdog(timeout 1s, ~0.33s마다 갱신) | **1** | 보유 중 임대 자동 연장 → 작업 끝까지 유지 |
+
+**교훈(라이브러리는 어떻게 다른가)**:
+- DIY는 **lease를 미리 추측**해야 하고, 작업이 그보다 길면 무너진다(또는 lease를 크게 잡으면 보유자 사망 시 오래 묶임).
+- Redisson **watchdog**은 보유 동안 임대를 자동 연장해 그 추측을 없앤다. 대신 watchdog 스레드/네트워크 비용,
+  보유자가 멈추면(GC 등) 연장도 멈춰 결국 만료되는 점은 동일(여전히 fencing이 근본 해법).
+- `tryLock`에 **명시 leaseTime을 주면 watchdog은 꺼진다**(자동 연장 없이 그 시간 후 해제). 그래서 어댑터는
+  watchdog을 쓰려고 leaseTime 인자를 의도적으로 무시한다.
+- 런타임 배선 확인: `APP_LOCK_PROVIDER=redisson` 기동 시 Redisson이 Redis에 연결되고 컨텍스트 정상 기동.
+
+> 우리 쿠폰 claim은 ms 단위라 DIY로 충분(정합성은 DB가 보증). Redisson은 **장수명 락**(작업이 길고 만료가
+> 곤란한 경우)에서 진가가 난다 — 이 실습이 그 차이를 수치로 보여준다.
+
 ## 참고
 - Spring Integration — Distributed Locks: https://docs.spring.io/spring-integration/reference/distributed-locks.html
 - Redisson Locks: https://redisson.pro/docs/data-and-services/locks-and-synchronizers/
