@@ -1,9 +1,12 @@
 # 테스트 전용 설정 — H2 인메모리 (MySQL 없이도 테스트가 독립적으로 돈다)
 spring:
-  # RabbitMQ 자동설정 제외 — 테스트엔 브로커가 없으므로 @SpringBootTest가 부팅 시 연결을 시도하지 않게 한다.
-  # (rabbit 발행/소비는 단위 테스트로 검증하고, 실제 브로커 통합은 Testcontainers=후속.)
+  # RabbitMQ·Redis 자동설정 제외 — 테스트엔 브로커/Redis가 없다(캐시는 NoOp). 부팅 시 연결 시도 방지.
+  # (Redis 캐시는 런타임 스모크로 검증하고, 실제 통합은 Testcontainers=후속.)
   autoconfigure:
-    exclude: org.springframework.boot.autoconfigure.amqp.RabbitAutoConfiguration
+    exclude:
+      - org.springframework.boot.autoconfigure.amqp.RabbitAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration
 
   # 테스트는 Flyway(MySQL용 V1 스크립트) 대신 H2 + Hibernate create-drop으로 스키마 생성.
   flyway:
