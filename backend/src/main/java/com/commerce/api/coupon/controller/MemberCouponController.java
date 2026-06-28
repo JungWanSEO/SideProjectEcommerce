@@ -2,6 +2,7 @@ package com.commerce.api.coupon.controller;
 
 import com.commerce.api.coupon.dto.ClaimableCouponResponse;
 import com.commerce.api.coupon.dto.MemberCouponResponse;
+import com.commerce.api.coupon.service.MemberCouponClaimService;
 import com.commerce.api.coupon.service.MemberCouponService;
 import com.commerce.api.global.common.ApiResponse;
 import com.commerce.api.global.security.SecurityUtil;
@@ -31,6 +32,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class MemberCouponController {
 
     private final MemberCouponService memberCouponService;
+    private final MemberCouponClaimService memberCouponClaimService;   // 분산락으로 감싼 claim 진입점
 
     @Operation(summary = "내 쿠폰함", description = "로그인 사용자가 발급받은 쿠폰을 최신순으로 조회한다. usable=사용 가능(미사용+활성+기간 내).")
     @GetMapping("/me")
@@ -53,7 +55,7 @@ public class MemberCouponController {
     @PostMapping("/claim/{couponId}")
     public ResponseEntity<ApiResponse<MemberCouponResponse>> claim(@PathVariable Long couponId) {
         MemberCouponResponse response =
-                memberCouponService.claim(SecurityUtil.getCurrentMemberId(), couponId);
+                memberCouponClaimService.claim(SecurityUtil.getCurrentMemberId(), couponId);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("쿠폰을 받았습니다.", response));
     }
