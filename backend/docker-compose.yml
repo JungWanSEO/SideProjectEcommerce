@@ -58,6 +58,24 @@ services:
       timeout: 5s
       retries: 10
 
+  # 분산 캐시(Redis) — app.cache.provider=redis 일 때만 앱이 연결한다(기본은 in-memory Caffeine이라 불필요).
+  # opt-in profile: 기본 `docker compose up -d`에는 안 뜬다(이미 6379를 쓰는 네이티브 Redis와 충돌 방지).
+  #   Redis로 시험할 때만 → `docker compose --profile redis up -d redis`. (네이티브 Redis가 이미 있으면 불필요.)
+  redis:
+    image: redis:7-alpine
+    container_name: commerce-redis
+    profiles: ["redis"]
+    ports:
+      - "127.0.0.1:6379:6379"   # 로컬만 노출(외부 차단) — MySQL/RabbitMQ와 동일 정책
+    volumes:
+      - commerce-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
 volumes:
   commerce-mysql-data:
   commerce-rabbitmq-data:
+  commerce-redis-data:

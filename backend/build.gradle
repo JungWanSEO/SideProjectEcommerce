@@ -29,6 +29,8 @@ dependencies {
 	// 다중 인스턴스 운영이면 설정만 Redis로 교체 가능. 버전은 Spring Boot BOM이 관리.
 	implementation 'org.springframework.boot:spring-boot-starter-cache'
 	implementation 'com.github.ben-manes.caffeine:caffeine'
+	// Redis(분산 캐시) — app.cache.provider=redis 일 때만 실제 사용. 기본(caffeine)에선 연결 안 함.
+	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 	// 메시지 브로커(RabbitMQ) 연동 — 아웃박스 P2b. outbox.publisher=rabbit 일 때만 실제 사용.
 	// (Spring AMQP: RabbitTemplate 발행 + @RabbitListener 소비)
 	implementation 'org.springframework.boot:spring-boot-starter-amqp'

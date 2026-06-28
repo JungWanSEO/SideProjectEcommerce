@@ -16,6 +16,13 @@ spring:
     password: ${MYSQL_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
+  # Redis 접속 — app.cache.provider=redis 일 때만 실제 연결(기본 caffeine이면 연결 안 함).
+  # 배포 시 REDIS_HOST/REDIS_PORT(또는 SPRING_DATA_REDIS_*)로 덮어쓴다.
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
   # Flyway: 버전관리된 SQL(db/migration/V*.sql)로 스키마를 통제.
   flyway:
     enabled: true
@@ -74,6 +81,8 @@ app:
   # 캐시 켜기(운영/로컬 기본). 테스트는 src/test 설정에서 false로 꺼 캐시가 테스트 결정성을 깨지 않게 한다.
   cache:
     enabled: true
+    # caffeine(기본·인메모리, 외부 0) | redis(분산 — docker-compose redis 필요, 다중 인스턴스 캐시 공유)
+    provider: ${APP_CACHE_PROVIDER:caffeine}
   cors:
     # 브라우저 호출을 허용할 FE origin(콤마 구분). 운영: APP_CORS_ALLOWED_ORIGINS=https://<your-app>.vercel.app
     allowed-origins: http://localhost:3000
