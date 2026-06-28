@@ -61,6 +61,14 @@ jwt:
   access-token-validity-ms: 1800000      # 30분
   refresh-token-validity-ms: 1209600000  # 14일
 
+# Actuator: 운영 모니터링 엔드포인트. metrics/caches 노출(캐시 적중률은 Micrometer cache.* 메트릭으로도 확인 가능).
+#   예: /actuator/metrics/cache.gets?tag=cache:productDetail  ·  /actuator/caches
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics, caches
+
 # 앱 배포 설정 — 로컬 기본값, 운영은 env로 덮어쓴다.
 app:
   # 캐시 켜기(운영/로컬 기본). 테스트는 src/test 설정에서 false로 꺼 캐시가 테스트 결정성을 깨지 않게 한다.

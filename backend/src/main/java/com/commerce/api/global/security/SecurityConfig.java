@@ -122,6 +122,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/coupons/**").hasRole("ADMIN")
                         // 어드민 대시보드(집계 KPI·매출 추이)는 운영 전용
                         .requestMatchers("/api/dashboard/**").hasRole("ADMIN")
+                        // 운영 모니터링(캐시 적중률 등)은 운영 전용
+                        .requestMatchers("/api/monitoring/**").hasRole("ADMIN")
                         // 셀러 콘솔(본인 정산 조회)은 SELLER 전용 — 자기 sellerId로만 스코핑
                         .requestMatchers("/api/seller/**").hasRole("SELLER")
                         // 추천 배치 수동 재계산은 운영 업무 → ADMIN (조회 /api/recommendations/me 는 아래 authenticated)

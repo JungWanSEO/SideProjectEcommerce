@@ -9,6 +9,8 @@ import com.commerce.api.category.dto.CategoryCreateRequest;
 import com.commerce.api.category.repository.CategoryRepository;
 import com.commerce.api.category.service.CategoryService;
 import com.commerce.api.global.config.CacheConfig;
+import com.commerce.api.monitoring.dto.CacheStatsResponse;
+import com.commerce.api.monitoring.service.CacheMonitoringService;
 import com.commerce.api.product.dto.ProductStatusUpdateRequest;
 import com.commerce.api.product.entity.Product;
 import com.commerce.api.product.entity.ProductStatus;
@@ -41,6 +43,7 @@ class CacheTest {
     @Autowired private CategoryService categoryService;
     @Autowired private WishlistService wishlistService;
     @Autowired private CacheManager cacheManager;
+    @Autowired private CacheMonitoringService cacheMonitoringService;
 
     @MockitoSpyBean private ProductRepository productRepository;
     @MockitoSpyBean private CategoryRepository categoryRepository;
@@ -99,6 +102,26 @@ class CacheTest {
 
         categoryService.getCategories();
         verify(categoryRepository, times(2)).findAll();   // 무효화돼 다시 조회
+    }
+
+    @Test
+    @DisplayName("캐시 적중률 통계 - 조회 시 hit/miss가 기록된다(recordStats)")
+    void cacheStats_recordHitsAndMisses() {
+        CacheStatsResponse before = productDetailStats();
+        productService.getProduct(productId);   // miss (setUp에서 엔트리 비움)
+        productService.getProduct(productId);   // hit
+        productService.getProduct(productId);   // hit
+        CacheStatsResponse after = productDetailStats();
+
+        assertThat(after.hitCount() - before.hitCount()).isGreaterThanOrEqualTo(2);
+        assertThat(after.missCount() - before.missCount()).isGreaterThanOrEqualTo(1);
+        assertThat(after.hitRate()).isBetween(0.0, 1.0);
+    }
+
+    private CacheStatsResponse productDetailStats() {
+        return cacheMonitoringService.getCacheStats().stream()
+                .filter(s -> s.cacheName().equals(CacheConfig.PRODUCT_DETAIL))
+                .findFirst().orElseThrow();
     }
 
     private Cache productCache() {
