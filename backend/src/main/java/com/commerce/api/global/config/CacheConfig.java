@@ -41,12 +41,13 @@ public class CacheConfig {
     public CacheManager cacheManager() {
         CaffeineCacheManager manager = new CaffeineCacheManager();
         manager.setAllowNullValues(false);   // 없는 상품은 예외(404)라 null을 캐시할 일이 없다.
+        // recordStats(): 적중/미스/축출 통계를 기록 — 적중률 모니터링(/api/monitoring/caches·Actuator)의 전제.
         manager.registerCustomCache(PRODUCT_DETAIL, Caffeine.newBuilder()
-                .maximumSize(1_000).expireAfterWrite(Duration.ofMinutes(10)).build());
+                .recordStats().maximumSize(1_000).expireAfterWrite(Duration.ofMinutes(10)).build());
         manager.registerCustomCache(CATEGORY_LIST, Caffeine.newBuilder()
-                .maximumSize(1).expireAfterWrite(Duration.ofHours(1)).build());
+                .recordStats().maximumSize(1).expireAfterWrite(Duration.ofHours(1)).build());
         manager.registerCustomCache(BRAND_LIST, Caffeine.newBuilder()
-                .maximumSize(1).expireAfterWrite(Duration.ofHours(1)).build());
+                .recordStats().maximumSize(1).expireAfterWrite(Duration.ofHours(1)).build());
         return manager;
     }
 
