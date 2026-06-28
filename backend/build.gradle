@@ -31,6 +31,9 @@ dependencies {
 	implementation 'com.github.ben-manes.caffeine:caffeine'
 	// Redis(분산 캐시) — app.cache.provider=redis 일 때만 실제 사용. 기본(caffeine)에선 연결 안 함.
 	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+	// Redisson(분산락 비교 실습) — app.lock.provider=redisson 일 때만 사용. core만(스타터 X)이라 자동설정 없음 →
+	// 우리가 만든 RedissonClient 빈만 쓰여 opt-in 안전. RLock watchdog(자동 임대 연장)을 DIY 락과 대조한다.
+	implementation 'org.redisson:redisson:4.6.1'
 	// 메시지 브로커(RabbitMQ) 연동 — 아웃박스 P2b. outbox.publisher=rabbit 일 때만 실제 사용.
 	// (Spring AMQP: RabbitTemplate 발행 + @RabbitListener 소비)
 	implementation 'org.springframework.boot:spring-boot-starter-amqp'
