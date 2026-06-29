@@ -18,6 +18,13 @@ export interface PageResponse<T> {
   hasNext: boolean;
 }
 
+/** 커서 기반(no-offset) 피드 응답 — GET /api/products/feed. nextCursor를 다음 요청 cursor로 넘긴다. */
+export interface ProductCursorResponse {
+  items: Product[];
+  nextCursor: number | null;
+  hasNext: boolean;
+}
+
 export type ProductStatus = "ON_SALE" | "SOLD_OUT" | "DISCONTINUED";
 
 /** 카테고리 / 브랜드 (필터 드롭다운용) — 백엔드 CategoryResponse·BrandResponse */

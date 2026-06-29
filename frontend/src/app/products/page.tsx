@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { apiGet } from "@/lib/api";
-import { Brand, Category, PageResponse, Product } from "@/lib/types";
+import { Brand, Category, PageResponse, Product, ProductCursorResponse } from "@/lib/types";
 import ProductThumb from "@/components/ui/ProductThumb";
 import Badge from "@/components/ui/Badge";
 import Stars from "@/components/ui/Stars";
@@ -87,7 +87,9 @@ function priceLabel(min: string, max: string): string {
 
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true); // 첫 로드(쿼리 변경)
+  const [loadingMore, setLoadingMore] = useState(false); // 다음 청크
+  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [categories, setCategories] = useState<Category[]>([]);
@@ -100,35 +102,96 @@ export default function ProductsPage() {
   const [minInput, setMinInput] = useState("");
   const [maxInput, setMaxInput] = useState("");
 
+  // 페이지네이션 전략: 기본 뷰(필터 없음 + 최신순)는 커서 피드(/feed, no-offset),
+  //   필터/정렬이 걸리면 offset 검색(/api/products?page=N). 둘 다 무한 스크롤로 append.
+  const isFeed =
+    !query.keyword &&
+    !query.categoryId &&
+    !query.brandId &&
+    !query.minPrice &&
+    !query.maxPrice &&
+    !query.optionSize &&
+    query.sort === "createdAt,desc";
+  const cursorRef = useRef<number | null>(null); // 피드 모드: 마지막으로 본 상품 id
+  const pageRef = useRef(0); // 검색 모드: 다음에 요청할 페이지 번호
+  const genRef = useRef(0); // 쿼리가 바뀌면 증가 → 진행 중이던 이전 응답을 폐기
+
   useEffect(() => {
     apiGet<Category[]>("/api/categories").then(setCategories).catch(() => {});
     apiGet<Brand[]>("/api/brands").then(setBrands).catch(() => {});
   }, []);
 
-  const load = useCallback(() => {
-    const p = new URLSearchParams();
-    if (query.keyword) p.set("keyword", query.keyword);
-    if (query.categoryId) p.set("categoryId", query.categoryId);
-    if (query.brandId) p.set("brandId", query.brandId);
-    if (query.minPrice) p.set("minPrice", query.minPrice);
-    if (query.maxPrice) p.set("maxPrice", query.maxPrice);
-    if (query.optionSize) p.set("optionSize", query.optionSize);
-    p.set("sort", query.sort);
+  // 다음 청크를 가져온다. reset=true면 첫 페이지. 모드(isFeed)에 따라 커서/offset 분기.
+  const fetchChunk = useCallback(
+    async (reset: boolean): Promise<Product[]> => {
+      if (isFeed) {
+        const c = reset ? null : cursorRef.current;
+        const qs = new URLSearchParams({ size: "20" });
+        if (c != null) qs.set("cursor", String(c));
+        const res = await apiGet<ProductCursorResponse>(`/api/products/feed?${qs.toString()}`);
+        cursorRef.current = res.nextCursor;
+        setHasMore(res.hasNext);
+        return res.items;
+      }
+      const p = reset ? 0 : pageRef.current;
+      const qs = new URLSearchParams();
+      if (query.keyword) qs.set("keyword", query.keyword);
+      if (query.categoryId) qs.set("categoryId", query.categoryId);
+      if (query.brandId) qs.set("brandId", query.brandId);
+      if (query.minPrice) qs.set("minPrice", query.minPrice);
+      if (query.maxPrice) qs.set("maxPrice", query.maxPrice);
+      if (query.optionSize) qs.set("optionSize", query.optionSize);
+      qs.set("sort", query.sort);
+      qs.set("page", String(p));
+      const page = await apiGet<PageResponse<Product>>(`/api/products?${qs.toString()}`);
+      pageRef.current = p + 1;
+      setHasMore(page.hasNext);
+      return page.content;
+    },
+    [isFeed, query],
+  );
 
+  // 쿼리 변경 → 커서/페이지 리셋하고 처음부터 다시 로드
+  useEffect(() => {
+    const gen = ++genRef.current;
+    cursorRef.current = null;
+    pageRef.current = 0;
     setLoading(true);
     setError(null);
-    return apiGet<PageResponse<Product>>(`/api/products?${p.toString()}`)
-      .then((page) => {
-        setProducts(page.content);
-        setSizes((prev) => (prev.length ? prev : distinctSizes(page.content)));
+    fetchChunk(true)
+      .then((items) => {
+        if (gen !== genRef.current) return; // 그새 쿼리가 또 바뀌었으면 폐기
+        setProducts(items);
+        setSizes((prev) => (prev.length ? prev : distinctSizes(items)));
       })
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [query]);
+      .catch((e: Error) => gen === genRef.current && setError(e.message))
+      .finally(() => gen === genRef.current && setLoading(false));
+  }, [fetchChunk]);
 
+  const loadMore = useCallback(() => {
+    if (loadingMore) return;
+    const gen = genRef.current;
+    setLoadingMore(true);
+    fetchChunk(false)
+      .then((items) => {
+        if (gen === genRef.current) setProducts((prev) => [...prev, ...items]);
+      })
+      .catch(() => {})
+      .finally(() => gen === genRef.current && setLoadingMore(false));
+  }, [fetchChunk, loadingMore]);
+
+  // 무한 스크롤: 하단 sentinel이 뷰포트 근처(400px)에 들어오면 다음 청크
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    load();
-  }, [load]);
+    const el = sentinelRef.current;
+    if (!el || !hasMore || loading) return;
+    const io = new IntersectionObserver(
+      (entries) => entries[0]?.isIntersecting && loadMore(),
+      { rootMargin: "400px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasMore, loading, loadMore]);
 
   // 드롭다운/칩/정렬은 즉시 적용(데스크톱 표준). 키워드·가격만 검색/Enter로 commit.
   const set = (patch: Partial<Query>) => setQuery((q) => ({ ...q, ...patch }));
@@ -298,6 +361,7 @@ export default function ProductsPage() {
       ) : products.length === 0 ? (
         <p className="py-12 text-center text-muted">조건에 맞는 상품이 없습니다.</p>
       ) : (
+        <>
         <ul className="grid grid-cols-2 gap-x-5 gap-y-10 lg:grid-cols-3">
           {products.map((p) => (
             <li key={p.id} className="relative">
@@ -357,6 +421,14 @@ export default function ProductsPage() {
             </li>
           ))}
         </ul>
+
+        {/* 무한 스크롤 sentinel + 상태 표시 */}
+        <div ref={sentinelRef} aria-hidden className="h-px" />
+        {loadingMore && <p className="py-8 text-center text-muted">더 불러오는 중…</p>}
+        {!hasMore && (
+          <p className="py-10 text-center text-xs text-muted">모든 상품을 둘러봤어요</p>
+        )}
+        </>
       )}
     </main>
   );
