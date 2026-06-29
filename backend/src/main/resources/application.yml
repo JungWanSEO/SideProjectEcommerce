@@ -25,6 +25,9 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+    web:
+      pageable:
+        max-page-size: 100   # 페이지 size 상한(남용·과다조회 방지). 초과 요청해도 100으로 제한.
 
   # Flyway: 버전관리된 SQL(db/migration/V*.sql)로 스키마를 통제.
   flyway:
