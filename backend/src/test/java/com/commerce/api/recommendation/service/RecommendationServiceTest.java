@@ -5,9 +5,7 @@ import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.BDDMockito.given;
 
 import com.commerce.api.product.dto.ProductResponse;
-import com.commerce.api.product.entity.Product;
 import com.commerce.api.product.entity.ProductStatus;
-import com.commerce.api.product.repository.ProductRepository;
 import com.commerce.api.product.service.ProductService;
 import com.commerce.api.recommendation.dto.RecommendationResponse;
 import com.commerce.api.recommendation.entity.Recommendation;
@@ -21,7 +19,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.test.util.ReflectionTestUtils;
 
 /**
  * RecommendationService 단위 테스트 — 저장된 추천(personalized) vs 콜드스타트 인기순 폴백.
@@ -30,7 +27,6 @@ import org.springframework.test.util.ReflectionTestUtils;
 class RecommendationServiceTest {
 
     @Mock private RecommendationRepository recommendationRepository;
-    @Mock private ProductRepository productRepository;
     @Mock private ProductService productService;
 
     @InjectMocks private RecommendationService recommendationService;
@@ -40,12 +36,6 @@ class RecommendationServiceTest {
     private ProductResponse productResponse(Long id) {
         return new ProductResponse(id, "p" + id, 10000L, null, null, ProductStatus.ON_SALE,
                 1L, "상의", 1L, "Nike", List.of(), 0, 0.0, 0, LocalDateTime.now());
-    }
-
-    private Product popular(Long id) {
-        Product p = Product.builder().name("p" + id).price(10000).status(ProductStatus.ON_SALE).build();
-        ReflectionTestUtils.setField(p, "id", id);
-        return p;
     }
 
     @Test
