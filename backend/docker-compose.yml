@@ -75,7 +75,39 @@ services:
       timeout: 3s
       retries: 10
 
+  # 관측성 스택(Prometheus + Grafana) — opt-in profile. 기본 up엔 안 뜬다.
+  #   띄우기: docker compose --profile observability up -d prometheus grafana
+  #   앱은 호스트(run.ps1)에서 돌므로 Prometheus가 host.docker.internal:8080/actuator/prometheus 를 스크레이프.
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: commerce-prometheus
+    profiles: ["observability"]
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # 컨테이너→호스트(데스크톱은 기본 제공, Linux 호환용)
+
+  grafana:
+    image: grafana/grafana:10.4.5
+    container_name: commerce-grafana
+    profiles: ["observability"]
+    ports:
+      - "127.0.0.1:3001:3000"   # 호스트 3001(FE가 3000 사용) → 컨테이너 3000
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro   # datasource·dashboard 자동 등록
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro    # 대시보드 JSON
+      - commerce-grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
 volumes:
   commerce-mysql-data:
   commerce-rabbitmq-data:
   commerce-redis-data:
+  commerce-grafana-data:

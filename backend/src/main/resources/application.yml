@@ -1,6 +1,9 @@
 # 서버 포트 — 로컬 8080. 배포 플랫폼(Render/Koyeb 등)이 PORT를 주입하면 그 포트로 바인딩한다.
 server:
   port: ${PORT:8080}
+  tomcat:
+    mbeanregistry:
+      enabled: true   # Tomcat 스레드 풀 MBean 등록 → Micrometer tomcat.threads.* 메트릭 노출(관측성)
 
 spring:
   application:
@@ -68,13 +71,23 @@ jwt:
   access-token-validity-ms: 1800000      # 30분
   refresh-token-validity-ms: 1209600000  # 14일
 
-# Actuator: 운영 모니터링 엔드포인트. metrics/caches 노출(캐시 적중률은 Micrometer cache.* 메트릭으로도 확인 가능).
-#   예: /actuator/metrics/cache.gets?tag=cache:productDetail  ·  /actuator/caches
+# Actuator: 운영 모니터링 엔드포인트. metrics/caches/prometheus 노출.
+#   예: /actuator/metrics/cache.gets?tag=cache:productDetail · /actuator/caches · /actuator/prometheus(Prometheus 스크레이프)
 management:
   endpoints:
     web:
       exposure:
-        include: health, info, metrics, caches
+        include: health, info, metrics, caches, prometheus
+  metrics:
+    tags:
+      application: commerce-api   # 모든 메트릭에 application 라벨 부여(여러 앱 구분)
+    distribution:
+      # http 요청 응답시간에 히스토그램 버킷을 발행 → Prometheus histogram_quantile로 p95/p99 계산 가능.
+      # (기본은 count/sum만 나와 분위수를 못 구한다.) 점 포함 키는 [] 로 감싸야 중첩 키로 안 쪼개진다.
+      percentiles-histogram:
+        "[http.server.requests]": true
+      slo:
+        "[http.server.requests]": 50ms, 100ms, 200ms, 400ms, 800ms, 1s, 2s
 
 # 앱 배포 설정 — 로컬 기본값, 운영은 env로 덮어쓴다.
 app:
