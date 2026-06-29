@@ -47,7 +47,7 @@ class RedisDistributedLockTest {
         this.connectionFactory = cf;
         this.redis = new StringRedisTemplate(cf);
         this.redis.afterPropertiesSet();
-        this.lock = new RedisDistributedLock(redis);
+        this.lock = new RedisDistributedLock(redis, 50, 3000, 5000);   // 기본값(spin 50ms·wait 3s·lease 5s)
     }
 
     @AfterAll
