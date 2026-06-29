@@ -98,6 +98,16 @@ public class ProductService {
         return enrich(findProduct(id));
     }
 
+    /**
+     * 인기 상품 ID 상위 12(ON_SALE·찜 수→리뷰 수). 추천 콜드스타트 폴백이 반복 호출하므로 캐시한다.
+     * ID만 캐시(enrich는 호출부에서) → 이름 staleness 표면 최소. 5분 TTL로 카운터 드리프트를 자가 수렴(수동 무효화 X).
+     */
+    @Cacheable(value = CacheConfig.POPULAR_PRODUCTS)
+    public List<Long> popularProductIds() {
+        return productRepository.findTop12ByStatusOrderByWishlistCountDescRatingCountDesc(ProductStatus.ON_SALE)
+                .stream().map(Product::getId).toList();
+    }
+
     /** 기본정보 수정 (ADMIN). 없는 상품 404, 카테고리/브랜드 id가 있으면 존재 검증(없으면 400). 옵션·이미지·상태는 별도 API. */
     @CacheEvict(value = CacheConfig.PRODUCT_DETAIL, key = "#id")
     @Transactional

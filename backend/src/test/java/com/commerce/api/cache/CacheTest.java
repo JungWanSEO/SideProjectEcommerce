@@ -25,6 +25,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
+import org.springframework.cache.interceptor.SimpleKey;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
@@ -122,6 +123,17 @@ class CacheTest {
         return cacheMonitoringService.getCacheStats().stream()
                 .filter(s -> s.cacheName().equals(CacheConfig.PRODUCT_DETAIL))
                 .findFirst().orElseThrow();
+    }
+
+    @Test
+    @DisplayName("인기 상품 ID - 두 번째 조회는 캐시(DB 조회 1회)")
+    void popularProducts_cached() {
+        productService.popularProductIds();
+        productService.popularProductIds();
+
+        verify(productRepository, times(1))
+                .findTop12ByStatusOrderByWishlistCountDescRatingCountDesc(ProductStatus.ON_SALE);
+        assertThat(cacheManager.getCache(CacheConfig.POPULAR_PRODUCTS).get(SimpleKey.EMPTY)).isNotNull();
     }
 
     private Cache productCache() {
