@@ -1,0 +1,164 @@
+{
+  "uid": "commerce-api",
+  "title": "commerce-api 관측성",
+  "tags": ["commerce-api"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "type": "row",
+      "title": "① 사용자가 겪는 것 — Golden Signals",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "type": "timeseries",
+      "title": "처리량 (RPS)",
+      "description": "초당 처리한 HTTP 요청 수. 트래픽 규모.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(http_server_requests_seconds_count[1m]))", "legendFormat": "RPS" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "응답 지연 (p50 / p95 / p99)",
+      "description": "히스토그램 버킷으로 계산한 분위수. 꼬리(p99)가 사용자 체감을 좌우.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum(rate(http_server_requests_seconds_bucket[1m])) by (le))", "legendFormat": "p50" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket[1m])) by (le))", "legendFormat": "p95" },
+        { "refId": "C", "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket[1m])) by (le))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "에러율 (4xx / 5xx)",
+      "description": "outcome 라벨로 클라이언트/서버 오류 발생률.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(http_server_requests_seconds_count{outcome=\"CLIENT_ERROR\"}[1m]))", "legendFormat": "4xx" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(http_server_requests_seconds_count{outcome=\"SERVER_ERROR\"}[1m]))", "legendFormat": "5xx" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "엔드포인트별 RPS (Top)",
+      "description": "URI 패턴별 처리량 — 어디로 트래픽이 몰리나.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "topk(8, sum by (uri) (rate(http_server_requests_seconds_count[1m])))", "legendFormat": "{{uri}}" }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "② 시스템이 버티는가 — Saturation",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 }
+    },
+    {
+      "type": "timeseries",
+      "title": "JVM 힙 사용량",
+      "description": "사용 중 힙 vs 최대 힙. GC 압박/누수 신호.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(jvm_memory_used_bytes{area=\"heap\"})", "legendFormat": "used" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(jvm_memory_max_bytes{area=\"heap\"})", "legendFormat": "max" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "DB 커넥션 풀 (Hikari)",
+      "description": "active=사용 중, idle=여유, pending=대기. pending↑ = 풀 부족(부하테스트의 실제 병목).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "hikaricp_connections_active", "legendFormat": "active" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "hikaricp_connections_idle", "legendFormat": "idle" },
+        { "refId": "C", "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "hikaricp_connections_pending", "legendFormat": "pending" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "CPU 사용률",
+      "description": "프로세스/시스템 CPU.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 26 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "process_cpu_usage", "legendFormat": "process" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "system_cpu_usage", "legendFormat": "system" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Tomcat 스레드",
+      "description": "busy=처리 중, current=풀 크기. busy가 한계에 붙으면 스레드 고갈.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 26 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "tomcat_threads_busy_threads", "legendFormat": "busy" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "tomcat_threads_current_threads", "legendFormat": "current" }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "③ 우리가 만든 것의 효과 — 도메인/기능",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 34 }
+    },
+    {
+      "type": "timeseries",
+      "title": "캐시 적중률",
+      "description": "hit / (hit+miss). 캐시가 실제로 DB를 막아주고 있나(캐시별).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 35 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (cache) (rate(cache_gets_total{result=\"hit\"}[5m])) / clamp_min(sum by (cache) (rate(cache_gets_total[5m])), 0.0001)", "legendFormat": "{{cache}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "선착순 claim 결과 (201 발급 / 409 마감 / 503 락실패)",
+      "description": "락 모드의 행동이 그대로 드러난다. status 라벨별 발생률.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 35 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (status) (rate(http_server_requests_seconds_count{uri=\"/api/member-coupons/claim/{couponId}\"}[1m]))", "legendFormat": "{{status}}" }
+      ]
+    }
+  ]
+}

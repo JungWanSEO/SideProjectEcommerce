@@ -1,0 +1,11 @@
+# Prometheus 스크레이프 설정 — commerce-api(/actuator/prometheus)를 5초마다 긁는다.
+# 앱은 호스트(run.ps1)에서 8080으로 도므로 컨테이너에서 host.docker.internal 로 접근.
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: 'commerce-api'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['host.docker.internal:8080']

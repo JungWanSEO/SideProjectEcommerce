@@ -87,8 +87,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/categories/**", "/api/brands/**").permitAll()
                         // 함께 산 상품(상품 통계, 개인정보 아님)은 상품 상세처럼 공개
                         .requestMatchers(HttpMethod.GET, "/api/recommendations/products/*/together").permitAll()
+                        // actuator: health·prometheus만 공개(Prometheus 스크레이프용). 나머지 actuator는 인증 필요.
+                        // ⚠️ 운영에선 메트릭 노출을 막아야 한다 — 관리 포트 분리(management.server.port) + 네트워크 제한이 정석.
                         .requestMatchers("/swagger-ui/**", "/swagger-ui.html",
-                                "/v3/api-docs/**", "/actuator/health").permitAll()
+                                "/v3/api-docs/**", "/actuator/health", "/actuator/prometheus").permitAll()
                         // 관리자
                         .requestMatchers(HttpMethod.POST, "/api/products").hasRole("ADMIN")
                         // 상품 기본정보 수정(단건 PUT /api/products/{id}) — ADMIN (옵션 PUT은 아래 별도 매처)
