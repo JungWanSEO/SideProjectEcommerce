@@ -172,6 +172,14 @@ class ProductControllerTest {
                 .andExpect(jsonPath("$.success").value(false));
     }
 
+    @Test
+    @DisplayName("GET /api/products/{id} - id 자리에 숫자가 아닌 값이면 400 (500 아님)")
+    void getProduct_typeMismatch() throws Exception {
+        mockMvc.perform(get("/api/products/abc"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
     private ProductResponse productWithOptions(ProductOptionResponse... options) {
         return new ProductResponse(1L, "반팔티셔츠", 29000L, "면 100%", "/products/1.svg",
                 ProductStatus.ON_SALE, 1L, "상의", 1L, "Nike",
