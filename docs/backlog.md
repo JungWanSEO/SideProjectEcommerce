@@ -5,7 +5,7 @@
 > 외부 프로그램 연동(RabbitMQ·외부 API·새 외부 도구)은 자율 금지 → "함께(학습)"에서 사용자와 직접.
 
 ## READY (결정 완료 · 외부 무관 · 자율 진행 가능 · 위에서부터)
-- **타입미스매치 400 핸들러** — 비숫자 PathVariable(`/api/products/abc`)가 현재 500. `MethodArgumentTypeMismatchException`을 GlobalExceptionHandler에서 400(BAD_REQUEST)로 매핑. (2026-06-29 피드 검증 중 발견.)
+- (비어 있음) — 다음 `자율진행`은 멈춰 "백로그 채우기 필요" 보고.
 
 ## 함께 (외부 연동 · 학습 — 자율 금지)
 - 🚧 **배포 ($0 라이브 데모)** — **준비 완료**(`feature/deploy-prep`→dev): env화(CORS·쿠키·포트·DB주소)·`backend/Dockerfile`·`docs/deploy.md`. **다음=사용자 계정 단계**: MySQL 무료호스트→Render(BE)→Vercel(FE) 배포 + env 입력 + 크로스도메인 로그인 확인. (가이드=docs/deploy.md)
@@ -17,6 +17,7 @@
 - (비어 있음) — 외부 무관 후보 소진. 다음은 "함께(외부)" 학습 또는 새 기능 결정.
 
 ## DONE (완료 — 기록)
+- [x] (06-29) **파라미터 타입 불일치 400** — `def391d`. 비숫자 PathVariable 500→400(MethodArgumentTypeMismatch 핸들러). 411 tests.
 - [x] (06-29) **DB 조회 인덱스 V36** — `53c3f44`. orders(member_id)·review(product_id)·order_item(product_id)·settlement_entry(seller_id·payout_id). 저카디널리티/복합UNIQUE-prefix 제외. **Flyway 부팅 적용(v36)+EXPLAIN key 선택 검증**.
 - [x] (06-29) **FE 상품목록 무한스크롤** — `6b353df`. 기본뷰=커서 `/feed`, 필터/정렬=offset. IntersectionObserver·generation 레이스가드. tsc/lint 0·라이브 200 검증.
 - [x] 옵션 API(추가/수정/삭제) + 어드민 옵션 UI — `94b…`/`6a43281` (정적+MySQL 런타임 PASS)
