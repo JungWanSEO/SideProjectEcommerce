@@ -1,7 +1,9 @@
 package com.commerce.api.monitoring.controller;
 
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -40,5 +42,13 @@ class CacheMonitoringControllerTest {
                 .andExpect(jsonPath("$.data[0].cacheName").value("productDetail"))
                 .andExpect(jsonPath("$.data[0].hitRate").value(0.9))
                 .andExpect(jsonPath("$.data[0].hitCount").value(9));
+    }
+
+    @Test
+    @DisplayName("POST /api/monitoring/caches/{name}/evict - 200, 서비스 evict 호출")
+    void evict() throws Exception {
+        mockMvc.perform(post("/api/monitoring/caches/productDetail/evict"))
+                .andExpect(status().isOk());
+        verify(cacheMonitoringService).evict("productDetail");
     }
 }

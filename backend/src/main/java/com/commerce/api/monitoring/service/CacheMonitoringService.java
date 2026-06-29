@@ -1,5 +1,6 @@
 package com.commerce.api.monitoring.service;
 
+import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.monitoring.dto.CacheStatsResponse;
 import com.github.benmanes.caffeine.cache.stats.CacheStats;
 import java.util.ArrayList;
@@ -9,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.caffeine.CaffeineCache;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 /**
@@ -39,5 +41,14 @@ public class CacheMonitoringService {
         }
         result.sort(Comparator.comparing(CacheStatsResponse::cacheName));
         return result;
+    }
+
+    /** 캐시 수동 비우기(운영 — 데이터 보정 후 stale 제거, 재기동 없이). 없는 캐시면 404. */
+    public void evict(String cacheName) {
+        Cache cache = cacheManager.getCache(cacheName);
+        if (cache == null) {
+            throw new BusinessException(HttpStatus.NOT_FOUND, "그런 캐시가 없습니다: " + cacheName);
+        }
+        cache.clear();
     }
 }
