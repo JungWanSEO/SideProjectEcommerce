@@ -9,6 +9,8 @@ import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -29,5 +31,12 @@ public class CacheMonitoringController {
     @GetMapping("/caches")
     public ResponseEntity<ApiResponse<List<CacheStatsResponse>>> getCacheStats() {
         return ResponseEntity.ok(ApiResponse.success(cacheMonitoringService.getCacheStats()));
+    }
+
+    @Operation(summary = "캐시 비우기", description = "지정 캐시를 비운다(운영 — 데이터 보정 후 stale 제거, 재기동 없이). 없는 캐시면 404.")
+    @PostMapping("/caches/{name}/evict")
+    public ResponseEntity<ApiResponse<Void>> evict(@PathVariable String name) {
+        cacheMonitoringService.evict(name);
+        return ResponseEntity.ok(ApiResponse.success("캐시를 비웠습니다.", null));
     }
 }
