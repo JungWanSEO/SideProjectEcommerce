@@ -86,6 +86,7 @@ services:
       - "127.0.0.1:9090:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alert.rules.yml:/etc/prometheus/alert.rules.yml:ro   # 알림 룰
     extra_hosts:
       - "host.docker.internal:host-gateway"   # 컨테이너→호스트(데스크톱은 기본 제공, Linux 호환용)
 
