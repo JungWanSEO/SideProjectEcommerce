@@ -506,3 +506,14 @@ export interface Dashboard {
   orderStatusDistribution: DashboardOrderStatusCount[];
   revenueTrend: DashboardDailyRevenue[];
 }
+
+/** 캐시 적중 통계 (CacheStatsResponse) — GET /api/monitoring/caches (ADMIN) */
+export interface CacheStats {
+  cacheName: string;
+  requestCount: number;
+  hitCount: number;
+  missCount: number;
+  hitRate: number; // 0..1
+  evictionCount: number;
+  estimatedSize: number;
+}
