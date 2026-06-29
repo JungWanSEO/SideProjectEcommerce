@@ -8,6 +8,7 @@ import com.commerce.api.global.config.CacheConfig;
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.product.dto.ProductCreateRequest;
+import com.commerce.api.product.dto.ProductCursorResponse;
 import com.commerce.api.product.dto.ProductImageCreateRequest;
 import com.commerce.api.product.dto.ProductOptionUpsertRequest;
 import com.commerce.api.product.dto.ProductResponse;
@@ -28,6 +29,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.repository.CrudRepository;
 import org.springframework.http.HttpStatus;
@@ -90,6 +92,25 @@ public class ProductService {
                 product.addOption(ProductOption.create(opt.size(), opt.stock())));
 
         return enrich(productRepository.save(product));
+    }
+
+    /**
+     * 커서 기반 피드(무한 스크롤) — {@code cursor} 미만 id의 노출 상품을 최신순(id desc)으로 size개.
+     * size+1을 읽어 다음 페이지 존재를 판정하고, 마지막 id를 nextCursor로 돌려준다. offset 없이 인덱스 탐색.
+     */
+    public ProductCursorResponse feed(Long cursor, int size) {
+        int limit = Math.min(Math.max(size, 1), 50);   // 1~50 클램프(남용 방지)
+        List<Product> rows = productRepository.findFeed(VISIBLE_STATUSES, cursor, PageRequest.of(0, limit + 1));
+        boolean hasNext = rows.size() > limit;
+        List<Product> page = hasNext ? rows.subList(0, limit) : rows;
+
+        Map<Long, String> categoryNames = categoryNameMap(page);
+        Map<Long, String> brandNames = brandNameMap(page);
+        List<ProductResponse> items = page.stream()
+                .map(p -> ProductResponse.of(p, categoryNames.get(p.getCategoryId()), brandNames.get(p.getBrandId())))
+                .toList();
+        Long nextCursor = hasNext ? page.get(page.size() - 1).getId() : null;
+        return new ProductCursorResponse(items, nextCursor, hasNext);
     }
 
     /** 단건 조회 — 읽기 빈도 최상이라 캐시(productDetail, key=상품 id). 쓰기/리뷰/찜 변동 시 evict로 무효화. */

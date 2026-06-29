@@ -11,6 +11,7 @@ import com.commerce.api.category.repository.CategoryRepository;
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.product.dto.ProductCreateRequest;
+import com.commerce.api.product.dto.ProductCursorResponse;
 import com.commerce.api.product.dto.ProductImageCreateRequest;
 import com.commerce.api.product.dto.ProductOptionUpsertRequest;
 import com.commerce.api.product.dto.ProductResponse;
@@ -53,6 +54,20 @@ class ProductServiceTest {
 
     @InjectMocks
     private ProductService productService;
+
+    @Test
+    @DisplayName("feed - size+1을 읽어 hasNext 판정, items는 size로 트림, nextCursor=마지막 id")
+    void feed_cursorPaging() {
+        // size=2 인데 findFeed가 3개(size+1) 반환 → 다음 페이지 있음
+        given(productRepository.findFeed(any(), any(), any()))
+                .willReturn(List.of(productWithId(3L), productWithId(2L), productWithId(1L)));
+
+        ProductCursorResponse resp = productService.feed(null, 2);
+
+        assertThat(resp.hasNext()).isTrue();
+        assertThat(resp.items()).extracting(ProductResponse::id).containsExactly(3L, 2L);   // 트림
+        assertThat(resp.nextCursor()).isEqualTo(2L);   // 마지막 항목 id
+    }
 
     private Product productWithId(Long id) {
         Product product = Product.builder()

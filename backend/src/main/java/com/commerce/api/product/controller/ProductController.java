@@ -3,6 +3,7 @@ package com.commerce.api.product.controller;
 import com.commerce.api.global.common.ApiResponse;
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.product.dto.ProductCreateRequest;
+import com.commerce.api.product.dto.ProductCursorResponse;
 import com.commerce.api.product.dto.ProductImageCreateRequest;
 import com.commerce.api.product.dto.ProductOptionUpsertRequest;
 import com.commerce.api.product.dto.ProductResponse;
@@ -28,6 +29,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -71,6 +73,17 @@ public class ProductController {
             Pageable pageable) {
         PageResponse<ProductResponse> response = productService.getProducts(condition, pageable);
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @Operation(summary = "상품 피드 (커서 기반 무한 스크롤)",
+            description = "노출 상품을 최신순(id desc)으로 cursor 미만부터 size개. 첫 페이지는 cursor 생략. "
+                    + "응답의 nextCursor를 다음 요청 cursor로 넘긴다(hasNext=false면 끝). offset 없이 인덱스 탐색이라 깊은 페이지도 빠름. "
+                    + "예: /api/products/feed?size=20 → /api/products/feed?cursor=<nextCursor>&size=20")
+    @GetMapping("/feed")
+    public ResponseEntity<ApiResponse<ProductCursorResponse>> feed(
+            @RequestParam(required = false) Long cursor,
+            @RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(ApiResponse.success(productService.feed(cursor, size)));
     }
 
     @Operation(summary = "상품 단건 조회", description = "상품 ID로 상품 정보를 조회한다. 없으면 404.")
