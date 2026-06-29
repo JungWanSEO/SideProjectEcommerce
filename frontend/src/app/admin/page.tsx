@@ -11,7 +11,7 @@ import {
   YAxis,
 } from "recharts";
 import { apiGet } from "@/lib/api";
-import { Dashboard } from "@/lib/types";
+import { CacheStats, Dashboard } from "@/lib/types";
 import { ORDER_STATUS_BADGE, ORDER_STATUS_LABEL } from "@/lib/orderStatus";
 
 /**
@@ -22,6 +22,7 @@ import { ORDER_STATUS_BADGE, ORDER_STATUS_LABEL } from "@/lib/orderStatus";
 export default function AdminDashboardPage() {
   const [days, setDays] = useState(30); // 매출 추이 기간(7/30일)
   const [data, setData] = useState<Dashboard | null>(null);
+  const [cacheStats, setCacheStats] = useState<CacheStats[]>([]); // 캐시 적중률(부가 정보)
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,6 +33,13 @@ export default function AdminDashboardPage() {
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
   }, [days]);
+
+  // 캐시 적중률은 부가 정보 — 실패해도 대시보드는 정상(에러 무시). Redis 모드면 빈 목록.
+  useEffect(() => {
+    apiGet<CacheStats[]>("/api/monitoring/caches")
+      .then(setCacheStats)
+      .catch(() => setCacheStats([]));
+  }, []);
 
   return (
     <div>
@@ -126,6 +134,44 @@ export default function AdminDashboardPage() {
               </ResponsiveContainer>
             </div>
           </section>
+
+          {/* 시스템 — 캐시 적중률 (부가 정보, Caffeine 모드) */}
+          {cacheStats.length > 0 && (
+            <section className="rounded-2xl border border-gray-200 bg-white p-5">
+              <h2 className="mb-4 text-sm font-semibold text-gray-500">시스템 — 캐시 적중률</h2>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-100 text-left text-xs text-gray-500">
+                      <th className="py-2 pr-4">캐시</th>
+                      <th className="py-2 pr-4 text-right">적중률</th>
+                      <th className="py-2 pr-4 text-right">요청</th>
+                      <th className="py-2 pr-4 text-right">hit</th>
+                      <th className="py-2 pr-4 text-right">miss</th>
+                      <th className="py-2 text-right">크기</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cacheStats.map((c) => (
+                      <tr key={c.cacheName} className="border-b border-gray-50">
+                        <td className="py-2 pr-4 font-medium text-ink">{c.cacheName}</td>
+                        <td className="py-2 pr-4 text-right">{(c.hitRate * 100).toFixed(1)}%</td>
+                        <td className="py-2 pr-4 text-right text-gray-500">
+                          {c.requestCount.toLocaleString()}
+                        </td>
+                        <td className="py-2 pr-4 text-right text-sage-600">{c.hitCount.toLocaleString()}</td>
+                        <td className="py-2 pr-4 text-right text-gray-400">{c.missCount.toLocaleString()}</td>
+                        <td className="py-2 text-right text-gray-500">{c.estimatedSize.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-2 text-xs text-gray-400">
+                Caffeine 누적 통계(프로세스 시작 이후). Redis 모드에선 비어 있음 — Grafana에서 확인.
+              </p>
+            </section>
+          )}
         </div>
       ) : null}
     </div>
