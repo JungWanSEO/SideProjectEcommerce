@@ -1,261 +1,397 @@
 # commerce-api 아키텍처
 
-> 이 문서는 실제 코드를 정독해 작성·검증한 아키텍처 설명이다. (멀티 에이전트 정독 → 종합 → 적대적 검증)
+> 패션 셀렉트샵(다중 셀러 마켓플레이스) 커머스 백엔드의 설계 레퍼런스.
+> 실제 코드(컨트롤러·서비스·엔티티·마이그레이션·테스트)를 정독해 작성·검증한 문서다.
+> README가 "무엇을·왜"의 요약이라면, 이 문서는 **도메인·데이터·핵심 흐름의 깊은 근거**를 담는다.
+
+---
 
 ## 1. 개요
-**패션 커머스 백엔드 클론 (Spring Boot 3.5.14, 모노레포).**
-- 목적: .NET 응용프로그램 개발자의 **백엔드 전환 포트폴리오**. 도메인형 패키지, JWT 스테이트리스 인증, 애그리거트 설계, 스냅샷 보존 등 실무 패턴 학습/시연.
-- 현재 범위: member(가입/조회) · auth(로그인/토큰 회전) · product(카탈로그/재고) · order(주문/취소) · cart(장바구니) 5개 도메인.
+
+**Spring Boot 3.5.14 기반, 모노레포(backend + frontend) 패션 셀렉트샵 백엔드 클론.**
+
+- **목적**: .NET 응용프로그램 개발자의 **백엔드 전환 포트폴리오**. 도메인형 패키지·애그리거트 경계·JWT 스테이트리스 인증·동시성 제어·결제/정산/대사·이벤트 정합성 등 실무 패턴을 학습·시연한다.
+- **컨셉**: 단일 쇼핑몰이 아니라 **여러 브랜드(셀러)가 입점하는 셀렉트샵**. 그래서 "매출 ≠ 셀러 정산금"을 1급 시민으로 모델링하고, *결제 → 셀러별 정산 → PG 대사 → 정산금 지급*까지 백오피스를 구현한 것이 차별점이다.
+- **현재 범위**: **18개 REST 도메인** + 이벤트 전용 `notification`(HTTP 없음) + 공통 `global` = **19개 도메인**. 마이그레이션 **V1~V36**, 테스트 **411개**.
+
+> 개별 의사결정의 상세 근거·대안 비교는 ADR(`docs/private/adr/`, 로컬 전용)에 있으며, 이 문서가 그 공개 요약본 역할을 한다.
+
+---
 
 ## 2. 기술 스택 & 버전
+
 | 영역 | 기술 | 버전/비고 |
 |---|---|---|
 | 언어 | Java | 21 (toolchain) |
-| 프레임워크 | Spring Boot | **3.5.14** (4.0 금지 — 의도적 고정) |
-| 빌드 | Gradle (Wrapper) | 8.14.5 |
-| 보안/인증 | Spring Security + JWT(jjwt) | jjwt 0.12.6, HS256 |
-| ORM | Spring Data JPA + Hibernate | `ddl-auto: update`(로컬) |
-| DB(운영/로컬) | MySQL 8.0 | Docker, host 3307 → container 3306 |
-| DB(테스트) | H2 in-memory | MODE=MySQL, 별도 test yml |
-| API 문서 | springdoc-openapi | 2.8.6 (Swagger UI) |
-| 기타 | Lombok · Validation · Actuator · JUnit5 | — |
+| 프레임워크 | Spring Boot | **3.5.14** (4.0 미사용 — 의도적 고정, ADR-0001) |
+| 빌드 | Gradle (Wrapper) | — |
+| 보안/인증 | Spring Security + JWT(jjwt) | 0.12.6, HS256, **httpOnly 쿠키** |
+| ORM | Spring Data JPA + Hibernate | **`ddl-auto: validate`** (스키마는 Flyway가 소유) |
+| 동적 쿼리 | **QueryDSL** | 5.1.0 (jakarta) |
+| DB(운영/로컬) | MySQL 8.0 | Docker, host **3307** → container 3306 |
+| DB(테스트) | H2 in-memory | `MODE=MySQL`, `create-drop`, Flyway 미사용 |
+| 마이그레이션 | **Flyway** | V1~V36, `baseline-on-migrate` |
+| API 문서 | springdoc-openapi | Swagger UI |
+| 메시징 | 트랜잭셔널 아웃박스 + **RabbitMQ** | opt-in(`outbox.publisher`), 기본 in-process |
+| 캐시 | Spring Cache | **Caffeine**(기본) / **Redis**(opt-in) / NoOp 토글 |
+| 분산 락 | 포트 + 어댑터 | NoOp(기본) / Redis(DIY) / **Redisson** 토글 |
+| 관측성 | Micrometer · Actuator | → **Prometheus + Grafana** (opt-in 프로파일) |
+| 부하 테스트 | **k6** | 캐시 처리량 · 쿠폰 동시성 시나리오 |
+| 기타 | Lombok · Validation · JUnit5 · GitHub Actions(CI) | — |
 
 좌표: groupId `com.commerce`, artifactId `commerce-api`, 루트 패키지 `com.commerce.api`.
 
-## 3. 모노레포 구조
+---
+
+## 3. 모노레포 & 패키지 구조
+
 ```
 commerce-api/ (repo root)
-├── backend/    Spring Boot 앱 (모든 gradle/docker 명령은 여기서 실행)
-├── frontend/   (예정)
-├── docs/       architecture.md, dev-log.md
-└── .claude/    skills · settings · Stop훅
+├── backend/    Spring Boot 앱 (모든 gradle/docker 명령은 여기서)
+│   ├── src/main/java/com/commerce/api/   (도메인형 패키지 — §4)
+│   ├── src/main/resources/db/migration/  (Flyway V1~V36)
+│   ├── monitoring/    (Prometheus/Grafana 설정·대시보드·alert.rules)
+│   ├── load-test/     (k6 시나리오)
+│   └── Dockerfile · docker-compose.yml · run.ps1
+├── frontend/   Next.js 15 / React 19 / TS (App Router)
+├── docs/       architecture.md · dev-log · deploy.md · ADR(private)
+└── .claude/    skills · settings
 ```
 
-## 4. 패키지 / 계층 구조 (도메인형)
+### 패키지 (도메인형)
+
 ```
 com.commerce.api
-├── member/   controller·service·repository·entity(Member, Role)·dto
-├── auth/     controller·service·repository·entity(RefreshToken)·dto
-├── product/  controller·service·repository·entity(Product, ProductStatus)·dto
-├── order/    controller·service·repository·entity(Order, OrderItem, OrderStatus)·dto
-├── cart/     controller·service·repository·entity(Cart, CartItem)·dto
-└── global/   config(JpaConfig, SecurityConfig, OpenApiConfig)
-              common(BaseEntity, ApiResponse)
-              exception(BusinessException, GlobalExceptionHandler)
-              security(JwtTokenProvider, JwtAuthenticationFilter, SecurityUtil)
+├── member · auth                      회원 · JWT 쿠키 인증
+├── product · category · brand         카탈로그(상품/SKU/이미지 · 2단계 카테고리 · 브랜드)
+├── cart · address · order · payment   장바구니 · 주소록 · 주문/체크아웃 · 결제(다중 PG)
+├── seller · settlement                셀러 · 정산/지급(payout)/대사(reconciliation)
+├── coupon                             쿠폰/프로모션/선착순
+├── review · wishlist                  리뷰 · 위시리스트
+├── activity · recommendation          행동 로그 · 개인화 추천(나를위한/함께산)
+├── dashboard · monitoring             운영 KPI · 캐시 모니터링
+├── notification                       이벤트 소비(HTTP 컨트롤러 없음)
+└── global   config · common · exception · security · lock · ratelimit · events
 ```
-계층 흐름: **Controller → Service → Repository → Entity**, DTO(record)는 경계에서만.
+
+각 도메인은 `controller · service · repository · entity · dto`로 일관 분리한다.
 
 | 계층 | 책임 |
 |---|---|
 | Controller `@RestController` | 라우팅, `@Valid`, `ApiResponse` 래핑 |
-| Service `@Service @Transactional` | 비즈니스 로직, 트랜잭션 경계(기본 readOnly) |
-| Repository `JpaRepository` | 데이터 접근, 메서드명 쿼리 |
+| Service `@Service @Transactional` | 비즈니스 로직, 트랜잭션 경계(기본 readOnly), 소유권 검사(`SecurityUtil`) |
+| Repository `JpaRepository` (+ QueryDSL `…Impl`) | 데이터 접근, 동적 쿼리 |
 | Entity | 도메인 모델 + 도메인 로직(애그리거트 루트) |
-| DTO(record) | 불변 요청/응답 계약 |
+| DTO(record) | 불변 요청/응답 계약, `from()` 매핑 중앙화 |
 
-## 5. 요청 처리 흐름
+> **계층 흐름**: Controller → Service → Repository → Entity. DTO(record)는 경계에서만. (ASP.NET Core의 Controller/Service/Repository + DI와 동형)
 
-**일반(공개)**
-```
-Client → JwtAuthenticationFilter(토큰 없음→통과) → SecurityFilterChain(permitAll)
-       → Controller(@Valid) → Service(@Transactional) → Repository → DB
-       ←─ ApiResponse<T>
-```
+---
 
-**JWT 인증 요청**
-```
-Client (Authorization: Bearer <accessToken>)
- → JwtAuthenticationFilter (OncePerRequestFilter)
-     1) "Bearer " 추출  2) validate(HS256)
-     3) role claim 있으면(=access) → UsernamePasswordAuthenticationToken
-          principal=memberId(Long), authorities="ROLE_"+role
-     4) SecurityContext에 저장
- → 인가 검사(SecurityConfig)
- → Controller: SecurityUtil.getCurrentMemberId() (없으면 401)
- → Service → Repository → DB → ApiResponse<T>
-```
-- 세션 `STATELESS`, CSRF/Basic/formLogin 비활성. 필터는 `UsernamePasswordAuthenticationFilter` **앞**에 등록.
-- **role claim 없는 토큰(=refresh)은 SecurityContext에 설정되지 않음 → 요청 인증 불가**(의도된 설계).
+## 4. 보안 아키텍처
 
-## 6. 보안 아키텍처
-- **비밀번호**: `BCryptPasswordEncoder`(salt 내장). 가입 시 인코딩, 로그인 시 `matches()`. 응답 DTO에서 password 제외.
-- **JWT 서명**: HS256 대칭키. 시크릿은 `application.yml`(로컬) — 운영은 환경변수화 TODO.
-- **principal = memberId(Long)**: 위변조 불가, DB 직매핑.
-- **역할**: `Role`(USER/ADMIN). Spring Security가 `ROLE_` 접두사 부여(`JwtAuthenticationFilter`에서 `"ROLE_"+role`). 가입은 USER, ADMIN은 직접 설정.
+### 4.1 인증 — JWT httpOnly 쿠키 (ADR-0005)
 
-**토큰 설계**
+브라우저 SPA(Next.js)를 위해 토큰을 **httpOnly 쿠키**로 운반한다(localStorage는 XSS로 탈취 가능). `AuthCookieManager`가 `ResponseCookie`로 httpOnly + SameSite를 설정한다.
+
 | | Access | Refresh |
 |---|---|---|
+| 운반 | httpOnly 쿠키 | httpOnly 쿠키 |
 | 만료 | 30분 | 14일 |
-| subject | memberId | memberId |
-| role claim | 있음 | **없음** |
+| role claim | **있음**(인가용) | 없음 |
 | jti(UUID) | 있음 | 있음 |
-| 상태 | 무상태 | `refresh_token` 테이블 저장(stateful) |
-| 요청 인증 | 가능 | 불가 |
+| 저장 | 무상태 | **`refresh_token` 테이블**(멤버당 1행, stateful) |
+| 요청 인증 | 가능 | 불가(role claim 없음 → SecurityContext 미설정) |
 
-- 응답 형태: `TokenResponse { accessToken, refreshToken, tokenType:"Bearer" }`.
-- **jti(UUID)**: 같은 초에 발급돼도 토큰이 달라짐 → 회전·재사용 탐지.
-- **회전(rotation)**: refresh 시 저장본과 정확히 일치해야 하고, 새 토큰 발급과 동시에 저장값 in-place 갱신(멤버당 1레코드, `findByMemberId`+`ifPresentOrElse` upsert). 불일치/이미 회전됨 → 401.
+- **회전(rotation)**: refresh 시 저장본과 정확히 일치해야 하고, 새 토큰 발급과 동시에 저장값을 in-place upsert(`findByMemberId` + `ifPresentOrElse`). 불일치/이미 회전됨 → 401. → refresh 토큰 1회용화, **재사용 탐지**.
+- **principal = memberId(Long)**: 위변조 불가, DB 직매핑. `SecurityUtil.getCurrentMemberId()`(없으면 401) / `isAdmin()`.
+- 세션 `STATELESS`, CSRF/Basic/formLogin 비활성. `JwtAuthenticationFilter`(OncePerRequestFilter)를 `UsernamePasswordAuthenticationFilter` 앞에 등록.
 
-**경로 인가 매트릭스**
+### 4.2 인가 — 경로 기반 (SecurityConfig 단일 출처)
+
+인가는 전부 `SecurityConfig`의 **경로 기반 규칙**으로 한다(코드에 `@PreAuthorize` 0개). 자원별 소유권("내 주문 또는 ADMIN", "작성자만", "구매자만 리뷰")은 **서비스 계층에서** `SecurityUtil`로 강제한다.
+
 | 경로 | 인가 |
 |---|---|
-| `POST /api/auth/**` (login/refresh) | permitAll |
-| `POST /api/members` (가입) | permitAll |
-| `GET /api/products/**` (조회) | permitAll |
-| `/swagger-ui/**`, `/v3/api-docs/**`, `/actuator/health` | permitAll |
-| `POST /api/products` (등록) | **hasRole('ADMIN')** |
-| `GET /api/members/{id}`, `/api/orders/**`, `/api/carts/**`, 그 외 | **authenticated** (anyRequest) |
+| `POST /api/auth/login·refresh·logout` · `POST /api/members`(가입) | permitAll |
+| `GET /api/products/**` · `/api/categories` · `/api/brands` · 리뷰 조회 | permitAll |
+| `/swagger-ui/**` · `/v3/api-docs/**` · `/actuator/health` · `/actuator/prometheus` | permitAll |
+| `/api/coupons/**` · `/api/sellers/**` · `/api/settlements/**` · `/api/payouts/**` · `/api/reconciliations/**` · `/api/dashboard` · `/api/monitoring/**` · 카탈로그 쓰기 | **hasRole(ADMIN)** |
+| `/api/seller/**` (셀러 셀프 콘솔) | **hasRole(SELLER)** |
+| 그 외 | **authenticated** (`anyRequest`) |
 
-## 7. 데이터 모델
-| 엔티티 | 테이블 | 핵심 컬럼 | 관계 |
+- **역할(Role)**: USER · SELLER · ADMIN. 가입은 USER, SELLER/ADMIN은 직접 부여(`member.seller_id`로 셀러 콘솔 스코프).
+- **비밀번호**: `BCryptPasswordEncoder`(salt 내장). 소셜 유저는 password null(§7 OAuth prep).
+- **로그인 레이트 리밋**: 이메일당 5회/분 초과 시 인증 평가 *전에* 429(`global/ratelimit`, `RateLimitIntegrationTest`).
+
+---
+
+## 5. 데이터 모델
+
+### 5.1 애그리거트 경계 — ID 참조 vs 객체 연관 (ADR-0002)
+
+```
+애그리거트 내부  ══ @OneToMany cascade/orphanRemoval (FK + 객체연관)
+애그리거트 간    ── Long ID 참조 (FK 객체 없음, 필요 시 findAllById 배치 enrich)
+
+Order ══(N) OrderItem        Cart ══(N) CartItem        Product ══(N) ProductOption / ProductImage
+Order ──memberId──> Member   OrderItem ──productId/sellerId(스냅샷)──> Product/Seller
+Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId──> Payment/Seller
+```
+
+- 애그리거트를 넘는 `@ManyToOne`을 쓰지 않는다 → 결합도↓·경계 명확·불필요 로딩 회피. 이름은 조회 시점에 `findAllById` 배치로 enrich(N+1 회피).
+- **실제 FK 제약은 애그리거트 내부에만**: `product_option.product_id`, `product_image.product_id`, `cart_item.cart_id`, `order_item.order_id`.
+- **돈은 `bigint`(원 단위)**, 비율·점수는 `double`. enum은 `@Enumerated(STRING)` + 마이그레이션 enum 값을 **알파벳순**으로 둬 Hibernate `validate`와 일치(Boot 3.5 트랩, ADR-0006).
+- 모든 엔티티 `BaseEntity`(createdAt 불변 / updatedAt) 상속.
+
+### 5.2 주요 테이블
+
+| 테이블 | 도메인 | 목적 | 핵심 컬럼/제약 |
 |---|---|---|---|
-| Member | `member` | id, email(unique), password(**nullable** — 소셜 유저), nickname, role(enum), **provider(enum,기본 LOCAL)·providerId**(OAuth2 대비, §12) | 독립 |
-| RefreshToken | `refresh_token` | id, memberId(unique), token(varchar512) | memberId → Member (ID참조) |
-| Product | `product` | id, name, price(**long** 원), stock(int), description, status(enum) | 독립 |
-| Order | `orders`(예약어 회피) | id, memberId(ID참조), status(enum), totalPrice(long) | @OneToMany OrderItem |
-| OrderItem | `order_item` | id, order_id(FK), productId(ID참조), productName/orderPrice(**스냅샷**), quantity | order(@ManyToOne) |
-| Cart | `cart` | id, memberId(unique) | @OneToMany CartItem |
-| CartItem | `cart_item` | id, cart_id(FK), productId(ID참조), quantity | cart(@ManyToOne) |
+| `member` | member/auth | 회원(로컬+소셜), 역할 기반 | email UNIQUE · role(USER/SELLER/ADMIN) · provider/provider_id · seller_id |
+| `refresh_token` | auth | 멤버당 refresh 토큰 | member_id UNIQUE |
+| `category` / `brand` | product | 2단계 카테고리 / 브랜드(셀러 소유) | name UNIQUE · category.parent_id · brand.seller_id |
+| `product` | product(루트) | 판매 상품 + 비정규화 신호 카운터 | brand_id · category_id · status · image_url · rating_count/sum · wishlist_count |
+| `product_option` | product(자식) | **SKU**(사이즈+재고) + 낙관적 락 | FK→product · `version` |
+| `product_image` | product(자식) | 이미지 갤러리 | FK→product · sort_order |
+| `cart`/`cart_item` | cart | 멤버당 장바구니 | cart.member_id UNIQUE · option_id |
+| `orders` | order(루트) | 주문 헤더: 상태머신·배송 스냅샷·쿠폰 스냅샷 | status(PENDING/PAID/SHIPPING/DELIVERED/CANCELLED) · 배송 컬럼 · discount/coupon 스냅샷 |
+| `order_item` | order(자식) | 라인: 가격·이름·사이즈 + brand/seller **스냅샷** | FK→orders · status(ACTIVE/CANCELLED) |
+| `address` | member | 저장 배송지 | member_id · is_default |
+| `payment` | payment | 주문당 결제(다중 PG·부분환불) | order_id(ID참조) · idempotency_key UNIQUE · provider · refunded_amount |
+| `settlement_entry` | settlement | **(결제 × 셀러)** 정산: 수수료·플랫폼수수료·할인 배분·지급 연결 | payment_id · seller_id · payout_id · gross/fee/net/platform_fee · fee_rate · provider |
+| `mismatch` | reconciliation | PG↔우리 대사 불일치 + 예외 큐 | pg_transaction_id · type · status(OPEN/RESOLVED/IGNORED) · provider |
+| `outbox_event` | global/events | 트랜잭셔널 아웃박스(at-least-once) | status(PENDING/PUBLISHED/FAILED) · retry_count · next_attempt_at |
+| `notification_log` | events | 멱등 소비 로그 | event_id UNIQUE |
+| `seller` | seller | 입점사(플랫폼 테넌트) | name UNIQUE · commission_rate · status(ACTIVE/SUSPENDED) |
+| `payout` | settlement | 셀러·기간별 정산금 지급 묶음 | seller_id · period_from/to · totals · status(PENDING/PAID) |
+| `coupon` | coupon | 쿠폰 정의(공개/발급·한정수량) | code UNIQUE · discount_type · funded_by · issue_type · total_quantity/issued_count |
+| `member_coupon` | coupon | 멤버 쿠폰 지갑 | member_id+coupon_id UNIQUE · status(UNUSED/USED) |
+| `wishlist` | personalization | 위시 상품 | member_id+product_id UNIQUE |
+| `activity_log` | personalization | 조회 이벤트 append-only | type(VIEW) · idx(member_id, created_at) |
+| `recommendation` | personalization | 멤버별 "나를위한" 사전계산 | member_id+product_id UNIQUE · score |
+| `product_cooccurrence` | personalization | "함께 산 상품" 사전계산 | reference_product_id+product_id UNIQUE · co_buy_count · score |
 
-모든 엔티티 `BaseEntity`(createdAt/updatedAt) 상속. enum은 모두 `@Enumerated(STRING)`.
+### 5.3 스키마 진화 (Flyway 36개, 에포크별)
 
-**관계 원칙 — 애그리거트 경계**
-```
-Member (1)──ID참조──(1) RefreshToken / Cart      [memberId unique]
-Member (1)──ID참조──(N) Order
-Order  (1)══객체연관══(N) OrderItem   [@OneToMany, cascade ALL, orphanRemoval]
-Cart   (1)══객체연관══(N) CartItem    [@OneToMany, cascade ALL, orphanRemoval]
-OrderItem ──ID참조──> Product (+ name/price 스냅샷)
-CartItem  ──ID참조──> Product (스냅샷 없음, 조회 시 enrich)
-
- ══ 애그리거트 내부 객체연관(FK+cascade)   ── 애그리거트 간 ID참조(Long, FK객체 없음)
-```
-
-## 8. 도메인별 요약
-| 도메인 | 책임 | 핵심 로직 |
+| 에포크 | 마이그레이션 | 내용 |
 |---|---|---|
-| **member** | 가입/조회 | `existsByEmail` 중복검사(→409), BCrypt 인코딩, 기본 role USER. 조회 실패 404. |
-| **auth** | 로그인/토큰갱신 | 로그인: email + `matches()`(실패 401) → access+refresh. refresh: 저장본 일치 검증 → 회전. 멤버당 단일 refresh(upsert). |
-| **product** | 카탈로그/재고/상태 | 신규 ON_SALE. `decreaseStock()`/`increaseStock()`는 **엔티티 메서드**(재고부족 409). 물리삭제 대신 status 전이(소프트삭제). |
-| **order** | 주문 애그리거트 | 생성: 가격/이름 **스냅샷** + 재고차감, 원자적(실패 시 전체 롤백). **동시 주문은 `@Version` 낙관적 락으로 초과판매 방지** — `OrderService.create`(@Retryable) → `OrderProcessor.place`(@Transactional) 위임으로 충돌 시 새 트랜잭션 재시도. `cancel()`: 재고 복원, 이미 취소면 409. |
-| **cart** | 멤버당 장바구니 | 멤버당 1개(memberId unique). `addItem` 중복 시 수량증가. CartItem **스냅샷 없음** — 조회 시 `findAllById` 배치(N+1 방지)로 enrich, 삭제된 상품은 `"(삭제된 상품)"` placeholder. 빈 카트는 합성 응답. removeItem: 카트 없으면 404, 항목 없으면 조용히 무시. |
+| A 코어 커머스 | V1~V2 | 회원·카탈로그·주문·장바구니·SKU 베이스라인 / OAuth 필드 prep(소셜은 후속) |
+| B 결제 | V3~V4 | payment 테이블(멱등키) / 주문 상태머신 ORDERED→PENDING·PAID |
+| C 정산·대사 | V5~V7 | settlement_entry(payment UNIQUE) / mismatch / 예외 상태(OPEN/RESOLVED/IGNORED) |
+| D 아웃박스·이벤트 | V8~V10 | outbox_event / notification_log(event_id UNIQUE) / 백오프(next_attempt_at) |
+| E 다중 PG | V11~V13 | payment·settlement·mismatch에 provider·fee_rate 컬럼 |
+| F 리뷰·이미지·주소·배송 | V14~V17 | image_url / review(+평점 카운터) / address / 주문 배송 스냅샷 |
+| G 셀러 정산 | V18~V24 | seller / brand·order_item 셀러 스냅샷 / (payment×seller) 분해 / SELLER 역할 / payout / 부분환불 |
+| H 쿠폰 | V25~V27 | coupon(funded_by) / 정산 할인 배분 / issue_type + member_coupon 지갑 |
+| I 개인화 | V28~V31 | wishlist / activity_log / recommendation / product_cooccurrence |
+| J 어드민·카테고리·배송상태 | V32~V35 | product_image 갤러리 / category.parent_id / 배송 상태 enum / 쿠폰 한정수량 |
+| K 인덱스 | V36 | 애그리거트 FK 회피로 안 잡힌 필터 컬럼에 보조 인덱스 |
 
-## 9. 횡단 관심사 (global)
+---
+
+## 6. 핵심 도메인 흐름 (깊은 설계)
+
+### 6.1 주문 → 결제 → 재고 (ADR-0003·0008)
+
+```
+체크아웃  POST /api/orders/checkout → 주문 PENDING (가격/배송지 스냅샷, 재고 차감 ❌)
+결제      POST /api/payments → PaymentGatewayRouter.approve
+  성공 → [한 트랜잭션] 재고 차감(@Version) + Order PAID + Payment PAID
+  실패 → Payment FAILED, Order PENDING 유지(재결제 가능)
+취소      (PAID였으면) 재고 복원 + Order/Payment CANCELLED   ※ SHIPPING 이후 취소 차단(409)
+```
+
+- **재고 차감 시점 이동**: 주문 생성이 아니라 **결제 승인 시점**. 같은 SKU 동시 결제는 `ProductOption.version` 낙관적 락으로 충돌 감지.
+- **재시도 빈 분리**: `OrderService`(@Retryable, OptimisticLockingFailureException, 3회·100ms 백오프) → `OrderProcessor`(@Transactional)에 위임. 같은 빈 self-invocation은 프록시를 안 거쳐 "롤백→새 트랜잭션 재시도"가 안 되므로, **별도 빈으로 분리**해 프록시 경유를 보장. 실재 재고부족은 재시도 없이 409.
+- **멱등성**: `Payment.idempotencyKey`(UUID) UNIQUE. 같은 키 재요청은 재승인·재차감 없이 기존 결과 반환(네트워크 재시도·더블클릭 방어).
+
+### 6.2 다중 PG 라우팅 (ADR-0010)
+
+`PaymentGateway` 포트 + 2개 모의 어댑터(Toss/Kakao, `AbstractMockPaymentGateway`) + `PaymentGatewayRouter`. **3가지 전략**:
+
+1. **클라이언트 지정** — 요청의 provider로 승인(대소문자 무시, 미지정/미지원 → 기본/400).
+2. **페일오버**(`approveWithFailover`) — 비용 오름차순으로 PG를 순회, 다운/거절 시 다음 PG로. 실제 승인한 PG를 `Payment.provider`에 기록(환불을 그 PG로 라우팅).
+3. **비용기반 AUTO** — `provider="AUTO"`면 수수료율이 가장 낮은 PG 선택.
+
+> 수수료율은 `PaymentGateway.feeRate()` **단일 출처** — 라우팅과 정산이 같은 값을 공유(정산→결제 방향 의존). 검증: `PaymentGatewayRouterTest`(13).
+
+### 6.3 셀러별 정산 (ADR-0011)
+
+한 주문에 여러 셀러 상품이 섞이므로 정산은 **(결제 × 셀러)로 분해**한다. `SettlementService.run()`:
+
+1. PAID 결제를 스캔 → 셀러별 gross 합산(귀속은 주문 시점 `order_item.seller_id` **스냅샷** 기준 — 나중에 브랜드를 재귀속해도 과거 정산 불변).
+2. **PG 수수료**를 셀러별로 비례 배분(잔여 원 단위는 최대 셀러에 — largest remainder).
+3. **플랫폼 수수료**(`Seller.commissionRate`) 차감 → `net = gross − fee − platform_fee (+ PLATFORM 부담 할인 환원)`.
+4. `SettlementEntry` 생성. 멱등성은 `existsByPaymentId`(앱) — V24에서 부분환불 역분개 행을 허용하려 `(payment_id, seller_id)` UNIQUE를 제거했기 때문.
+5. **payout**: 셀러·기간별로 `SettlementEntry`를 묶어 지급 단위(PENDING→PAID), 이중 지급은 `payout_id` 연결로 방지.
+
+### 6.4 PG 대사 (Reconciliation, ADR 흐름)
+
+우리 정산 장부와 **PG의 독립 장부**(모의 PG가 stateful ledger 보유)를 `pgTransactionId`로 조인. `ReconciliationService`가 각 거래를 **정상(MATCHED)과 4종 불일치**(`MISSING_IN_PG · MISSING_IN_OURS · AMOUNT_MISMATCH · STATUS_MISMATCH`)로 분류(예: "정산 후 환불 → STATUS_MISMATCH"가 자연 발생). `mismatch` 행으로 적재되는 건 불일치 4종이고, MATCHED는 요약 카운트.
+
+- 셀러 분할 정산을 PG 거래 단위로 group-by-sum해 비교, **PG별(byProvider) 분해**.
+- **일자 윈도우**(선택 `from/to`, 무인자=전체) — 정산일 기준, OPEN 삭제는 해당 윈도우 거래키로 한정(다른 날 OPEN 보존).
+- 불일치는 예외 큐: `OPEN → RESOLVED/IGNORED`(사유). 재실행 시 이미 처리된 키는 다시 OPEN하지 않음. 검증: `ReconciliationServiceTest`(20).
+
+### 6.5 트랜잭셔널 아웃박스 (ADR-0009)
+
+결제완료 이벤트의 **이중 쓰기** 문제(DB 커밋과 메시지 발행 사이 크래시 → 이벤트 유실/유령)를 해결.
+
+```
+결제완료  PaymentCompletionRecorder.saveWithEvent
+          → [한 로컬 트랜잭션] payment.markPaid + outbox_event INSERT(PENDING)
+폴러      OutboxRelay(@Scheduled) → FOR UPDATE SKIP LOCKED로 PENDING 청크 claim
+          → EventPublisher 포트로 발행 → PUBLISHED
+소비      NotificationLog(event_id UNIQUE) → 멱등 소비(at-least-once 대비)
+```
+
+- `PaymentService.pay`는 의도적으로 `@Transactional`이 아님(낙관락 재시도 보존) → 아웃박스가 정합을 보강.
+- **신뢰성(P2a)**: 지수 백오프(`next_attempt_at`, 2→4→8초) + 최대 재시도 후 dead-letter(FAILED) + 멀티 폴러 안전(SKIP LOCKED, MySQL 전용).
+- **발행 포트**(`EventPublisher`): 기본 in-process, **opt-in으로 RabbitMQ**(`RabbitEventPublisher` + `@RabbitListener`, exchange `commerce.events`). 결제/폴러는 포트에만 의존 → 어댑터 교체 시 코드 변화 0. 검증: `OutboxProcessorTest`(6).
+
+### 6.6 쿠폰 / 프로모션 (ADR-0012)
+
+- **funded-by 회계**: `Coupon`은 4축(부담 PLATFORM/SELLER · 범위 sellerId · 발급 PUBLIC/ISSUED · 정액/정률+상한). 체크아웃은 **gross 보존** 후 `payableAmount = gross − discount`만 청구.
+- **정산 배분**: 누가 할인을 부담하는지가 셀러 net과 플랫폼 마케팅 비용을 가르므로, 할인을 셀러 정산에 비례 배분하고 아이템별 유효가(`Order.discountShares`)를 단일 출처로 둬 **부분 취소 과환불 방지**.
+- **선착순 한정수량**(ADR-0015 연계): `coupon.total_quantity/issued_count`. `POST /api/member-coupons/claim/{id}`는 **원자적 조건부 UPDATE**(`incrementIssuedCount` — 한도 내에서만 +1, DB 행 잠금) + `member_coupon` UNIQUE(1인 1장)로, **앱 락 없이** 초과 발급 0을 보장. 검증: `CouponClaimConcurrencyTest`(30명→정확히 10장).
+
+### 6.7 개인화 추천 (배치)
+
+- **신호**: `activity_log`(VIEW, append-only) + 위시리스트·구매(PAID 주문) 테이블.
+- **나를 위한 추천**: 규칙 기반 배치(구매×3 / 위시×2 / 조회×1 → 카테고리·브랜드 선호 → top-10), `@Scheduled+@Transactional` 단일 메서드(self-invocation 회피), `recommendation` 사전계산.
+- **함께 산 상품**: PAID 주문의 상품쌍을 `COUNT(DISTINCT order)`로 집계 → `product_cooccurrence`. 추천→상품 단방향을 위해 `RecommendationController`에 배치(상품 컨트롤러 아님).
+
+---
+
+## 7. 동시성 제어 — 두 가지 전략
+
+| 문제 | 전략 | 이유 |
+|---|---|---|
+| **재고 초과판매** (낮은 경합, 도메인 규칙·메시지 필요) | `@Version` **낙관적 락** + 새 트랜잭션 재시도 | 비관적 락의 처리량 손해 회피, 충돌은 드물고 재시도로 흡수 |
+| **선착순 쿠폰** (높은 경합, 단순 카운터) | **원자적 조건부 UPDATE** + UNIQUE | 한 문장으로 "한도 내에서만 발급" 직렬화 — 앱 락 불필요, DB가 펜싱 |
+
+**분산 락**(`global/lock`, ADR-0015)은 포트 + 어댑터로 토글한다: NoOp(기본) / Redis DIY(`SET NX PX` + Lua 원자 해제) / Redisson(`RLock` 워치독). 쿠폰 발급의 *정합*은 위 DB 원자 UPDATE가 이미 보장하므로 분산 락은 **멀티 인스턴스 직렬화를 위한 advisory**이고, DB가 펜싱 백스톱 역할을 한다. `MemberCouponClaimService`가 이 포트로 claim 트랜잭션을 감싼다.
+
+> `LockComparisonTest`의 통찰: 리스(lease) 기반 DIY 락은 작업(2초)이 리스(1초)보다 길면 상호배제가 깨져 동시성=2가 되고, Redisson 워치독은 리스를 자동 연장해 동시성=1을 유지한다. (로컬 Redis 없으면 `assumeTrue`로 skip)
+
+---
+
+## 8. 횡단 관심사 (global)
+
 | 관심사 | 구현 |
 |---|---|
-| 감사 | `BaseEntity`(@MappedSuperclass) + `JpaConfig`(@EnableJpaAuditing): createdAt(불변)/updatedAt 자동 |
-| 공통 응답 | `ApiResponse<T>` {success, message, data}. 성공/검증오류/비즈니스예외/시스템오류 단일 형태. 오류는 `error(message)`(data=null, success=false) |
-| 전역 예외 | `GlobalExceptionHandler`(@RestControllerAdvice): BusinessException→보유 HttpStatus / Validation→400 / HttpMessageNotReadable→400 / 그 외→500(로깅) |
-| 비즈니스 예외 | `BusinessException` extends RuntimeException + HttpStatus 보유 → 도메인이 상태코드 결정 |
-| API 문서 | `OpenApiConfig`(springdoc): `/swagger-ui.html`, `/v3/api-docs` |
-| 보안 헬퍼 | `SecurityUtil.getCurrentMemberId()`: principal(memberId) 추출, 없으면 401 |
+| 감사 | `BaseEntity`(@MappedSuperclass) + JPA Auditing: createdAt(불변)/updatedAt 자동 |
+| 공통 응답 | `ApiResponse<T>` {success, message, data} — 성공/검증오류/비즈니스예외/시스템오류 단일 형태 |
+| 전역 예외 | `GlobalExceptionHandler`(@RestControllerAdvice): BusinessException→보유 HttpStatus / Validation·메시지 파싱·**타입 불일치**→400 / 그 외→500(로깅) |
+| 비즈니스 예외 | `BusinessException`(+HttpStatus) → 도메인이 상태코드 결정 |
+| 캐싱 | `CacheConfig`가 3개 매니저 빌드(Caffeine/Redis/NoOp), `@Cacheable`/`@CacheEvict` + 도메인 간 무효화(리뷰·위시 → 상품) |
+| 레이트 리밋 | 로그인 이메일당 5회/분 → 초과 시 429(인증 평가 전) |
+| 보안 헬퍼 | `SecurityUtil.getCurrentMemberId()`(없으면 401) / `isAdmin()` |
+| API 문서 | springdoc — `/swagger-ui.html`, `/v3/api-docs` |
+
+---
+
+## 9. 운영 · 관측성
+
+> **설계 철학**: Redis·RabbitMQ·Prometheus/Grafana는 **코드로 완성되어 있되 기본은 OFF/로컬**. 단일 인스턴스 데모에 외부 의존을 강제하지 않으면서, 스케일아웃 시 토글만으로 켜지는 이음새를 확보했다. (구현 ≠ 기본 활성)
+
+### 9.1 관측성 (Prometheus + Grafana, ADR-0016) — opt-in 프로파일
+
+- Micrometer → `/actuator/prometheus`(permitAll) 노출, `http.server.requests` 히스토그램 버킷 + SLO 버킷, Tomcat 스레드 metric.
+- `docker compose --profile observability up` → Prometheus(:9090, 5초 스크레이프) + Grafana(:3001). `monitoring/grafana/dashboards/commerce.json` — **3계층(행) 10개 패널**(① 골든 시그널 RPS/지연 p50·p95·p99/에러율 ② 포화도 JVM 힙·Hikari·CPU·Tomcat ③ 도메인 캐시 히트율·선착순 claim 201/409/503).
+- 별도 앱 레벨 `GET /api/monitoring/caches`(ADMIN) — 캐시 히트율 KPI를 어드민 콘솔에 노출(Prometheus와 별개).
+
+### 9.2 부하 테스트 (k6) — 수동
+
+- `cache-throughput.js` — 캐시 ON/OFF 비교(thresholds: 에러<1%, p95<800ms). 측정: 캐시로 RPS ~5.3×, p95 ~13× 개선.
+- `coupon-claim.js` — 200 VU 버스트로 100장 쿠폰 claim, `claim_success ≤ 100`(초과 발급 0 증명), 락 모드(none/redis/redisson) 비교.
+
+### 9.3 배포 준비 — prep 완료(실배포는 후속)
+
+- `Dockerfile`(멀티스테이지, temurin 21 jdk→jre, `bootJar -x test`), `server.port=${PORT:8080}`, DB·CORS·쿠키 전부 env화(`app.cors.allowed-origins` / `app.cookie.*`).
+- **CORS·쿠키 실배선**: `allowCredentials=true`(와일드카드 없음), httpOnly 항상, prod는 Secure=true + SameSite=None(크로스 도메인 로그인 트랩 문서화).
+- `run.ps1`(로컬 전용 — `.env` 로드 후 dev 프로파일 시드로 bootRun).
+
+### 9.4 CI (GitHub Actions)
+
+push/PR(`dev`·`main`) 시 2잡: **backend**(JDK 21, `gradlew test`, H2 — 시크릿/MySQL 불필요) + **frontend**(Node 20, `npm ci` → `tsc --noEmit` → lint). 배포·이미지 빌드 스테이지는 없음.
+
+---
 
 ## 10. 전체 API 엔드포인트
-| METHOD | Path | 인가 | 설명 |
-|---|---|---|---|
-| POST | `/api/auth/login` | permitAll | 인증 → access+refresh (실패 401) |
-| POST | `/api/auth/refresh` | permitAll | 회전 재발급 (불일치 401) |
-| POST | `/api/members` | permitAll | 가입 201 (중복 409) |
-| GET | `/api/members/{id}` | authenticated | 조회 200 (없으면 404) |
-| GET | `/api/products/{id}` | permitAll | 조회 200 (없으면 404) |
-| POST | `/api/products` | ADMIN | 등록 201 |
-| POST | `/api/orders` | authenticated | 주문(스냅샷+재고차감) 201 |
-| GET | `/api/orders/{id}` | authenticated | 조회 200 (없으면 404) |
-| POST | `/api/orders/{id}/cancel` | authenticated | 취소(재고복원) 200 (이미취소 409) |
-| POST | `/api/carts/items` | authenticated | 담기(없으면 생성, 중복 수량증가) |
-| GET | `/api/carts` | authenticated | 내 장바구니(상품 enrich) |
-| DELETE | `/api/carts/items/{productId}` | authenticated | 항목 제거 (카트 없으면 404) |
 
-## 11. 핵심 설계 결정
-1. **스냅샷 vs 라이브 참조**: Order/OrderItem은 가격·이름 스냅샷(이력 보존), Cart는 스냅샷 없이 조회 시점 최신 정보 enrich.
-2. **애그리거트 간 ID 참조**: memberId/productId는 항상 `Long`(객체 연관 금지) → 결합도↓·경계 명확·불필요 로딩 회피.
-3. **돈은 long**(원 단위 정수) → 부동소수점 오차 방지.
-4. **enum은 `@Enumerated(STRING)`** → ordinal 대비 안전.
-5. **JWT stateless** + access/refresh 분리 + 회전 + jti.
-6. **principal = memberId(Long)** + SecurityUtil null 시 401.
-7. **HS256**(단일 서비스 적합; 다중 서비스면 RS256).
-8. **도메인 로직은 엔티티에**(재고 변동/주문 합계·취소/장바구니 dedup).
-9. **생성 제어**: `@NoArgsConstructor(PROTECTED)` + Builder/팩토리(`Order.create`).
-10. **DTO는 record**(불변, 엔티티 누출 방지, `from()` 매핑 중앙화).
-11. **트랜잭션 기본 readOnly**, 쓰기 메서드만 `@Transactional`.
-12. **소프트 삭제**(상품 status 전이) → 주문 참조 무결성 보존.
-13. **N+1 방지**: Cart 조회 시 `findAllById` 배치.
-14. **테스트는 H2**(MySQL 비의존, 격리), 운영/로컬은 MySQL(Docker).
-15. **재고 동시성 = 낙관적 락(@Version) + 재시도**: 동시 차감 충돌은 커밋 시 감지(초과판매 방지), `@Retryable`로 새 트랜잭션 재시도(재시도는 트랜잭션 워커 빈 분리로 보장). 동시성 테스트로 검증.
+> 인가: public(permitAll) · authenticated(로그인) · ADMIN · SELLER. 소유권("내 것 또는 ADMIN" 등)은 서비스 계층에서 강제.
 
-## 12. 인증 확장: OAuth2 / 소셜 로그인 (설계)
-
-> 로컬(email/password)에 더해 구글·카카오·네이버 등 **소셜 로그인**을 받기 위한 설계. **소셜 로그인 구현 자체는 후속**이며, 유저 모델은 Flyway **V2 마이그레이션으로 미리 대비**(provider/providerId/nullable password)했다.
-
-### 12.1 핵심 원칙 — "검증 주체만 갈아끼우고, 토큰 발급은 그대로"
-소셜 로그인 = 비밀번호 확인 대신 **외부 제공자(IdP)가 신원을 확인**하는 것. 인증 성공 *이후*에는 로컬과 **동일하게 우리 JWT(httpOnly access/refresh 쿠키)를 발급**한다 → 기존 인증/인가 파이프라인(`JwtAuthenticationFilter`·쿠키·401/403·refresh 회전) 전부 재사용. (.NET의 외부 인증 핸들러 + 자체 토큰 발급과 동형.)
-
-### 12.2 유저 모델 — 단일 테이블
-- `Member.provider`(LOCAL/GOOGLE/KAKAO/NAVER) + `Member.providerId`(제공자 고유 ID = 소셜의 `sub`). LOCAL은 password 보유, 소셜은 **password null**.
-- **식별자 = (provider, providerId)**. ⚠️ email은 제공자 측에서 바뀔 수 있어 1차 식별자로 부적합 — 연동 보조 키로만.
-- **단일 테이블** 채택(표준·간단). "한 사람이 로컬+구글+카카오를 *한 계정*에 연동"이 요구사항이 되면 분리 테이블(`member` 1—N `social_account`)로 확장.
-
-### 12.3 로그인 플로우 (구현 시)
-```
-브라우저 → /oauth2/authorization/{google} → IdP 로그인·동의
- → 콜백 → Spring Security OAuth2 Client → 커스텀 OAuth2UserService
-     1) provider + sub + email + name 추출
-     2) Member find-or-create  (provider, providerId 기준)
-     3) 우리 JWT(access·refresh) 발급 → httpOnly 쿠키 Set-Cookie
- → 프론트로 리다이렉트 (이후 요청은 기존 쿠키 인증과 동일)
-```
-- 의존성: `spring-boot-starter-oauth2-client`. 제공자 **client-id/secret은 환경변수**(시크릿 분리 원칙과 동일).
-
-### 12.4 계정 연동 & email 유니크 — 보류(구현 시 확정)
-같은 이메일을 로컬·구글 둘 다 쓰는 경우의 정책:
-- **(A) 이메일 자동 연동**: 같은 *검증된* 이메일 = 한 계정. UX 좋음. ⚠️ 제공자가 이메일을 검증해야 안전(미검증 이메일 신뢰 시 계정 탈취 위험; 구글·카카오는 검증).
-- **(B) provider별 별개 계정**: 단순·안전, 단 중복 계정 발생.
-- 현재는 email unique 유지. 정책 확정 시 유니크 제약을 (provider, providerId) 또는 (provider, email) 기준으로 재설계.
-
-### 12.5 현재 prep 상태 (V2 완료)
-- `V2__add_oauth_fields.sql`: `password` nullable, `provider`(enum, 기본 LOCAL)·`provider_id`(nullable) 추가. 기존 회원은 LOCAL 부여, 로컬 로그인 영향 없음.
-- ⚠️ Hibernate(Boot 3.5)는 `@Enumerated(STRING)`을 **MySQL 네이티브 ENUM**으로 매핑 → 손수 쓰는 마이그레이션의 enum 값 집합을 **알파벳순**으로 두어 `validate` 기대값과 일치시킴.
+| 도메인 | 엔드포인트 |
+|---|---|
+| **auth** | `POST /api/auth/login`(public, 5/분) · `/refresh` · `/logout`(public) · `GET /api/auth/me`(auth) |
+| **member** | `POST /api/members`(public 가입) · `GET /api/members/{id}`(auth) |
+| **product** | `GET /api/products`(검색/필터/정렬) · `/feed`(커서) · `/{id}`(public) · `POST·PUT /api/products` · 옵션 `POST·PUT·DELETE` · `PATCH /{id}/status` · 이미지 `POST·DELETE`(ADMIN) |
+| **category** | `GET`(public) · `POST·PUT·DELETE`(ADMIN, 2단계) |
+| **brand** | `GET`(public) · `POST·PUT·DELETE` · `PUT /{id}/seller`(ADMIN) |
+| **cart** | `POST·GET /api/carts/items|carts` · `PUT·DELETE /items/{optionId}`(auth) |
+| **address** | `GET·POST /api/addresses` · `PUT·DELETE /{id}` · `PUT /{id}/default`(auth) |
+| **order** | `POST /api/orders` · `/checkout` · `/coupon-preview` · `GET /api/orders`(내것) · `/{id}` · `POST /{id}/cancel` · `/items/{itemId}/cancel`(부분) · `GET /admin`·`PATCH /{id}/status`(ADMIN 배송) |
+| **payment** | `POST /api/payments`(auth, 멱등키) |
+| **coupon** | `POST /api/coupons` · `/{id}/issue` · `GET`(ADMIN) · `GET /api/member-coupons/me|claimable` · `POST /claim/{id}`(auth) |
+| **seller** | `GET·POST·PUT /api/sellers` · `suspend·activate·owner`(ADMIN) · `GET /api/seller/me|settlements|summary|payouts`(SELLER) |
+| **settlement** | `POST /run` · `GET` · `POST /reverse-refunds` · `GET /summary` · `POST /{id}/payout`(ADMIN) |
+| **payout** | `POST /api/payouts` · `/{id}/pay` · `GET`(ADMIN) |
+| **reconciliation** | `POST /run`(from/to) · `GET /mismatches` · `POST /{id}/resolve|ignore`(ADMIN) |
+| **review** | `POST·GET /api/products/{id}/reviews`(쓰기=구매자) · `PUT·DELETE /api/reviews/{id}`(작성자/ADMIN) |
+| **wishlist** | `POST·DELETE·GET /api/wishlist[/me|/{productId}]`(auth) |
+| **activity** | `POST /api/activity/views`(auth) |
+| **recommendation** | `GET /me`(auth) · `/products/{id}/together`(public) · `POST /run`·`/cooccurrence/run`(ADMIN) |
+| **dashboard** | `GET /api/dashboard?days=`(ADMIN) |
+| **monitoring** | `GET /api/monitoring/caches` · `POST /caches/{name}/evict`(ADMIN) |
+| **notification** | (REST 없음 — 이벤트 소비 전용) |
 
 ---
 
-## 13. 결제(Payment) 설계
+## 11. 핵심 설계 결정 요약
 
-> 결제 도메인. **모의 PG**(외부 연동 없이 시뮬레이션)로 시작하되 **포트-어댑터로 추상화**해 실제 PG(토스/포트원) 교체가 가능하게 한다. 재고는 **결제 승인 시점에 차감**(주문 생성 시 X). 구현은 단계적(P1 골격 → P2 흐름전환 → P3 결제API/멱등성 → P4 취소·환불).
-
-### 13.1 포트-어댑터 (외부 연동 추상화)
-- `PaymentGateway`(인터페이스=포트): `approve(거래정보) → 결과(pgTransactionId, 성공여부)`.
-- `MockPaymentGateway`(어댑터): 외부 호출 없이 가짜 `pgTransactionId` 발급 + 승인/실패 결정(테스트용 실패 트리거). 운영 전환 시 **같은 인터페이스에 실제 PG 어댑터만 교체**(DIP). (.NET `IPaymentGateway` + DI와 동형.)
-
-### 13.2 상태머신 & 주문↔결제 흐름
-- `OrderStatus`: `PENDING`(결제대기) → `PAID`(결제완료) / `CANCELLED`. **기존 `ORDERED` 제거** — 결제 도입으로 "주문=완료"가 깨짐.
-- `PaymentStatus`: `READY` → `PAID` / `FAILED`, `PAID` → `CANCELLED`(환불).
-```
-체크아웃 → 주문 PENDING (스냅샷만, 재고 차감 ❌)
-결제 요청 → MockGateway.approve
-   성공 → [한 트랜잭션] 재고 차감(@Version+재시도) + Order PAID + Payment PAID
-   실패 → Payment FAILED, Order PENDING 유지(재결제 가능)
-주문 취소 → (PAID였으면) 재고 복원 + Order/Payment CANCELLED
-```
-- **핵심 이동**: 재고 차감이 `OrderProcessor.placeOrder` → **결제 승인 단계**로 이동. 낙관락 재시도(@Retryable + 새 트랜잭션)도 결제 승인 워커로 따라감.
-
-### 13.3 멱등성 (중복 결제 방지)
-- 클라이언트가 `idempotencyKey`(UUID)를 결제 요청에 포함 → `Payment.idempotencyKey` **unique**. 동일 키 재요청은 새 결제 대신 **기존 결과 반환**(네트워크 재시도·더블클릭 방어).
-
-### 13.4 데이터 모델 (Flyway V3)
-- `Payment`: id · `orderId`(Long, ID참조) · amount · `status`(PaymentStatus) · method · pgTransactionId · `idempotencyKey`(unique) · BaseEntity.
-- 주문↔결제 = 다른 애그리거트 → **ID 참조**(객체연관 X, §11 준수).
-- `V3__add_payment.sql`: payment 테이블 + `orders.status` enum 값 변경(ORDERED → PENDING/PAID).
-
-### 13.5 확장 지점 (지금은 미도입 — 이음새만 확보)
-테스트 단계라 단순(MySQL+JPA)하게 가되, 경계만 끊어두어 추후 무중단 확장:
-- **Redis**: 멱등키 저장(TTL), 재고 분산락(스케일아웃 시 `@Version` 보완), 결제세션 캐시.
-- **RabbitMQ/Kafka**: 결제완료 **이벤트 발행**(주문확정·배송·알림 디커플링), **아웃박스 패턴**(DB 커밋↔메시지 발행 원자성), 실제 PG **웹훅 비동기 수신**.
-- **실제 PG**: `PaymentGateway`에 토스/포트원 어댑터 추가 + 결제창(프론트)·웹훅.
+1. **Spring Boot 3.5 고정** — 전환 학습 단계의 안정성·레퍼런스 우선(4.0 미사용).
+2. **도메인형 패키지 + 애그리거트 간 ID 참조** — 모듈러 모놀리스, 경계 명확.
+3. **스냅샷 vs 라이브 참조** — Order/OrderItem은 가격·이름·셀러 스냅샷(이력 보존), Cart는 조회 시점 enrich.
+4. **돈은 long(원), enum은 STRING** — 부동소수점·ordinal 위험 회피.
+5. **재고 동시성 = 낙관적 락 + 새 트랜잭션 재시도** (재시도 빈 분리로 프록시 경유 보장).
+6. **JWT httpOnly 쿠키 + access/refresh 회전 + jti** — XSS·재사용 방어, principal=memberId.
+7. **인가는 경로 기반(SecurityConfig), 소유권은 서비스 계층**.
+8. **시크릿 12-factor + Flyway validate** — 스키마를 마이그레이션이 소유.
+9. **동적 검색 = QueryDSL** — 타입 안전, 정산 집계에도 재사용.
+10. **결제 = 포트-어댑터 + 멱등키 + 다중 PG 라우팅** — 무중단 교체, 수수료율 단일 출처.
+11. **트랜잭셔널 아웃박스** — 이중 쓰기 해결, 백오프·DLQ·SKIP LOCKED.
+12. **셀러별 정산(payment×seller) + 대사 예외 큐** — "매출 ≠ 셀러 정산금"을 1급으로.
+13. **쿠폰 funded-by + 선착순 원자 UPDATE** — 회계 정합 + 초과 발급 0.
+14. **비정규화 카운터(평점·위시)** — 원자적 `@Modifying`(`flushAutomatically=true`로 파생 delete flush 순서 버그 수정).
+15. **캐시·분산락·관측성·메시징은 토글** — 코드 완성 + 기본 OFF/로컬, 스케일아웃 이음새 확보.
+16. **테스트는 H2**(격리), 동시성/멱등성/페일오버/대사는 명시적 테스트로 증명.
 
 ---
 
-> **알려진 TODO/한계**: ① ~~재고 oversell~~ → **@Version+재시도로 해결(완료)**. ② ~~JWT 시크릿 환경변수화~~ → **OS 환경변수(12-factor)·`.env`로 분리(완료)**. ③ ~~`ddl-auto: update` → Flyway~~ → **Flyway 도입·`validate` 전환(완료)**. ④ 장바구니 수량/재고 검증 없음(담기 단계, 의도적 — 주문 시 검증). ⑤ ~~frontend 미구현~~ → **Next.js 구매흐름 구현 중**. ⑥ ~~FE CORS~~ → **완료**. ⑦ OAuth2/소셜 로그인 — 유저 모델 prep 완료(§12), 구현은 후속.
->
-> ⚠️ **문서 갱신 지연 주의**: §5~§10 일부는 초기(5도메인·헤더 JWT·ddl update) 기준이라 현행과 차이가 있음 — 실제 현행은 category·brand 도메인 추가, 상품 옵션(사이즈) 도입, **인증이 httpOnly 쿠키 기반**, Flyway 적용 등. 정확한 최신 이력은 `dev-log.md` 참고.
+## 12. 인증 확장: OAuth2 / 소셜 로그인 (설계 — 스키마 prep만)
+
+로컬(email/password)에 더해 구글·카카오·네이버 소셜 로그인을 위한 설계. **유저 모델은 V2로 미리 대비**(provider/providerId/nullable password)했으나 **소셜 로그인 구현 자체는 후속**이다.
+
+- **원칙**: 검증 주체(IdP)만 갈아끼우고, 인증 성공 *이후*에는 로컬과 동일하게 우리 JWT 쿠키를 발급 → 기존 인증/인가 파이프라인 전부 재사용.
+- **식별자 = (provider, providerId)** (email은 제공자 측 변경 가능 → 보조 키). 단일 테이블 채택, 다중 연동 요구 시 `social_account` 분리로 확장.
+- 계정 연동·email 유니크 정책(자동 연동 vs provider별 별개)은 구현 시 확정. 의존성 `spring-boot-starter-oauth2-client`, client-id/secret은 환경변수.
+
+---
+
+## 13. 알려진 한계 / 확장 지점
+
+> 포트폴리오로서 **무엇이 의도적으로 미구현인지**를 명시한다("구현 ≠ 기본 활성", "설계 ≠ 운영").
+
+- **실제 PG 미연동** — 모의 PG(stateful ledger)로 시뮬레이션. `PaymentGateway` 포트에 토스/포트원 어댑터 + 결제창·웹훅을 추가하면 교체(이음새 확보됨).
+- **Alertmanager 미배선** — Prometheus alert 규칙 6개는 평가되어 `/alerts`에 뜨지만 **알림 채널(Slack/메일)은 없음**(후속). 관측성 스택 자체는 opt-in 프로파일로 구동.
+- **Redis 캐시·분산 락 기본 OFF** — Caffeine(기본)/NoOp 락(기본). Redis/Redisson 코드·도커는 완비, `app.cache.provider`/`app.lock.provider` + `--profile redis`로 활성.
+- **RabbitMQ opt-in** — 기본 발행은 in-process. `outbox.publisher` 토글 시 실제 브로커 사용(SKIP LOCKED는 MySQL 전용 → 런타임 검증, 단위 테스트는 H2라 제외).
+- **실배포는 prep까지** — Dockerfile·env화·CORS/쿠키·CI 완료, 실제 클라우드 배포(IaC/플랫폼 설정)는 후속.
+- **OAuth2/소셜** — 유저 모델 prep만(§12).
+- **FE 갭** — 회원가입 페이지 없음(로그인만), 이미지 URL 입력 방식(업로드 없음), 셀러 콘솔은 정산 조회 전용, FE 자동 테스트 없음(tsc/lint + 브라우저 확인).
+- **의도적 단순화** — `Payment` 엔티티가 `HttpStatus`(웹 개념)를 import(도메인 예외 + `@ExceptionHandler` 분리는 후속). 정산 `(payment_id, seller_id)` UNIQUE는 V24에서 역분개 허용 위해 제거(멱등성은 앱 `existsByPaymentId`).
+
+> 최신 진행 이력은 [docs/dev-log.md](dev-log.md), 개별 결정의 상세 근거는 ADR(`docs/private/adr/`) 참고.
+</content>
