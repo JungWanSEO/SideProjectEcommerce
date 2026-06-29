@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import com.commerce.api.category.dto.CategoryCreateRequest;
 import com.commerce.api.category.repository.CategoryRepository;
 import com.commerce.api.category.service.CategoryService;
+import com.commerce.api.dashboard.service.DashboardService;
 import com.commerce.api.global.config.CacheConfig;
 import com.commerce.api.monitoring.dto.CacheStatsResponse;
 import com.commerce.api.monitoring.service.CacheMonitoringService;
@@ -45,6 +46,7 @@ class CacheTest {
     @Autowired private WishlistService wishlistService;
     @Autowired private CacheManager cacheManager;
     @Autowired private CacheMonitoringService cacheMonitoringService;
+    @Autowired private DashboardService dashboardService;
 
     @MockitoSpyBean private ProductRepository productRepository;
     @MockitoSpyBean private CategoryRepository categoryRepository;
@@ -134,6 +136,14 @@ class CacheTest {
         verify(productRepository, times(1))
                 .findTop12ByStatusOrderByWishlistCountDescRatingCountDesc(ProductStatus.ON_SALE);
         assertThat(cacheManager.getCache(CacheConfig.POPULAR_PRODUCTS).get(SimpleKey.EMPTY)).isNotNull();
+    }
+
+    @Test
+    @DisplayName("대시보드 - 같은 days 조회는 캐시에 적재된다(준실시간 30초)")
+    void dashboard_cached() {
+        dashboardService.getDashboard(7);
+        dashboardService.getDashboard(7);
+        assertThat(cacheManager.getCache(CacheConfig.DASHBOARD).get(7)).isNotNull();
     }
 
     private Cache productCache() {

@@ -4,6 +4,7 @@ import com.commerce.api.dashboard.dto.DashboardResponse;
 import com.commerce.api.dashboard.dto.DashboardResponse.DailyRevenue;
 import com.commerce.api.dashboard.dto.DashboardResponse.Kpi;
 import com.commerce.api.dashboard.dto.DashboardResponse.OrderStatusCount;
+import com.commerce.api.global.config.CacheConfig;
 import com.commerce.api.member.repository.MemberRepository;
 import com.commerce.api.order.entity.OrderStatus;
 import com.commerce.api.order.repository.OrderRepository;
@@ -19,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,7 +44,8 @@ public class DashboardService {
     private final MemberRepository memberRepository;
     private final ProductRepository productRepository;
 
-    /** 대시보드 한 화면(KPI + 주문 상태 분포 + 최근 days일 매출 추이). */
+    /** 대시보드 한 화면(KPI + 주문 상태 분포 + 최근 days일 매출 추이). 비싼 집계라 30초 캐시(준실시간·days별). */
+    @Cacheable(value = CacheConfig.DASHBOARD, key = "#days")
     public DashboardResponse getDashboard(int days) {
         int range = Math.min(Math.max(days, MIN_DAYS), MAX_DAYS);
 
