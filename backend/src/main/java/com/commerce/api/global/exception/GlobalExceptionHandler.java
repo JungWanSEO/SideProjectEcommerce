@@ -7,6 +7,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /**
  * 전역 예외 처리기.
@@ -39,6 +40,16 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleNotReadable(HttpMessageNotReadableException e) {
         return ResponseEntity.badRequest()
                 .body(ApiResponse.error("요청 본문을 읽을 수 없습니다. JSON 형식과 인코딩(UTF-8)을 확인하세요."));
+    }
+
+    /**
+     * 경로/쿼리 파라미터 타입 불일치 → 400 (잘못된 요청, 500 아님).
+     * 예: GET /api/products/abc — {id} 가 Long인데 "abc"가 와서 변환 실패. 클라이언트가 잘못된 URL을 보낸 것.
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiResponse<Void>> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
+        return ResponseEntity.badRequest()
+                .body(ApiResponse.error("요청 파라미터 '" + e.getName() + "' 의 형식이 올바르지 않습니다."));
     }
 
     /** 그 외 예상 못 한 예외 → 500 (원인을 반드시 로그로 남긴다) */
