@@ -1,9 +1,6 @@
 package com.commerce.api.recommendation.service;
 
 import com.commerce.api.product.dto.ProductResponse;
-import com.commerce.api.product.entity.Product;
-import com.commerce.api.product.entity.ProductStatus;
-import com.commerce.api.product.repository.ProductRepository;
 import com.commerce.api.product.service.ProductService;
 import com.commerce.api.recommendation.dto.RecommendationResponse;
 import com.commerce.api.recommendation.entity.Recommendation;
@@ -28,7 +25,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class RecommendationService {
 
     private final RecommendationRepository recommendationRepository;
-    private final ProductRepository productRepository;
     private final ProductService productService;
 
     /** 내 추천. 저장된 추천이 있으면 그것(personalized), 없으면 인기순 폴백. */
@@ -43,12 +39,9 @@ public class RecommendationService {
         return new RecommendationResponse(false, popularFallback());
     }
 
-    /** 콜드스타트: 전체 인기순(찜 수→리뷰 수) ON_SALE 상위 12개. */
+    /** 콜드스타트: 전체 인기순(찜 수→리뷰 수) ON_SALE 상위 12개. ID는 캐시(ProductService.popularProductIds). */
     private List<ProductResponse> popularFallback() {
-        List<Long> ids = productRepository
-                .findTop12ByStatusOrderByWishlistCountDescRatingCountDesc(ProductStatus.ON_SALE)
-                .stream().map(Product::getId).toList();
-        return enrich(ids);
+        return enrich(productService.popularProductIds());
     }
 
     /** productId 묶음 → 상품 응답(원래 순서 유지, 삭제된 상품은 제외). */

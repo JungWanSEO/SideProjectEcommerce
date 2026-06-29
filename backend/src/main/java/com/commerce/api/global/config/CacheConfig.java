@@ -45,9 +45,11 @@ public class CacheConfig {
     public static final String PRODUCT_DETAIL = "productDetail";
     public static final String CATEGORY_LIST = "categoryList";
     public static final String BRAND_LIST = "brandList";
+    public static final String POPULAR_PRODUCTS = "popularProducts";
 
     private static final Duration PRODUCT_TTL = Duration.ofMinutes(10);
     private static final Duration LIST_TTL = Duration.ofHours(1);
+    private static final Duration POPULAR_TTL = Duration.ofMinutes(5);   // 인기 순위는 천천히 변함 — 짧은 TTL로 자가 수렴
 
     /**
      * 로컬 인메모리(Caffeine) — 기본. 캐시 켜짐 && provider != redis 일 때.
@@ -64,6 +66,8 @@ public class CacheConfig {
                 .recordStats().maximumSize(1).expireAfterWrite(LIST_TTL).build());
         manager.registerCustomCache(BRAND_LIST, Caffeine.newBuilder()
                 .recordStats().maximumSize(1).expireAfterWrite(LIST_TTL).build());
+        manager.registerCustomCache(POPULAR_PRODUCTS, Caffeine.newBuilder()
+                .recordStats().maximumSize(1).expireAfterWrite(POPULAR_TTL).build());
         return manager;
     }
 
@@ -81,7 +85,8 @@ public class CacheConfig {
         Map<String, RedisCacheConfiguration> perCache = Map.of(
                 PRODUCT_DETAIL, base.entryTtl(PRODUCT_TTL),
                 CATEGORY_LIST, base.entryTtl(LIST_TTL),
-                BRAND_LIST, base.entryTtl(LIST_TTL));
+                BRAND_LIST, base.entryTtl(LIST_TTL),
+                POPULAR_PRODUCTS, base.entryTtl(POPULAR_TTL));
         return RedisCacheManager.builder(connectionFactory)
                 .cacheDefaults(base)
                 .withInitialCacheConfigurations(perCache)

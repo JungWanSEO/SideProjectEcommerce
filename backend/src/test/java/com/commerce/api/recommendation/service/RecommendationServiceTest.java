@@ -66,8 +66,7 @@ class RecommendationServiceTest {
     void getMyRecommendations_coldStartFallback() {
         given(recommendationRepository.findByMemberIdOrderByScoreDescProductIdAsc(MEMBER_ID))
                 .willReturn(List.of());
-        given(productRepository.findTop12ByStatusOrderByWishlistCountDescRatingCountDesc(ProductStatus.ON_SALE))
-                .willReturn(List.of(popular(7L)));
+        given(productService.popularProductIds()).willReturn(List.of(7L));   // 인기 ID는 ProductService가 캐시
         given(productService.getProductMap(anyCollection())).willReturn(Map.of(7L, productResponse(7L)));
 
         RecommendationResponse response = recommendationService.getMyRecommendations(MEMBER_ID);

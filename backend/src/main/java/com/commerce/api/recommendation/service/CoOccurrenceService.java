@@ -58,9 +58,7 @@ public class CoOccurrenceService {
                         ProductStatus.ON_SALE, PageRequest.of(0, limit))
                 .stream().map(Product::getId).toList();
         if (ids.isEmpty()) {
-            ids = productRepository
-                    .findTop12ByStatusOrderByWishlistCountDescRatingCountDesc(ProductStatus.ON_SALE).stream()
-                    .map(Product::getId)
+            ids = productService.popularProductIds().stream()   // 인기 ID는 캐시됨
                     .filter(id -> !id.equals(product.getId()))   // 기준 상품 자신 제외
                     .limit(limit)
                     .toList();
