@@ -2,6 +2,7 @@ package com.commerce.api.product.repository;
 
 import com.commerce.api.product.entity.Product;
 import com.commerce.api.product.entity.ProductStatus;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Pageable;
@@ -30,6 +31,15 @@ public interface ProductRepository extends JpaRepository<Product, Long>, Product
 
     /** 특정 상태 상품 수 — 대시보드 "판매 중 상품" KPI(ON_SALE). */
     long countByStatus(ProductStatus status);
+
+    /**
+     * 커서 기반 피드 — 노출 상태 상품을 id 내림차순(최신순)으로, {@code cursor} 미만 id만(첫 페이지면 cursor=null).
+     * Pageable로 개수를 제한한다. offset 없이 인덱스 탐색이라 페이지 깊이와 무관하게 빠르다.
+     */
+    @Query("select p from Product p where p.status in :statuses "
+            + "and (:cursor is null or p.id < :cursor) order by p.id desc")
+    List<Product> findFeed(@Param("statuses") Collection<ProductStatus> statuses,
+            @Param("cursor") Long cursor, Pageable pageable);
 
     /** 이 브랜드를 참조하는 상품이 하나라도 있는지 — 브랜드 삭제 가드(참조 중이면 409). */
     boolean existsByBrandId(Long brandId);

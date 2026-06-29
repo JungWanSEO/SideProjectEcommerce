@@ -183,6 +183,23 @@ class ProductRepositoryTest {
                 .containsExactly("평균5.0", "평균4.0", "리뷰없음");
     }
 
+    @Test
+    @DisplayName("findFeed - 커서 미만 id를 최신순(desc)으로, 비노출 상태는 제외")
+    void findFeed_cursorPaging() {
+        Long id1 = productRepository.save(product("p1", ProductStatus.ON_SALE)).getId();
+        Long id2 = productRepository.save(product("p2", ProductStatus.ON_SALE)).getId();
+        Long id3 = productRepository.save(product("p3", ProductStatus.ON_SALE)).getId();
+        productRepository.save(product("숨김", ProductStatus.DISCONTINUED));   // 노출 제외
+
+        // 첫 페이지(cursor=null) size 2 → 최신 2개(id desc)
+        List<Product> first = productRepository.findFeed(VISIBLE, null, PageRequest.of(0, 2));
+        assertThat(first).extracting(Product::getId).containsExactly(id3, id2);
+
+        // 다음 페이지(cursor=id2) → id2 미만만(숨김 상태는 애초에 제외)
+        List<Product> next = productRepository.findFeed(VISIBLE, id2, PageRequest.of(0, 10));
+        assertThat(next).extracting(Product::getId).containsExactly(id1);
+    }
+
     /** 평점 카운터를 직접 세팅한 상품(엔티티에 setter가 없어 리플렉션 사용). */
     private Product rated(String name, int ratingCount, int ratingSum) {
         Product p = product(name, ProductStatus.ON_SALE);
