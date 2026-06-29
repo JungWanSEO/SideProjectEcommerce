@@ -47,5 +47,6 @@
 - [x] 관측성 (Prometheus + Grafana) — `feature/observability-grafana`→dev (**런타임 PASS**). `micrometer-registry-prometheus`→`/actuator/prometheus`(히스토그램 버킷·tomcat mbean·security 허용). docker-compose prometheus+grafana(opt-in profile `observability`)·`monitoring/`(스크레이프·provisioning·`commerce.json` 13패널). **3단 내러티브 대시보드**(①사용자경험 RPS/p95/에러 ②시스템 JVM/Hikari/Tomcat ③기능 캐시적중률/claim결과). 검증=타깃 up·Grafana 프로비저닝·패널 실데이터(캐시 96.7%). Grafana localhost:3001. 후속=알림룰·배포
 - [x] 관측성 알림 룰 — `feature/observability-alerts`→dev `4c32528`(앱/테스트 무변경·397). `monitoring/alert.rules.yml` 6룰(InstanceDown·5xx율·p99>1s·Hikari pending·Tomcat 80%·상품캐시 적중률<50%)·`prometheus.yml` rule_files+compose 마운트. promtool SUCCESS·prometheus 6룰 로드 확인. 임계값 예시. 후속=Alertmanager 채널(Slack/메일)=외부
 - [x] ADR 0014/0015/0016 (캐싱·분산락·관측성) — docs/private/adr(로컬·gitignore). 최근 결정 근거 기록(면접 자료). README 인덱스 갱신
+- [x] (자율배치 06-29) 인기상품 ID 캐싱 `eb75187`·대시보드 집계 캐싱 `1da5e21`·인메모리 레이트리밋(로그인/claim) `8a057ee`·FE 캐시 적중률 패널 `f00ac47`·컨트롤러/NoOp락 테스트 `37df9c4`·레이트리밋 통합테스트 `1b8cc38`. **407 tests**. 캐시/레이트리밋 테스트 OFF 토글로 기존 무영향. 보류=DB인덱스(Flyway 미검증)·커서페이지(설계 결정)
 - [x] **V32·V33 MySQL 런타임 스모크 PASS** — `06-17` 재기동 시 Flyway v33 validate·`GET /api/categories` 200(parent_id)·product_image validate
 - ⚠️ 공통 남음: 위 어드민 FE들(상품·카테고리·브랜드) **브라우저 확인**(서버 기동 완료 — http://localhost:3000/admin)
