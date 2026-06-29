@@ -2,6 +2,7 @@ package com.commerce.api.coupon.service;
 
 import com.commerce.api.coupon.dto.MemberCouponResponse;
 import com.commerce.api.global.lock.DistributedLock;
+import com.commerce.api.global.ratelimit.RateLimiter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -22,9 +23,11 @@ public class MemberCouponClaimService {
 
     private final DistributedLock distributedLock;
     private final MemberCouponService memberCouponService;
+    private final RateLimiter rateLimiter;
 
-    /** 쿠폰별 락("coupon:claim:{id}")으로 직렬화한 뒤 실제 발급(트랜잭션)을 수행한다. */
+    /** 회원별 레이트 리밋 후, 쿠폰별 락("coupon:claim:{id}")으로 직렬화해 실제 발급(트랜잭션)을 수행한다. */
     public MemberCouponResponse claim(Long memberId, Long couponId) {
+        rateLimiter.check("claim:" + memberId, 20);   // claim 스팸 방지: 회원당 1분 20회
         return distributedLock.executeWithLock(
                 "coupon:claim:" + couponId,
                 () -> memberCouponService.claim(memberId, couponId));

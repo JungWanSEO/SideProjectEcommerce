@@ -39,6 +39,9 @@ outbox:
 
 # 캐시는 테스트 기본 OFF(NoOpCacheManager) — "쓰고 바로 읽기"류 테스트가 stale 캐시로 깨지는 것 방지.
 # 캐시 적중/무효화는 전용 테스트에서 @TestPropertySource(app.cache.enabled=true)로만 켜서 검증한다.
+# 레이트 리밋도 OFF — 공유 카운터가 여러 테스트의 로그인/claim에 누적돼 교차 간섭하는 것 방지(RateLimiterTest는 직접 인스턴스화).
 app:
   cache:
+    enabled: false
+  ratelimit:
     enabled: false

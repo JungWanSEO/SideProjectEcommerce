@@ -99,6 +99,9 @@ app:
   # 분산락 구현: none(기본·락 없음, 선착순은 DB 원자 UPDATE가 보증) | redis(DIY SETNX+Lua) | redisson(RLock watchdog).
   lock:
     provider: ${APP_LOCK_PROVIDER:none}
+  # 레이트 리밋(인메모리). 운영/로컬 ON, 테스트는 OFF(공유 카운터의 교차 간섭 방지).
+  ratelimit:
+    enabled: ${APP_RATELIMIT_ENABLED:true}
     # DIY(redis) 락 튜닝 — 고경합에선 spin 간격이 핸드오프 처리량을 좌우(부하 실험). spin↓이면 핸드오프↑·Redis 폴링↑.
     redis:
       spin-interval-ms: ${APP_LOCK_REDIS_SPIN_INTERVAL_MS:50}
