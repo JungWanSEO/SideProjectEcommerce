@@ -24,8 +24,17 @@ public interface DistributedLock {
      */
     <T> T executeWithLock(String key, Duration waitTime, Duration leaseTime, Supplier<T> action);
 
+    /** 편의 메서드가 쓸 기본 대기/임대 시간 — 어댑터가 설정값으로 오버라이드할 수 있다(예: DIY 락 튜닝). */
+    default Duration defaultWait() {
+        return DEFAULT_WAIT;
+    }
+
+    default Duration defaultLease() {
+        return DEFAULT_LEASE;
+    }
+
     /** 기본 대기/임대 시간으로 실행하는 편의 메서드. */
     default <T> T executeWithLock(String key, Supplier<T> action) {
-        return executeWithLock(key, DEFAULT_WAIT, DEFAULT_LEASE, action);
+        return executeWithLock(key, defaultWait(), defaultLease(), action);
     }
 }

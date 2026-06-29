@@ -58,7 +58,7 @@ class LockComparisonTest {
 
         StringRedisTemplate template = new StringRedisTemplate(cf);
         template.afterPropertiesSet();
-        this.diyLock = new RedisDistributedLock(template);
+        this.diyLock = new RedisDistributedLock(template, 50, 3000, 5000);   // 기본값(spin 50ms)
 
         Config config = new Config();
         config.useSingleServer().setAddress("redis://localhost:6379");
