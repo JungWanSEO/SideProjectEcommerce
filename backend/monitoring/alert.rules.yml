@@ -1,0 +1,60 @@
+# Prometheus 알림 룰 — 3단 내러티브와 같은 결로 "사용자 경험 / 시스템 / 기능"의 임계치.
+# ⚠️ 임계값은 예시(로컬 단일 인스턴스 기준)다. 운영에선 실측 베이스라인을 보고 조정한다.
+#   PromQL은 대시보드(commerce.json)에서 데이터 반환을 검증한 쿼리만 재사용했다.
+#   발화(firing) 확인은 Prometheus /alerts, 알림 채널(Slack/메일) 연동은 후속(Alertmanager).
+groups:
+  - name: commerce-api
+    rules:
+      # ── 가용성 ──
+      - alert: InstanceDown
+        expr: up{job="commerce-api"} == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "commerce-api 스크레이프 실패(다운)"
+          description: "Prometheus가 1분 이상 앱을 긁지 못함."
+
+      # ── ① 사용자 경험 ──
+      - alert: HighServerErrorRate
+        expr: sum(rate(http_server_requests_seconds_count{outcome="SERVER_ERROR"}[5m])) > 1
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "5xx 에러율 상승"
+          description: "최근 5분 5xx 발생률이 1 req/s를 2분 이상 초과."
+
+      - alert: HighLatencyP99
+        expr: histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket[5m])) by (le)) > 1
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "응답 지연 p99 > 1s"
+          description: "p99 지연이 1초를 2분 이상 초과(꼬리 지연 악화)."
+
+      # ── ② 시스템(포화) ──
+      - alert: HikariPoolSaturated
+        expr: hikaricp_connections_pending > 0
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "DB 커넥션 풀 대기 발생"
+          description: "Hikari pending > 0 (커넥션 부족 — 부하테스트에서 본 병목 신호)."
+
+      - alert: TomcatThreadsSaturated
+        expr: tomcat_threads_busy_threads / tomcat_threads_config_max_threads > 0.8
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "Tomcat 스레드 80% 초과"
+          description: "busy/최대 스레드 비율이 0.8을 2분 이상 초과(스레드 고갈 임박)."
+
+      # ── ③ 기능 효과 ──
+      - alert: LowProductCacheHitRate
+        expr: >
+          sum(rate(cache_gets_total{cache="productDetail",result="hit"}[10m]))
+          / clamp_min(sum(rate(cache_gets_total{cache="productDetail"}[10m])), 0.0001) < 0.5
+        for: 10m
+        labels: { severity: info }
+        annotations:
+          summary: "상품 상세 캐시 적중률 < 50%"
+          description: "10분 적중률이 0.5 미만(캐시 효과 저하 — 무효화 과다/TTL 점검)."
