@@ -4,6 +4,7 @@ import com.commerce.api.global.exception.BusinessException;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.LongSupplier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
@@ -59,20 +60,27 @@ public class RedisSlidingWindowRateLimiter implements RateLimiter {
 
     private final StringRedisTemplate redis;
     private final long windowMs;
+    private final LongSupplier clock;   // 시각 공급원 — 운영은 실제 시계, 테스트는 가짜 시계 주입
 
     public RedisSlidingWindowRateLimiter(StringRedisTemplate redis) {
-        this(redis, WINDOW_MS);   // 운영: 1분 윈도우
+        this(redis, WINDOW_MS, System::currentTimeMillis);   // 운영: 1분 윈도우·실제 시계
     }
 
     /** 테스트용 — 윈도우를 짧게 줘(예: 1초) 슬라이딩 동작을 60초 안 기다리고 검증한다. */
     RedisSlidingWindowRateLimiter(StringRedisTemplate redis, long windowMs) {
+        this(redis, windowMs, System::currentTimeMillis);
+    }
+
+    /** 테스트용 — 시계까지 주입해 윈도우 경계를 결정적으로 재현한다(고정 윈도우와의 경계 버스트 대조). */
+    RedisSlidingWindowRateLimiter(StringRedisTemplate redis, long windowMs, LongSupplier clock) {
         this.redis = redis;
         this.windowMs = windowMs;
+        this.clock = clock;
     }
 
     @Override
     public void check(String key, int limitPerMinute) {
-        long now = System.currentTimeMillis();
+        long now = clock.getAsLong();
         String member = now + "-" + UUID.randomUUID();   // 같은 ms에 동시 요청이 와도 구별되도록 유일값
         Long allowed = redis.execute(SLIDING_WINDOW_SCRIPT, List.of(KEY_PREFIX + key),
                 String.valueOf(now), String.valueOf(windowMs), String.valueOf(limitPerMinute), member);
