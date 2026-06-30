@@ -1,46 +1,18 @@
 package com.commerce.api.global.ratelimit;
 
-import com.commerce.api.global.exception.BusinessException;
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
-import java.time.Duration;
-import java.util.concurrent.atomic.AtomicInteger;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpStatus;
-import org.springframework.stereotype.Component;
-
 /**
- * 간단한 인메모리 레이트 리미터 — 키별 "1분 고정 윈도우" 카운터. 외부 의존 0(이미 있는 Caffeine 재사용).
+ * 레이트 리밋 포트(port) — 키별 "1분당 N회" 제한. 구현(어댑터)을 설정으로 교체한다:
+ * memory(기본·인메모리 고정 윈도우) / redis(DIY Lua 슬라이딩 윈도우) / redisson(토큰 버킷).
  *
- * <p>무차별 로그인·요청 스팸을 앱 계층에서 막는다. 윈도우=1분 고정(Caffeine {@code expireAfterWrite}):
- * 키별 첫 요청에 카운터 생성 → 1분 뒤 만료 → 새 윈도우(증가는 AtomicInteger라 TTL 리셋 안 됨 = 진짜 고정 윈도우).
+ * <p>분산락({@code DistributedLock})·캐시({@code CacheManager})와 같은 포트-어댑터 패턴: 호출부
+ * (로그인·쿠폰 claim)는 이 인터페이스만 의존하고, 단일 인스턴스(메모리)↔다중 인스턴스(Redis 공유 카운터)를
+ * 설정 토글({@code app.ratelimit.provider})로 오간다. (.NET의 {@code IRateLimiter} + DI 와 동형.)
  *
- * <p><b>한계/확장</b>: 인메모리라 단일 인스턴스 기준(다중 인스턴스는 인스턴스마다 카운트) — 분산은 Redis
- * {@code INCR + EXPIRE}로 확장. <b>테스트 격리</b>: {@code app.ratelimit.enabled=false}(테스트 기본)면
- * no-op이라 공유 카운터가 테스트 결정성을 깨지 않는다(캐시 토글과 같은 패턴).
+ * <p><b>왜 분산이 필요한가:</b> 인메모리 카운터는 인스턴스마다 따로라, 앱을 2대로 늘리면 "5회/분"이 사실상
+ * "10회/분"이 된다(한도 누수). Redis로 옮기면 모든 인스턴스가 같은 카운터를 본다 — 캐시·락의 단일↔분산 동기와 동일.
  */
-@Component
-public class RateLimiter {
+public interface RateLimiter {
 
-    private final boolean enabled;
-    private final Cache<String, AtomicInteger> counters = Caffeine.newBuilder()
-            .expireAfterWrite(Duration.ofMinutes(1))
-            .maximumSize(100_000)
-            .build();
-
-    public RateLimiter(@Value("${app.ratelimit.enabled:true}") boolean enabled) {
-        this.enabled = enabled;
-    }
-
-    /** {@code key}의 1분 내 호출이 {@code limitPerMinute}를 넘으면 429(TOO_MANY_REQUESTS). */
-    public void check(String key, int limitPerMinute) {
-        if (!enabled) {
-            return;
-        }
-        int count = counters.get(key, k -> new AtomicInteger()).incrementAndGet();
-        if (count > limitPerMinute) {
-            throw new BusinessException(HttpStatus.TOO_MANY_REQUESTS,
-                    "요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.");
-        }
-    }
+    /** {@code key}의 최근 1분 호출이 {@code limitPerMinute}를 넘으면 429(TOO_MANY_REQUESTS)를 던진다. */
+    void check(String key, int limitPerMinute);
 }

@@ -102,14 +102,16 @@ app:
   # 분산락 구현: none(기본·락 없음, 선착순은 DB 원자 UPDATE가 보증) | redis(DIY SETNX+Lua) | redisson(RLock watchdog).
   lock:
     provider: ${APP_LOCK_PROVIDER:none}
-  # 레이트 리밋(인메모리). 운영/로컬 ON, 테스트는 OFF(공유 카운터의 교차 간섭 방지).
-  ratelimit:
-    enabled: ${APP_RATELIMIT_ENABLED:true}
     # DIY(redis) 락 튜닝 — 고경합에선 spin 간격이 핸드오프 처리량을 좌우(부하 실험). spin↓이면 핸드오프↑·Redis 폴링↑.
     redis:
       spin-interval-ms: ${APP_LOCK_REDIS_SPIN_INTERVAL_MS:50}
       wait-ms: ${APP_LOCK_REDIS_WAIT_MS:3000}
       lease-ms: ${APP_LOCK_REDIS_LEASE_MS:5000}
+  # 레이트 리밋. 운영/로컬 ON, 테스트는 OFF(공유 카운터의 교차 간섭 방지).
+  ratelimit:
+    enabled: ${APP_RATELIMIT_ENABLED:true}
+    # 구현: memory(기본·인메모리 고정 윈도우) | redis(DIY 슬라이딩 윈도우 Lua) | redisson(토큰 버킷 RRateLimiter)
+    provider: ${APP_RATELIMIT_PROVIDER:memory}
   cors:
     # 브라우저 호출을 허용할 FE origin(콤마 구분). 운영: APP_CORS_ALLOWED_ORIGINS=https://<your-app>.vercel.app
     allowed-origins: http://localhost:3000
