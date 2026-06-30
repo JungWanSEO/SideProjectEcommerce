@@ -5,6 +5,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.LongSupplier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
@@ -62,6 +63,7 @@ public class RedisSlidingWindowRateLimiter implements RateLimiter {
     private final long windowMs;
     private final LongSupplier clock;   // 시각 공급원 — 운영은 실제 시계, 테스트는 가짜 시계 주입
 
+    @Autowired   // 생성자 3개(테스트용 2개 포함) 중 Spring이 주입에 쓸 것을 명시 — 없으면 부팅 시 모호.
     public RedisSlidingWindowRateLimiter(StringRedisTemplate redis) {
         this(redis, WINDOW_MS, System::currentTimeMillis);   // 운영: 1분 윈도우·실제 시계
     }
