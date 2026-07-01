@@ -2,6 +2,7 @@
 
 import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 
 export default function LoginPage() {
@@ -64,7 +65,13 @@ export default function LoginPage() {
           {submitting ? "로그인 중…" : "로그인"}
         </button>
       </form>
-      <p className="mt-5 text-center text-xs text-muted">테스트 계정: buyer@commerce.com / buyerpass1234</p>
+      <p className="mt-5 text-center text-sm text-muted">
+        계정이 없으신가요?{" "}
+        <Link href="/signup" className="text-clay hover:underline">
+          회원가입
+        </Link>
+      </p>
+      <p className="mt-2 text-center text-xs text-muted">테스트 계정: buyer@commerce.com / buyerpass1234</p>
     </main>
   );
 }
