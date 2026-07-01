@@ -57,9 +57,14 @@ export default function Header() {
               </button>
             </>
           ) : (
-            <Link href="/login" className={navLink}>
-              로그인
-            </Link>
+            <>
+              <Link href="/login" className={navLink}>
+                로그인
+              </Link>
+              <Link href="/signup" className="text-sm font-medium text-clay hover:text-clay-600">
+                회원가입
+              </Link>
+            </>
           )}
         </div>
       </nav>
