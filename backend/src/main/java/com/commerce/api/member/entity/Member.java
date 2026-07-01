@@ -76,4 +76,19 @@ public class Member extends BaseEntity {
         this.role = Role.SELLER;
         this.sellerId = sellerId;
     }
+
+    /** 프로필 수정 — 닉네임만. (email은 신원 식별자라 불변, role은 ADMIN만 변경) */
+    public void updateProfile(String nickname) {
+        this.nickname = nickname;
+    }
+
+    /** 비밀번호 설정/변경 — 인코딩된 값을 받는다(BCrypt 인코딩은 서비스가 수행). 소셜 전용 계정의 비번 '설정'도 이걸로. */
+    public void changePassword(String encodedPassword) {
+        this.password = encodedPassword;
+    }
+
+    /** 로컬 비밀번호 보유 여부 — 소셜 전용 계정은 false(→ 비번 '변경'이 아니라 '설정' 대상). */
+    public boolean hasPassword() {
+        return this.password != null;
+    }
 }

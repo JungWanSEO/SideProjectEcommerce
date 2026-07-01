@@ -41,6 +41,9 @@ export default function Header() {
               <Link href="/cart" className={navLink}>
                 장바구니
               </Link>
+              <Link href="/account/profile" className={navLink}>
+                내 정보
+              </Link>
               {user.role === "ADMIN" && (
                 <Link href="/admin/settlements" className="text-sm font-medium text-clay hover:text-clay-600">
                   관리자

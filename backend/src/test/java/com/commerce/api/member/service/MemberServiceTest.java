@@ -11,6 +11,10 @@ import static org.mockito.Mockito.verify;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.member.dto.MemberResponse;
 import com.commerce.api.member.dto.MemberSignupRequest;
+import com.commerce.api.member.dto.MemberUpdateRequest;
+import com.commerce.api.member.dto.MyProfileResponse;
+import com.commerce.api.member.dto.PasswordChangeRequest;
+import com.commerce.api.member.entity.AuthProvider;
 import com.commerce.api.member.entity.Member;
 import com.commerce.api.member.entity.Role;
 import com.commerce.api.member.repository.MemberRepository;
@@ -151,5 +155,79 @@ class MemberServiceTest {
         assertThatThrownBy(() -> memberService.assignAsSeller(99L, 5L))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("회원을 찾을 수 없습니다");
+    }
+
+    private Member socialMemberWithoutPassword(Long id) {
+        Member member = Member.builder()
+                .email("kakao_" + id + "@social.local").nickname("소셜")
+                .role(Role.USER).provider(AuthProvider.KAKAO).providerId(String.valueOf(id)).build();  // password null
+        ReflectionTestUtils.setField(member, "id", id);
+        return member;
+    }
+
+    @Test
+    @DisplayName("내 프로필 수정 - 닉네임 변경(dirty checking)")
+    void updateMyProfile_success() {
+        Member member = memberWithId(1L, "a@c.com", "old");
+        given(memberRepository.findById(1L)).willReturn(Optional.of(member));
+
+        MyProfileResponse response = memberService.updateMyProfile(1L, new MemberUpdateRequest("새닉네임"));
+
+        assertThat(response.nickname()).isEqualTo("새닉네임");
+        assertThat(member.getNickname()).isEqualTo("새닉네임");
+    }
+
+    @Test
+    @DisplayName("내 정보 조회 - provider(LOCAL)·hasPassword(true) 노출")
+    void getMyProfile_includesProviderAndHasPassword() {
+        given(memberRepository.findById(1L))
+                .willReturn(Optional.of(memberWithId(1L, "a@c.com", "alice")));   // password "ENCODED"
+
+        MyProfileResponse response = memberService.getMyProfile(1L);
+
+        assertThat(response.provider()).isEqualTo(AuthProvider.LOCAL);
+        assertThat(response.hasPassword()).isTrue();
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경(로컬) - 현재 비번 일치 시 새 비번으로 설정")
+    void changeMyPassword_localSuccess() {
+        Member member = memberWithId(1L, "a@c.com", "alice");   // password "ENCODED"
+        given(memberRepository.findById(1L)).willReturn(Optional.of(member));
+        given(passwordEncoder.matches("current123", "ENCODED")).willReturn(true);
+        given(passwordEncoder.encode("newpass123")).willReturn("NEW_ENCODED");
+
+        memberService.changeMyPassword(1L, new PasswordChangeRequest("current123", "newpass123"));
+
+        assertThat(member.getPassword()).isEqualTo("NEW_ENCODED");
+        verify(passwordEncoder).encode("newpass123");
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 실패(로컬) - 현재 비번 불일치면 400, 변경 안 함")
+    void changeMyPassword_wrongCurrent() {
+        Member member = memberWithId(1L, "a@c.com", "alice");
+        given(memberRepository.findById(1L)).willReturn(Optional.of(member));
+        given(passwordEncoder.matches("wrong", "ENCODED")).willReturn(false);
+
+        assertThatThrownBy(() ->
+                memberService.changeMyPassword(1L, new PasswordChangeRequest("wrong", "newpass123")))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("현재 비밀번호가 올바르지 않습니다");
+        assertThat(member.getPassword()).isEqualTo("ENCODED");
+        verify(passwordEncoder, never()).encode(anyString());
+    }
+
+    @Test
+    @DisplayName("비밀번호 설정(소셜) - 비번 없는 계정은 현재 비번 없이 바로 설정")
+    void changeMyPassword_socialSetsWithoutCurrent() {
+        Member social = socialMemberWithoutPassword(1L);   // password null
+        given(memberRepository.findById(1L)).willReturn(Optional.of(social));
+        given(passwordEncoder.encode("newpass123")).willReturn("SET_ENCODED");
+
+        memberService.changeMyPassword(1L, new PasswordChangeRequest(null, "newpass123"));
+
+        assertThat(social.getPassword()).isEqualTo("SET_ENCODED");
+        verify(passwordEncoder, never()).matches(anyString(), anyString());   // 현재 비번 검증 안 함
     }
 }

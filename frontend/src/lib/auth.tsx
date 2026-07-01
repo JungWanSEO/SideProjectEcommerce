@@ -18,6 +18,7 @@ interface AuthContextType {
   loading: boolean; // 최초 /me 확인 중 여부
   login: (email: string, password: string) => Promise<User>; // 로그인한 유저 반환(역할 기반 분기용)
   logout: () => Promise<void>;
+  refreshUser: () => Promise<void>; // /me 재조회로 전역 유저 갱신(예: 프로필 수정 후 헤더 닉네임 반영)
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -50,8 +51,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   };
 
+  // 프로필 수정 등으로 서버 유저 정보가 바뀐 뒤 전역 상태를 최신화(쿠키의 access로 /me 재조회)
+  const refreshUser = async () => {
+    try {
+      setUser(await apiGet<User>("/api/auth/me"));
+    } catch {
+      setUser(null);
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

@@ -3,6 +3,9 @@ package com.commerce.api.member.service;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.member.dto.MemberResponse;
 import com.commerce.api.member.dto.MemberSignupRequest;
+import com.commerce.api.member.dto.MemberUpdateRequest;
+import com.commerce.api.member.dto.MyProfileResponse;
+import com.commerce.api.member.dto.PasswordChangeRequest;
 import com.commerce.api.member.entity.AuthProvider;
 import com.commerce.api.member.entity.Member;
 import com.commerce.api.member.entity.Role;
@@ -89,9 +92,41 @@ public class MemberService {
 
     /** 단건 조회 */
     public MemberResponse getMember(Long id) {
-        Member member = memberRepository.findById(id)
+        return MemberResponse.from(getMemberEntity(id));
+    }
+
+    /** 내 정보 조회(수정 화면용) — provider·hasPassword 포함. */
+    public MyProfileResponse getMyProfile(Long memberId) {
+        return MyProfileResponse.from(getMemberEntity(memberId));
+    }
+
+    /** 내 프로필 수정(닉네임). 영속 엔티티라 dirty checking으로 flush(save 불필요). */
+    @Transactional
+    public MyProfileResponse updateMyProfile(Long memberId, MemberUpdateRequest request) {
+        Member member = getMemberEntity(memberId);
+        member.updateProfile(request.nickname());
+        return MyProfileResponse.from(member);
+    }
+
+    /**
+     * 비밀번호 변경/설정. 비번이 이미 있으면(로컬·비번설정 소셜) 현재 비번을 검증하고,
+     * 없으면(소셜 전용 계정) 현재 비번 없이 바로 설정한다.
+     */
+    @Transactional
+    public void changeMyPassword(Long memberId, PasswordChangeRequest request) {
+        Member member = getMemberEntity(memberId);
+        if (member.hasPassword()) {
+            if (request.currentPassword() == null
+                    || !passwordEncoder.matches(request.currentPassword(), member.getPassword())) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "현재 비밀번호가 올바르지 않습니다.");
+            }
+        }
+        member.changePassword(passwordEncoder.encode(request.newPassword()));
+    }
+
+    private Member getMemberEntity(Long id) {
+        return memberRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "회원을 찾을 수 없습니다."));
-        return MemberResponse.from(member);
     }
 
     /**
