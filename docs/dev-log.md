@@ -19,6 +19,7 @@
 ## 📅 타임라인 — 2026-06 · [상세 →](dev-log/2026-06.md)
 
 **23일차 (07-01)**
+- **구글 소셜 로그인 (OAuth2)** — architecture §12 구현. `spring-boot-starter-oauth2-client`·scope openid/email/profile·**opt-in**(GOOGLE_CLIENT_ID 없으면 자동 backoff). **스테이트리스 유지**=세션 대신 쿠키에 인가요청 저장(`HttpCookieOAuth2AuthorizationRequestRepository`). 성공 핸들러=(provider,sub) find-or-create→`AuthService.issueTokens` 재사용→JWT httpOnly 쿠키→FE 리다이렉트. FE "Google로 계속하기"(login/signup). **422 tests**(쿠키저장소 라운드트립3)·FE 0·**🟢 런타임 PASS**(자격증명 로드→302 구글·redirect_uri 정확·**사용자 브라우저 실제 로그인 성공**). ⚠️자격증명 `.env.example`(추적) 오입력→`.env` 이동·스크럽·git 미노출 확인. 머지 `feature/oauth2-google-login`→dev `--no-ff`. 다음=카카오·배포·dev→main.
 - **회원가입 화면 (FE)** — 배포 데모 자립: 가입 페이지가 없어 방문자가 계정을 못 만들던 구멍 메움(BE는 기존 `POST /api/members`). `/signup`(이메일·비번8+·확인·닉네임·클라 선검증·**가입 후 자동 로그인**→/products·서버메시지 노출) + 로그인↔가입 상호링크 + Header 가입 링크(clay 강조). BE 무변경·**tsc/lint 0**. 머지 `feature/fe-signup-page`→dev `--no-ff`. **🟢 런타임 스모크 PASS**(가입 201·중복 409·자동로그인 200·검증 400; 한글 닉네임 400=Windows 셸 UTF-8 함정·앱 무관)·브라우저 클릭=사용자.
 
 **22일차 (06-30)**
