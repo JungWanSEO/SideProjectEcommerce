@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { apiPost } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import GoogleLoginButton from "@/components/GoogleLoginButton";
+import SocialLoginButtons from "@/components/SocialLoginButtons";
 
 export default function SignupPage() {
   const { login } = useAuth();
@@ -96,7 +96,7 @@ export default function SignupPage() {
           {submitting ? "가입 중…" : "회원가입"}
         </button>
       </form>
-      <GoogleLoginButton />
+      <SocialLoginButtons />
       <p className="mt-5 text-center text-sm text-muted">
         이미 계정이 있으신가요?{" "}
         <Link href="/login" className="text-clay hover:underline">

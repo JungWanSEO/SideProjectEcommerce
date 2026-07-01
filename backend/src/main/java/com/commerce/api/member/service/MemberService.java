@@ -7,6 +7,7 @@ import com.commerce.api.member.entity.AuthProvider;
 import com.commerce.api.member.entity.Member;
 import com.commerce.api.member.entity.Role;
 import com.commerce.api.member.repository.MemberRepository;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -60,17 +61,23 @@ public class MemberService {
     }
 
     private Member linkByEmailOrCreate(AuthProvider provider, String providerId, String email, String name) {
-        if (email == null || email.isBlank()) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "소셜 계정에서 이메일을 받지 못했습니다.");
+        // email 있으면(구글·검수된 카카오) 같은 email 계정에 자동 연동. 없으면(카카오 email-free) 플레이스홀더로 생성.
+        if (email != null && !email.isBlank()) {
+            Optional<Member> linked = memberRepository.findByEmail(email);
+            if (linked.isPresent()) {
+                return linked.get();
+            }
+        } else {
+            // email 미제공 소셜 계정 — email 컬럼 NOT NULL·UNIQUE 충족용 플레이스홀더(providerId로 유일). 실제 메일 아님.
+            email = provider.name().toLowerCase() + "_" + providerId + "@social.local";
         }
-        return memberRepository.findByEmail(email)
-                .orElseGet(() -> memberRepository.save(Member.builder()
-                        .email(email)
-                        .nickname(resolveNickname(name, email))
-                        .role(Role.USER)
-                        .provider(provider)
-                        .providerId(providerId)
-                        .build()));   // password 미지정(null) = 소셜 전용 계정
+        return memberRepository.save(Member.builder()
+                .email(email)
+                .nickname(resolveNickname(name, email))
+                .role(Role.USER)
+                .provider(provider)
+                .providerId(providerId)
+                .build());   // password 미지정(null) = 소셜 전용 계정
     }
 
     /** 닉네임 = 제공자 이름(없으면 email 로컬파트). member.nickname length 30 제약에 맞춰 절단. */

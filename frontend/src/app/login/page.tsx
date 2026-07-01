@@ -4,7 +4,7 @@ import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
-import GoogleLoginButton from "@/components/GoogleLoginButton";
+import SocialLoginButtons from "@/components/SocialLoginButtons";
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -66,7 +66,7 @@ export default function LoginPage() {
           {submitting ? "로그인 중…" : "로그인"}
         </button>
       </form>
-      <GoogleLoginButton />
+      <SocialLoginButtons />
       <p className="mt-5 text-center text-sm text-muted">
         계정이 없으신가요?{" "}
         <Link href="/signup" className="text-clay hover:underline">
