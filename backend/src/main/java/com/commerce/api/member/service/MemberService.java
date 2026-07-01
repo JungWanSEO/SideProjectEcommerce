@@ -3,6 +3,7 @@ package com.commerce.api.member.service;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.member.dto.MemberResponse;
 import com.commerce.api.member.dto.MemberSignupRequest;
+import com.commerce.api.member.entity.AuthProvider;
 import com.commerce.api.member.entity.Member;
 import com.commerce.api.member.entity.Role;
 import com.commerce.api.member.repository.MemberRepository;
@@ -41,6 +42,42 @@ public class MemberService {
                 .build();
 
         return MemberResponse.from(memberRepository.save(member));
+    }
+
+    /**
+     * 소셜 로그인 회원 find-or-create. 식별자는 (provider, providerId).
+     * <ol>
+     *   <li>(provider, providerId)로 있으면 그대로 반환.</li>
+     *   <li>없고 같은 email 계정이 이미 있으면 그 계정으로 <b>연동</b>(로그인). 제공자가 검증한 email 기준
+     *       (구글은 email 검증됨) — 데모용 자동 연동 정책. provider별 별개 계정을 원하면 이 분기를 제거한다.</li>
+     *   <li>둘 다 아니면 신규 생성(password=null = 소셜 전용, 기본 USER).</li>
+     * </ol>
+     */
+    @Transactional
+    public Member findOrCreateSocialMember(AuthProvider provider, String providerId, String email, String name) {
+        return memberRepository.findByProviderAndProviderId(provider, providerId)
+                .orElseGet(() -> linkByEmailOrCreate(provider, providerId, email, name));
+    }
+
+    private Member linkByEmailOrCreate(AuthProvider provider, String providerId, String email, String name) {
+        if (email == null || email.isBlank()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "소셜 계정에서 이메일을 받지 못했습니다.");
+        }
+        return memberRepository.findByEmail(email)
+                .orElseGet(() -> memberRepository.save(Member.builder()
+                        .email(email)
+                        .nickname(resolveNickname(name, email))
+                        .role(Role.USER)
+                        .provider(provider)
+                        .providerId(providerId)
+                        .build()));   // password 미지정(null) = 소셜 전용 계정
+    }
+
+    /** 닉네임 = 제공자 이름(없으면 email 로컬파트). member.nickname length 30 제약에 맞춰 절단. */
+    private String resolveNickname(String name, String email) {
+        int at = email.indexOf('@');
+        String base = (name != null && !name.isBlank()) ? name : (at > 0 ? email.substring(0, at) : email);
+        return base.length() > 30 ? base.substring(0, 30) : base;
     }
 
     /** 단건 조회 */
