@@ -1,9 +1,13 @@
 package com.commerce.api.global.security;
 
+import com.commerce.api.global.security.oauth2.HttpCookieOAuth2AuthorizationRequestRepository;
+import com.commerce.api.global.security.oauth2.OAuth2LoginSuccessHandler;
 import java.util.Arrays;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -64,7 +68,11 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain filterChain(
-            HttpSecurity http, CorsConfigurationSource corsConfigurationSource) throws Exception {
+            HttpSecurity http, CorsConfigurationSource corsConfigurationSource,
+            ObjectProvider<ClientRegistrationRepository> clientRegistrationRepositoryProvider,
+            ObjectProvider<OAuth2LoginSuccessHandler> oAuth2SuccessHandlerProvider,
+            ObjectProvider<HttpCookieOAuth2AuthorizationRequestRepository> authRequestRepositoryProvider)
+            throws Exception {
         http
                 // 프론트엔드(다른 origin)에서의 브라우저 호출 허용. preflight(OPTIONS)는 Spring이 자동 처리.
                 .cors(cors -> cors.configurationSource(corsConfigurationSource))
@@ -91,6 +99,8 @@ public class SecurityConfig {
                         // ⚠️ 운영에선 메트릭 노출을 막아야 한다 — 관리 포트 분리(management.server.port) + 네트워크 제한이 정석.
                         .requestMatchers("/swagger-ui/**", "/swagger-ui.html",
                                 "/v3/api-docs/**", "/actuator/health", "/actuator/prometheus").permitAll()
+                        // 소셜 로그인 시작(/oauth2/authorization/**)·콜백(/login/oauth2/code/**)은 인증 전 접근 필요
+                        .requestMatchers("/oauth2/**", "/login/oauth2/**").permitAll()
                         // 관리자
                         .requestMatchers(HttpMethod.POST, "/api/products").hasRole("ADMIN")
                         // 상품 기본정보 수정(단건 PUT /api/products/{id}) — ADMIN (옵션 PUT은 아래 별도 매처)
@@ -135,6 +145,16 @@ public class SecurityConfig {
                         .anyRequest().authenticated())
                 .addFilterBefore(new JwtAuthenticationFilter(jwtTokenProvider),
                         UsernamePasswordAuthenticationFilter.class);
+
+        // 소셜 로그인: GOOGLE_CLIENT_ID/SECRET가 설정돼 ClientRegistrationRepository 빈이 있을 때만 활성.
+        //   (자격증명 없으면 자동설정 backoff → 이 블록 skip → 기존 로컬 로그인만. 테스트/기존 흐름 무영향.)
+        //   인가 요청은 세션 대신 쿠키에 저장(STATELESS 유지), 성공 시 우리 JWT 쿠키를 굽는 핸들러로 위임.
+        if (clientRegistrationRepositoryProvider.getIfAvailable() != null) {
+            http.oauth2Login(oauth -> oauth
+                    .authorizationEndpoint(endpoint -> endpoint
+                            .authorizationRequestRepository(authRequestRepositoryProvider.getObject()))
+                    .successHandler(oAuth2SuccessHandlerProvider.getObject()));
+        }
         return http.build();
     }
 }

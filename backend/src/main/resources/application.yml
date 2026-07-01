@@ -29,6 +29,18 @@ spring:
       pageable:
         max-page-size: 100   # 페이지 size 상한(남용·과다조회 방지). 초과 요청해도 100으로 제한.
 
+  # 소셜 로그인(OAuth2). client-id가 비어 있으면 자동설정이 backoff → 기존 로컬 로그인만 동작(opt-in).
+  #   Google Cloud Console에서 발급한 값을 env로 주입: GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
+  #   승인 리다이렉트 URI(콘솔에 등록): {baseUrl}/login/oauth2/code/google (로컬=http://localhost:8080/...)
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID:}
+            client-secret: ${GOOGLE_CLIENT_SECRET:}
+            scope: openid, email, profile   # 기본 신원 스코프만 → 구글 검수·미검증 경고·100명 제한 없음
+
   # Flyway: 버전관리된 SQL(db/migration/V*.sql)로 스키마를 통제.
   flyway:
     enabled: true
@@ -120,3 +132,6 @@ app:
     #   운영: APP_COOKIE_SECURE=true · APP_COOKIE_SAME_SITE=None
     secure: false
     same-site: Lax
+  # 소셜 로그인 성공 후 브라우저를 돌려보낼 FE 주소(쿠키는 이미 심겨 로그인 상태). 운영: APP_OAUTH2_REDIRECT=https://<your-app>.vercel.app
+  oauth2:
+    success-redirect-url: ${APP_OAUTH2_REDIRECT:http://localhost:3000}

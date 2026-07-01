@@ -25,6 +25,9 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-web'
 	implementation 'org.springframework.boot:spring-boot-starter-security'
+	// 소셜 로그인(OAuth2 Client) — GOOGLE_CLIENT_ID/SECRET가 있을 때만 활성. 자격증명이 없으면 자동설정이
+	// backoff 하여(ClientsConfiguredCondition) 기존 로컬 로그인만 동작한다(opt-in·기존 흐름 무영향).
+	implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
 	implementation 'org.springframework.boot:spring-boot-starter-aop'
 	// === 캐시 추상화 + Caffeine(로컬 인메모리 캐시) ===
 	// Spring Cache 추상화(@Cacheable/@CacheEvict)로 구현체를 추상화 — 지금은 Caffeine(외부 인프라 0),

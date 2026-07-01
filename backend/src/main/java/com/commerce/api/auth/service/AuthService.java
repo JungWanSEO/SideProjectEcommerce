@@ -41,14 +41,23 @@ public class AuthService {
         Member member = memberRepository.findByEmail(request.email())
                 .orElseThrow(() -> new BusinessException(HttpStatus.UNAUTHORIZED, INVALID_LOGIN));
 
+        // 소셜 전용 계정은 password가 null → matches(raw, null)=false → 로컬 로그인은 자연히 차단(401).
         if (!passwordEncoder.matches(request.password(), member.getPassword())) {
             throw new BusinessException(HttpStatus.UNAUTHORIZED, INVALID_LOGIN);
         }
 
+        return issueTokens(member);
+    }
+
+    /**
+     * 회원에게 access·refresh 토큰을 발급하고 refresh를 저장(멤버당 1개 upsert)한다.
+     * 로컬 로그인과 소셜 로그인(OAuth2 성공 핸들러)이 공용으로 쓰는 발급 지점 — 인증 "주체"만 다르고 발급은 동일.
+     */
+    @Transactional
+    public AuthResult issueTokens(Member member) {
         String accessToken = jwtTokenProvider.createAccessToken(member.getId(), member.getRole());
         String refreshToken = jwtTokenProvider.createRefreshToken(member.getId());
         saveOrUpdateRefreshToken(member.getId(), refreshToken);
-
         return new AuthResult(accessToken, refreshToken, MemberResponse.from(member));
     }
 
