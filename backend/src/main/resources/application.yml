@@ -15,8 +15,10 @@ spring:
   # 시크릿은 OS 환경변수로 주입(12-factor). 로컬은 backend/.env + run.ps1로 로드.
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3307/commerce?serverTimezone=Asia/Seoul&characterEncoding=UTF-8}
-    username: ${MYSQL_USER}
-    password: ${MYSQL_PASSWORD}
+    # 배포는 SPRING_DATASOURCE_USERNAME/_PASSWORD(deploy.md §5)를 1급으로 쓰고, 없으면 로컬 컨벤션 MYSQL_USER/_PASSWORD로 폴백.
+    #   둘 다 없으면 안쪽 ${MYSQL_USER}가 기본값이 없어 부팅 실패(fail-fast) — 시크릿 누락을 조용히 넘기지 않는다.
+    username: ${SPRING_DATASOURCE_USERNAME:${MYSQL_USER}}
+    password: ${SPRING_DATASOURCE_PASSWORD:${MYSQL_PASSWORD}}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
   # Redis 접속 — app.cache.provider=redis 일 때만 실제 연결(기본 caffeine이면 연결 안 함).
