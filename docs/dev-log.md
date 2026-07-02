@@ -18,6 +18,9 @@
 
 ## 📅 타임라인 — 2026-06 · [상세 →](dev-log/2026-06.md)
 
+**24일차 (07-02)**
+- **배포 경로 A(Oracle VM) 준비물 + env 배선 보강** — 배포 단계 점검. 계정 없이 로컬 검증: `bootJar`(Dockerfile)·`next build`(Vercel) 둘 다 PASS·3-에이전트 병렬 감사로 env 배선/FE 설정/무료티어 최신성 확인(런타임 하드코딩 localhost 0). 무료티어 2026-07 실검색=**🔴 Koyeb 무료 폐쇄**(Mistral 인수)·Oracle 2/12 감축 확정. **결정=경로 A(Oracle Always Free VM)**(콜드스타트 없음·진짜 MySQL·쿠키 first-party 가능). 산출물=`docker-compose.prod.yml`(앱+MySQL)·`.env.prod.example`·datasource 계정 `${SPRING_DATASOURCE_USERNAME:${MYSQL_USER}}` 체인·deploy.md APP_OAUTH2_REDIRECT 행. **🔒 `.gitignore` 시크릿 갭 수정**(`.env.prod` 추적될 뻔→`.env.*`+template negate·check-ignore 검증). 429 tests 유지. 머지 `feature/deploy-prep-hardening`→dev `--no-ff`(`06e7ff8`). 다음=(사용자) Oracle VM 생성→compose 기동→Caddy→Vercel·쿠키전략(Vercel rewrites 프록시)·dev→main.
+
 **23일차 (07-01)**
 - **회원정보 수정 (프로필·비밀번호)** — member 도메인에 없던 수정 기능 추가(가입+조회만이던 것). `GET/PUT /api/members/me`(닉네임·`MyProfileResponse`=provider/hasPassword)·`PUT /me/password`(로컬=현재비번 검증·소셜=현재비번 없이 설정). FE `/account/profile`(계정정보·닉네임·비번변경/설정)+`AuthProvider.refreshUser`(헤더 즉시 반영)+Header "내 정보". 마이그0·**429 tests**(+5)·FE 0·**🟢 런타임 스모크 PASS**(가입→로그인→GET/me→닉네임→비번 400/200→**새 비번 로그인 200**). 머지 `feature/member-profile-edit`→dev `--no-ff`.
 - **카카오 소셜 로그인 (OAuth2, email-free)** — 구글에 이어 추가. 카카오는 내장 provider가 아니라 `OAuth2ClientConfig`에서 엔드포인트 직접 지정(kauth/kapi·userNameAttr `id`·scope profile_nickname/image). 성공 핸들러 provider별 파싱(카카오 `id`=getName·중첩 nickname·email 없으면 플레이스홀더 `kakao_<id>@social.local`·스키마 무변경). FE `SocialLoginButtons`. **🐛 실버그 2건 잡음**: ①빈 provider registration이 Boot 부팅 실패→`spring.security.oauth2.client.*` 폐기하고 `app.oauth2.*`+client-id 있는 것만 고르는 커스텀 repo=**진짜 provider별 opt-in**(배포 한쪽만 켜도 안전) ②`String.valueOf(getAttribute("id"))` 제네릭 추론이 char[] 오버로드 골라 ClassCastException(Long→char[])→`getName()`+회귀테스트. **424 tests**·FE 0·**🟢 런타임 PASS**(구글·카카오 302·**사용자 브라우저 카카오 로그인 성공**). 머지 `feature/oauth2-kakao-login`→dev `--no-ff`. 다음=배포·dev→main·(후보)회원정보 수정.
