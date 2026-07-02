@@ -72,6 +72,7 @@ VM 한 대에 Docker로 BE+MySQL을 올린다. **이 스택에 가장 잘 맞는
 | `APP_CORS_ALLOWED_ORIGINS` | `https://<your-app>.vercel.app` | FE 도메인 허용(콤마로 여러 개) |
 | `APP_COOKIE_SECURE` | `true` | https 전용 쿠키 |
 | `APP_COOKIE_SAME_SITE` | `None`(경로 B) / `Lax`(경로 A·같은 상위도메인) | 크로스사이트면 None+Secure 한 쌍 |
+| `APP_OAUTH2_REDIRECT` | `https://<your-app>.vercel.app` | **소셜 로그인 켤 때 필수** — 로그인 성공 후 돌아갈 FE 주소. 안 넣으면 `localhost:3000`으로 리다이렉트돼 깨짐 |
 | `SPRING_PROFILES_ACTIVE` | `dev` *(선택)* | 데모 데이터 시드(빈 사이트 방지) |
 | `PORT` | *(플랫폼 자동)* | `server.port=${PORT:8080}`가 받음 |
 
