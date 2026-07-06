@@ -1,0 +1,5 @@
+# 줄바꿈 정규화 — Linux에서 실행되는 셸 스크립트/유닉스 설정은 Windows에서 편집해도 항상 LF로 저장.
+# (autocrlf=true 환경에서 CRLF가 섞이면 VM의 bash가 '\r'(bad interpreter)로 깨진다.)
+*.sh              text eol=lf
+gradlew           text eol=lf
+deploy/Caddyfile  text eol=lf
