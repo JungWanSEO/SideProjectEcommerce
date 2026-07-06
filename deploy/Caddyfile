@@ -1,0 +1,34 @@
+# Caddy 리버스 프록시 — 경로 A(Oracle VM)에서 Spring Boot 백엔드에 HTTPS를 입힌다.
+# Caddy는 Let's Encrypt 인증서를 자동 발급·갱신한다(이 도메인의 A레코드가 VM 공인 IP를 가리켜야 함).
+#
+# 사용:
+#   1) 아래 api.example.com 을 실제 백엔드 도메인으로 교체(DuckDNS면 <name>.duckdns.org).
+#   2) VM에 Caddy 설치 → 이 파일을 /etc/caddy/Caddyfile 로 두고  sudo systemctl reload caddy
+#   3) 앱 컨테이너는 docker-compose.prod.yml에서 127.0.0.1:8080 에만 바인딩 → Caddy가 그 앞에서 HTTPS 종단.
+#   4) 앱에 SERVER_FORWARD_HEADERS_STRATEGY=framework (compose 기본값) → OAuth2 redirect_uri가 https 도메인으로.
+#
+# 추천 구성(경로 A + Vercel FE): FE는 Vercel, 백엔드만 이 도메인.
+#   Vercel(또는 next.config)에서 /api/* 를 이 도메인으로 rewrite하면 브라우저엔 same-origin →
+#   로그인 쿠키가 first-party가 되어 크로스도메인 쿠키 함정이 사라진다.
+
+api.example.com {
+	# 백엔드 컨테이너(호스트 루프백 8080)로 프록시. Caddy가 X-Forwarded-Proto/Host/For 를 자동 부착.
+	reverse_proxy 127.0.0.1:8080
+
+	# 헬스체크는 그대로 노출된다: https://api.example.com/actuator/health
+	# 액세스 로그를 파일로 남기려면 주석 해제:
+	# log {
+	# 	output file /var/log/caddy/api-access.log
+	# }
+}
+
+# ── 대안: 단일 도메인에 FE+BE를 이 VM에 함께 둘 때(예: DuckDNS 하나로 Vercel 없이) ──
+# FE(Next.js node 또는 정적 export)를 VM에서 서빙하고 /api/* 만 백엔드로 보낸다. 완전 same-origin이라 쿠키는 SameSite=Lax로도 충분:
+#
+# example.duckdns.org {
+# 	handle /api/*      { reverse_proxy 127.0.0.1:8080 }   # 백엔드 API
+# 	handle /actuator/* { reverse_proxy 127.0.0.1:8080 }   # 헬스/메트릭
+# 	handle /login/*    { reverse_proxy 127.0.0.1:8080 }   # OAuth2 콜백
+# 	handle /oauth2/*   { reverse_proxy 127.0.0.1:8080 }   # OAuth2 인가 시작
+# 	handle             { reverse_proxy 127.0.0.1:3000 }   # 그 외 = Next.js FE
+# }

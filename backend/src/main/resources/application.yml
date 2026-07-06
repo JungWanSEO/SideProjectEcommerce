@@ -1,6 +1,11 @@
 # 서버 포트 — 로컬 8080. 배포 플랫폼(Render/Koyeb 등)이 PORT를 주입하면 그 포트로 바인딩한다.
 server:
   port: ${PORT:8080}
+  # 리버스 프록시(Caddy/nginx) 뒤에선 X-Forwarded-Proto/Host를 신뢰해 외부 https 도메인으로 URL을 생성한다.
+  #   특히 OAuth2 인가요청의 redirect_uri({baseUrl}/login/oauth2/code/*)가 내부 http://…:8080이 아니라
+  #   실제 https 도메인으로 만들어져야 소셜 로그인이 provider 등록 URI와 일치한다.
+  #   로컬(프록시 없음)=none. 배포(Caddy 뒤)=SERVER_FORWARD_HEADERS_STRATEGY=framework.
+  forward-headers-strategy: ${SERVER_FORWARD_HEADERS_STRATEGY:none}
   tomcat:
     mbeanregistry:
       enabled: true   # Tomcat 스레드 풀 MBean 등록 → Micrometer tomcat.threads.* 메트릭 노출(관측성)
