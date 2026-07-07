@@ -3,6 +3,7 @@ package com.commerce.api.coupon.controller;
 import com.commerce.api.coupon.dto.CouponCreateRequest;
 import com.commerce.api.coupon.dto.CouponIssueRequest;
 import com.commerce.api.coupon.dto.CouponResponse;
+import com.commerce.api.audit.aspect.Auditable;
 import com.commerce.api.coupon.service.CouponService;
 import com.commerce.api.coupon.service.MemberCouponService;
 import com.commerce.api.global.common.ApiResponse;
@@ -36,6 +37,7 @@ public class CouponController {
     private final MemberCouponService memberCouponService;
 
     @Operation(summary = "쿠폰 생성", description = "정액/정률·플랫폼/셀러 부담·적용 범위(전체/셀러)·배포 방식(공개/발급)을 지정해 쿠폰을 만든다. 코드는 대문자로 정규화된다.")
+    @Auditable(action = "COUPON_CREATE", targetType = "COUPON", targetId = "#result.body.data.id")
     @PostMapping
     public ResponseEntity<ApiResponse<CouponResponse>> create(
             @Valid @RequestBody CouponCreateRequest request) {
@@ -46,6 +48,7 @@ public class CouponController {
 
     @Operation(summary = "쿠폰 발급(회원 지갑으로)",
             description = "발급형(ISSUED) 쿠폰을 전체 회원 또는 특정 이메일 회원에게 발급한다(쿠폰함). 이미 발급된 회원은 건너뛴다. 발급한 장수를 반환.")
+    @Auditable(action = "COUPON_ISSUE", targetType = "COUPON", targetId = "#id")
     @PostMapping("/{id}/issue")
     public ResponseEntity<ApiResponse<Integer>> issue(
             @PathVariable Long id, @Valid @RequestBody CouponIssueRequest request) {

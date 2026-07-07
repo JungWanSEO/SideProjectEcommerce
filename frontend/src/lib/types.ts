@@ -524,3 +524,19 @@ export interface CacheStats {
   evictionCount: number;
   estimatedSize: number;
 }
+
+/** 감사 로그 결과 (AuditResult). */
+export type AuditResult = "SUCCESS" | "FAILURE";
+
+/** 감사 로그 (AuditLogResponse) — GET /api/audit-logs (ADMIN). 어드민 변경 이력 1건. */
+export interface AuditLog {
+  id: number;
+  actorMemberId: number | null;
+  actorEmail: string | null; // 백엔드가 회원 조회로 enrich(없으면 null)
+  action: string; // 예: "PRODUCT_UPDATE"
+  targetType: string | null; // 예: "PRODUCT"
+  targetId: string | null; // 예: "42"
+  detail: string | null; // 예: "PUT /api/products/42"
+  result: AuditResult;
+  createdAt: string;
+}

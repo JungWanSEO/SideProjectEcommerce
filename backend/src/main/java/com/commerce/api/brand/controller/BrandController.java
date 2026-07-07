@@ -5,6 +5,7 @@ import com.commerce.api.brand.dto.BrandResponse;
 import com.commerce.api.brand.dto.BrandSellerAssignRequest;
 import com.commerce.api.brand.dto.BrandUpdateRequest;
 import com.commerce.api.brand.service.BrandService;
+import com.commerce.api.audit.aspect.Auditable;
 import com.commerce.api.global.common.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -45,6 +46,7 @@ public class BrandController {
     }
 
     @Operation(summary = "브랜드 등록(ADMIN)", description = "브랜드를 등록한다. 이름 중복이면 409.")
+    @Auditable(action = "BRAND_CREATE", targetType = "BRAND", targetId = "#result.body.data.id")
     @PostMapping
     public ResponseEntity<ApiResponse<BrandResponse>> create(
             @Valid @RequestBody BrandCreateRequest request) {
@@ -55,6 +57,7 @@ public class BrandController {
 
     @Operation(summary = "브랜드 수정(ADMIN)",
             description = "브랜드 이름을 수정한다. 없으면 404, 이름 중복이면 409.")
+    @Auditable(action = "BRAND_UPDATE", targetType = "BRAND", targetId = "#id")
     @PutMapping("/{id}")
     public ResponseEntity<ApiResponse<BrandResponse>> update(
             @PathVariable Long id, @Valid @RequestBody BrandUpdateRequest request) {
@@ -64,6 +67,7 @@ public class BrandController {
 
     @Operation(summary = "브랜드 삭제(ADMIN)",
             description = "브랜드를 삭제한다. 없으면 404, 상품이 참조 중이면 409.")
+    @Auditable(action = "BRAND_DELETE", targetType = "BRAND", targetId = "#id")
     @DeleteMapping("/{id}")
     public ResponseEntity<ApiResponse<Void>> delete(@PathVariable Long id) {
         brandService.delete(id);
@@ -72,6 +76,7 @@ public class BrandController {
 
     @Operation(summary = "브랜드 셀러 귀속(ADMIN)",
             description = "브랜드를 셀러에 귀속한다. sellerId가 null이면 귀속 해제. 브랜드 없으면 404, 셀러 없으면 400.")
+    @Auditable(action = "BRAND_ASSIGN_SELLER", targetType = "BRAND", targetId = "#id")
     @PutMapping("/{id}/seller")
     public ResponseEntity<ApiResponse<BrandResponse>> assignSeller(
             @PathVariable Long id, @RequestBody BrandSellerAssignRequest request) {
