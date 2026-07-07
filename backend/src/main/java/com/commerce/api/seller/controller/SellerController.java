@@ -1,5 +1,6 @@
 package com.commerce.api.seller.controller;
 
+import com.commerce.api.audit.aspect.Auditable;
 import com.commerce.api.global.common.ApiResponse;
 import com.commerce.api.member.dto.MemberResponse;
 import com.commerce.api.seller.dto.SellerCreateRequest;
@@ -52,6 +53,7 @@ public class SellerController {
     }
 
     @Operation(summary = "셀러 등록(ADMIN)", description = "이름 중복이면 409.")
+    @Auditable(action = "SELLER_CREATE", targetType = "SELLER", targetId = "#result.body.data.id")
     @PostMapping
     public ResponseEntity<ApiResponse<SellerResponse>> create(
             @Valid @RequestBody SellerCreateRequest request) {
@@ -61,6 +63,7 @@ public class SellerController {
     }
 
     @Operation(summary = "셀러 정보 수정(ADMIN)", description = "이름·수수료율·정산계좌·사업자번호. 상태는 별도 엔드포인트.")
+    @Auditable(action = "SELLER_UPDATE", targetType = "SELLER", targetId = "#id")
     @PutMapping("/{id}")
     public ResponseEntity<ApiResponse<SellerResponse>> update(
             @PathVariable Long id, @Valid @RequestBody SellerUpdateRequest request) {
@@ -69,6 +72,7 @@ public class SellerController {
     }
 
     @Operation(summary = "셀러 입점 정지(ADMIN)", description = "이미 정지면 409.")
+    @Auditable(action = "SELLER_SUSPEND", targetType = "SELLER", targetId = "#id")
     @PutMapping("/{id}/suspend")
     public ResponseEntity<ApiResponse<SellerResponse>> suspend(@PathVariable Long id) {
         return ResponseEntity.ok(
@@ -76,6 +80,7 @@ public class SellerController {
     }
 
     @Operation(summary = "셀러 입점 재개(ADMIN)", description = "이미 활성이면 409.")
+    @Auditable(action = "SELLER_ACTIVATE", targetType = "SELLER", targetId = "#id")
     @PutMapping("/{id}/activate")
     public ResponseEntity<ApiResponse<SellerResponse>> activate(@PathVariable Long id) {
         return ResponseEntity.ok(
@@ -84,6 +89,7 @@ public class SellerController {
 
     @Operation(summary = "셀러 운영자 지정(ADMIN)",
             description = "회원을 이 셀러의 SELLER 운영자로 지정한다. 셀러 없으면 404, 회원 없으면 404, 관리자면 409.")
+    @Auditable(action = "SELLER_ASSIGN_OWNER", targetType = "SELLER", targetId = "#id")
     @PutMapping("/{id}/owner")
     public ResponseEntity<ApiResponse<MemberResponse>> assignOwner(
             @PathVariable Long id, @Valid @RequestBody SellerOwnerAssignRequest request) {

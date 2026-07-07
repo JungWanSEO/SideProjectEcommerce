@@ -1,5 +1,6 @@
 package com.commerce.api.product.controller;
 
+import com.commerce.api.audit.aspect.Auditable;
 import com.commerce.api.global.common.ApiResponse;
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.product.dto.ProductCreateRequest;
@@ -47,6 +48,7 @@ public class ProductController {
     private final ProductService productService;
 
     @Operation(summary = "상품 등록", description = "상품명/가격(원)/재고/설명으로 상품을 등록한다. 등록 시 상태는 ON_SALE.")
+    @Auditable(action = "PRODUCT_CREATE", targetType = "PRODUCT", targetId = "#result.body.data.id")
     @PostMapping
     public ResponseEntity<ApiResponse<ProductResponse>> create(
             @Valid @RequestBody ProductCreateRequest request) {
@@ -95,6 +97,7 @@ public class ProductController {
 
     @Operation(summary = "상품 기본정보 수정 (ADMIN)",
             description = "상품명/가격/설명/대표이미지/카테고리/브랜드를 수정한다. 옵션·이미지·상태는 별도 API. 없으면 404.")
+    @Auditable(action = "PRODUCT_UPDATE", targetType = "PRODUCT", targetId = "#id")
     @PutMapping("/{id}")
     public ResponseEntity<ApiResponse<ProductResponse>> update(
             @PathVariable Long id,
@@ -105,6 +108,7 @@ public class ProductController {
 
     @Operation(summary = "옵션 추가 (ADMIN)",
             description = "상품에 사이즈 옵션을 추가한다. 같은 사이즈가 이미 있으면 409. 갱신된 상품을 반환.")
+    @Auditable(action = "PRODUCT_OPTION_ADD", targetType = "PRODUCT", targetId = "#productId")
     @PostMapping("/{productId}/options")
     public ResponseEntity<ApiResponse<ProductResponse>> addOption(
             @PathVariable Long productId,
@@ -116,6 +120,7 @@ public class ProductController {
 
     @Operation(summary = "옵션 수정 (ADMIN)",
             description = "옵션의 사이즈/재고를 수정한다. 없는 옵션이면 404, 다른 옵션과 사이즈가 겹치면 409.")
+    @Auditable(action = "PRODUCT_OPTION_UPDATE", targetType = "PRODUCT", targetId = "#productId")
     @PutMapping("/{productId}/options/{optionId}")
     public ResponseEntity<ApiResponse<ProductResponse>> updateOption(
             @PathVariable Long productId,
@@ -126,6 +131,7 @@ public class ProductController {
     }
 
     @Operation(summary = "옵션 삭제 (ADMIN)", description = "옵션을 삭제한다. 없는 옵션이면 404.")
+    @Auditable(action = "PRODUCT_OPTION_REMOVE", targetType = "PRODUCT", targetId = "#productId")
     @DeleteMapping("/{productId}/options/{optionId}")
     public ResponseEntity<ApiResponse<ProductResponse>> removeOption(
             @PathVariable Long productId,
@@ -136,6 +142,7 @@ public class ProductController {
 
     @Operation(summary = "상품 상태 변경 (ADMIN)",
             description = "상품 상태를 변경한다(ON_SALE/SOLD_OUT/DISCONTINUED). 없는 상품이면 404.")
+    @Auditable(action = "PRODUCT_STATUS_CHANGE", targetType = "PRODUCT", targetId = "#id")
     @PatchMapping("/{id}/status")
     public ResponseEntity<ApiResponse<ProductResponse>> changeStatus(
             @PathVariable Long id,
@@ -146,6 +153,7 @@ public class ProductController {
 
     @Operation(summary = "이미지(갤러리) 추가 (ADMIN)",
             description = "상품에 갤러리 이미지를 추가한다(대표 imageUrl 외 추가분). 갱신된 상품을 반환.")
+    @Auditable(action = "PRODUCT_IMAGE_ADD", targetType = "PRODUCT", targetId = "#productId")
     @PostMapping("/{productId}/images")
     public ResponseEntity<ApiResponse<ProductResponse>> addImage(
             @PathVariable Long productId,
@@ -156,6 +164,7 @@ public class ProductController {
     }
 
     @Operation(summary = "이미지(갤러리) 삭제 (ADMIN)", description = "갤러리 이미지를 삭제한다. 없는 이미지면 404.")
+    @Auditable(action = "PRODUCT_IMAGE_REMOVE", targetType = "PRODUCT", targetId = "#productId")
     @DeleteMapping("/{productId}/images/{imageId}")
     public ResponseEntity<ApiResponse<ProductResponse>> removeImage(
             @PathVariable Long productId,

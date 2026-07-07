@@ -2,6 +2,7 @@ package com.commerce.api.category.controller;
 
 import com.commerce.api.category.dto.CategoryCreateRequest;
 import com.commerce.api.category.dto.CategoryResponse;
+import com.commerce.api.audit.aspect.Auditable;
 import com.commerce.api.category.dto.CategoryUpdateRequest;
 import com.commerce.api.category.service.CategoryService;
 import com.commerce.api.global.common.ApiResponse;
@@ -43,6 +44,7 @@ public class CategoryController {
     }
 
     @Operation(summary = "카테고리 등록(ADMIN)", description = "카테고리를 등록한다. 이름 중복이면 409.")
+    @Auditable(action = "CATEGORY_CREATE", targetType = "CATEGORY", targetId = "#result.body.data.id")
     @PostMapping
     public ResponseEntity<ApiResponse<CategoryResponse>> create(
             @Valid @RequestBody CategoryCreateRequest request) {
@@ -53,6 +55,7 @@ public class CategoryController {
 
     @Operation(summary = "카테고리 수정(ADMIN)",
             description = "이름·부모를 수정한다. 없으면 404, 이름 중복이면 409, 2단계 제약 위반이면 400.")
+    @Auditable(action = "CATEGORY_UPDATE", targetType = "CATEGORY", targetId = "#id")
     @PutMapping("/{id}")
     public ResponseEntity<ApiResponse<CategoryResponse>> update(
             @PathVariable Long id, @Valid @RequestBody CategoryUpdateRequest request) {
@@ -62,6 +65,7 @@ public class CategoryController {
 
     @Operation(summary = "카테고리 삭제(ADMIN)",
             description = "카테고리를 삭제한다. 없으면 404, 자식 카테고리가 있거나 상품이 참조 중이면 409.")
+    @Auditable(action = "CATEGORY_DELETE", targetType = "CATEGORY", targetId = "#id")
     @DeleteMapping("/{id}")
     public ResponseEntity<ApiResponse<Void>> delete(@PathVariable Long id) {
         categoryService.delete(id);
