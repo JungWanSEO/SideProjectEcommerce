@@ -18,6 +18,9 @@
 
 ## 📅 타임라인 — 2026-06 · [상세 →](dev-log/2026-06.md)
 
+**25일차 (07-07)**
+- **어드민 감사 로그 (AOP @Auditable/AuditAspect)** — VM 보류 중 새 기능. 5영역 병렬 코드스캔으로 갭 매핑→후보 4개→사용자 "감사 로그(AOP)" 선택. 새 `audit` 도메인: AuditLog(**V37**)·`@Auditable`+**AuditAspect(@Around)**(정상 SUCCESS/예외 FAILURE 자동기록·대상ID SpEL `#id`/`#result.body.data.id`·행위자 SecurityContext·detail HTTP·**REQUIRES_NEW**+best-effort)·조회 `GET /api/audit-logs`(ADMIN·QueryDSL 필터·행위자 이메일 enrich). 6도메인 **23개** 어드민 변경에 부착. FE `/admin/audit`(필터·페이지)+NAV. **431 tests**(+2 AuditAspectTest)·FE tsc/lint/build 0. 머지 `feature/admin-audit-log`→dev `--no-ff`(`01b8e86`). ⚠️V37 MySQL 검증=Docker 복귀 후. 다음=브라우저 확인·MySQL 스모크·배포 VM·다른 기능.
+
 **24일차 (07-02)**
 - **배포 경로 A(Oracle VM) 준비물 + env 배선 보강** — 배포 단계 점검. 계정 없이 로컬 검증: `bootJar`(Dockerfile)·`next build`(Vercel) 둘 다 PASS·3-에이전트 병렬 감사로 env 배선/FE 설정/무료티어 최신성 확인(런타임 하드코딩 localhost 0). 무료티어 2026-07 실검색=**🔴 Koyeb 무료 폐쇄**(Mistral 인수)·Oracle 2/12 감축 확정. **결정=경로 A(Oracle Always Free VM)**(콜드스타트 없음·진짜 MySQL·쿠키 first-party 가능). 산출물=`docker-compose.prod.yml`(앱+MySQL)·`.env.prod.example`·datasource 계정 `${SPRING_DATASOURCE_USERNAME:${MYSQL_USER}}` 체인·deploy.md APP_OAUTH2_REDIRECT 행. **🔒 `.gitignore` 시크릿 갭 수정**(`.env.prod` 추적될 뻔→`.env.*`+template negate·check-ignore 검증). 429 tests 유지. 머지 `feature/deploy-prep-hardening`→dev `--no-ff`(`06e7ff8`). 다음=(사용자) Oracle VM 생성→compose 기동→Caddy→Vercel·쿠키전략(Vercel rewrites 프록시)·dev→main.
 - **(이어서) VM 부트스트랩·Caddyfile + 프록시 헤더** — VM 대기 중 결정불필요 준비물. `deploy/vm-setup.sh`(Ubuntu Docker 설치·clone·.env.prod 준비)·`deploy/Caddyfile`(HTTPS 프록시 템플릿)·`deploy/README.md`·`.gitattributes`(`*.sh`/gradlew LF 고정). **🐛 프록시 뒤 OAuth2 함정 선제 차단**=`server.forward-headers-strategy`(로컬 none·배포 framework)로 `{baseUrl}` redirect_uri가 외부 https 도메인 사용. bootJar PASS·429 유지. 머지 `feature/deploy-vm-runbook`→dev `--no-ff`(`2832ed5`).

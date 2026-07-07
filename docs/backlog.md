@@ -17,6 +17,7 @@
 - (비어 있음) — 외부 무관 후보 소진. 다음은 "함께(외부)" 학습 또는 새 기능 결정.
 
 ## DONE (완료 — 기록)
+- [x] (07-07) **어드민 감사 로그 (AOP)** — `feature/admin-audit-log`→dev `01b8e86` (431 tests·FE 0). 새 `audit` 도메인: `@Auditable`+AuditAspect(@Around, 성공/실패 자동기록·SpEL 대상ID·REQUIRES_NEW·best-effort)·`GET /api/audit-logs`(ADMIN·QueryDSL 필터·행위자 enrich)·**V37**·6도메인 23개 어드민 변경 부착·FE `/admin/audit`. ⚠️V37 MySQL 스모크=Docker 복귀 후. 후속=상세 드릴다운·CSV 내보내기·failure 감사 알림.
 - [x] (06-29) **파라미터 타입 불일치 400** — `def391d`. 비숫자 PathVariable 500→400(MethodArgumentTypeMismatch 핸들러). 411 tests.
 - [x] (06-29) **DB 조회 인덱스 V36** — `53c3f44`. orders(member_id)·review(product_id)·order_item(product_id)·settlement_entry(seller_id·payout_id). 저카디널리티/복합UNIQUE-prefix 제외. **Flyway 부팅 적용(v36)+EXPLAIN key 선택 검증**.
 - [x] (06-29) **FE 상품목록 무한스크롤** — `6b353df`. 기본뷰=커서 `/feed`, 필터/정렬=offset. IntersectionObserver·generation 레이스가드. tsc/lint 0·라이브 200 검증.
