@@ -86,10 +86,16 @@ function priceLabel(min: string, max: string): string {
   return `${fmt(max)}원 이하`;
 }
 
+// Baymard 하이브리드: 누적 이 개수까지만 자동 append(무한스크롤), 넘으면 '더 보기' 버튼으로 전환한다.
+//   목표지향 이커머스 그리드엔 순수 무한스크롤보다 Load-more가 낫다(Baymard 대규모 사용성테스트·NN/g). 권장 범위 ~50~100.
+const AUTO_APPEND_LIMIT = 60;
+
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true); // 첫 로드(쿼리 변경)
   const [loadingMore, setLoadingMore] = useState(false); // 다음 청크
+  // 자동 append 허용 상한 — 누적이 넘으면 '더 보기' 버튼. 버튼 클릭 시 상한을 늘려 다음 구간을 다시 자동 append.
+  const [autoLimit, setAutoLimit] = useState(AUTO_APPEND_LIMIT);
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -157,6 +163,7 @@ export default function ProductsPage() {
     const gen = ++genRef.current;
     cursorRef.current = null;
     pageRef.current = 0;
+    setAutoLimit(AUTO_APPEND_LIMIT); // 새 쿼리 → 자동 append 상한 초기화
     setLoading(true);
     setError(null);
     fetchChunk(true)
@@ -185,14 +192,22 @@ export default function ProductsPage() {
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const el = sentinelRef.current;
-    if (!el || !hasMore || loading) return;
+    // 자동 append는 누적이 상한 미만일 때만 관찰 — 상한 넘으면 중단하고 '더 보기' 버튼으로 넘긴다.
+    if (!el || !hasMore || loading || products.length >= autoLimit) return;
     const io = new IntersectionObserver(
       (entries) => entries[0]?.isIntersecting && loadMore(),
       { rootMargin: "400px" },
     );
     io.observe(el);
     return () => io.disconnect();
-  }, [hasMore, loading, loadMore]);
+  }, [hasMore, loading, loadMore, products.length, autoLimit]);
+
+  // '더 보기' 클릭: 자동 append 상한을 한 구간 늘리고 즉시 다음 청크.
+  //   클릭은 CLS의 500ms 예외를 받아(스크롤은 못 받음) 레이아웃 확장이 점수에 안 잡힌다.
+  const handleLoadMoreClick = () => {
+    setAutoLimit((n) => n + AUTO_APPEND_LIMIT);
+    loadMore();
+  };
 
   // 드롭다운/칩/정렬은 즉시 적용(데스크톱 표준). 키워드·가격만 검색/Enter로 commit.
   const set = (patch: Partial<Query>) => setQuery((q) => ({ ...q, ...patch }));
@@ -423,9 +438,28 @@ export default function ProductsPage() {
           ))}
         </ul>
 
-        {/* 무한 스크롤 sentinel + 상태 표시 */}
+        {/* 무한 스크롤 sentinel — 자동 append는 임계치 전까지만(그 뒤엔 아래 '더 보기' 버튼) */}
         <div ref={sentinelRef} aria-hidden className="h-px" />
-        {loadingMore && <p className="py-8 text-center text-muted">더 불러오는 중…</p>}
+
+        {/* append 로딩: 전체 그리드 재로딩이 아니라 콘텐츠 크기 스켈레톤 카드 한 줄(NN/g append 원칙·CLS 안전·그리드 리듬 유지) */}
+        {loadingMore && (
+          <div className="mt-10" role="status" aria-label="상품 더 불러오는 중">
+            <ProductGridSkeleton count={3} />
+          </div>
+        )}
+
+        {/* Baymard 하이브리드: 누적 임계치 후엔 자동 무한스크롤 대신 '더 보기'로 사용자 통제·푸터 접근을 되돌린다 */}
+        {hasMore && !loadingMore && products.length >= autoLimit && (
+          <div className="mt-10 flex justify-center">
+            <button
+              onClick={handleLoadMoreClick}
+              className="rounded-full border border-line px-8 py-3 text-sm font-medium text-ink transition hover:border-clay hover:text-clay"
+            >
+              더 보기
+            </button>
+          </div>
+        )}
+
         {!hasMore && (
           <p className="py-10 text-center text-xs text-muted">모든 상품을 둘러봤어요</p>
         )}
