@@ -13,6 +13,7 @@ import {
 import { apiGet } from "@/lib/api";
 import { CacheStats, Dashboard } from "@/lib/types";
 import { ORDER_STATUS_BADGE, ORDER_STATUS_LABEL } from "@/lib/orderStatus";
+import DashboardSkeleton from "@/components/admin/DashboardSkeleton";
 
 /**
  * 어드민 대시보드 (/admin 랜딩) — 운영 요약 한 화면.
@@ -47,7 +48,7 @@ export default function AdminDashboardPage() {
 
       {error && <p className="mb-4 text-sm text-danger">{error}</p>}
       {loading && !data ? (
-        <p className="text-gray-500">불러오는 중…</p>
+        <DashboardSkeleton />
       ) : data ? (
         <div className="flex flex-col gap-8">
           {/* KPI 카드 */}

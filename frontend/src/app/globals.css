@@ -34,3 +34,32 @@
     color: #2b2521;
   }
 }
+
+/* 스켈레톤 shimmer — 로딩 중 골격 위로 좌→우 빛이 흐르는 sweep(웜 그레이 톤).
+   .skeleton 을 붙인 블록에 크기/모서리는 Tailwind 유틸(높이·너비·rounded)로 준다. */
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+.skeleton {
+  background-color: #eae6e0; /* 웜 그레이 base(크림/화이트/그레이-50 위에서 자연스럽게) */
+  background-image: linear-gradient(
+    90deg,
+    rgba(234, 230, 224, 0) 0%,
+    rgba(255, 253, 250, 0.9) 50%,
+    rgba(234, 230, 224, 0) 100%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+/* 모션 최소화 선호 사용자는 흐름 없이 은은한 base만 */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
