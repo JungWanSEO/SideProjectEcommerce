@@ -19,6 +19,7 @@
 ## 📅 타임라인 — 2026-06 · [상세 →](dev-log/2026-06.md)
 
 **26일차 (07-09)**
+- **상품 그리드 무한스크롤 → Baymard 하이브리드**(리서치 기반) — deep-research(102 에이전트·Baymard·NN/g·web.dev, 23 confirmed)로 "무한스크롤 append 로딩 표현" 조사 → append=스켈레톤 카드 한 줄(role=status·CLS 안전) + 누적 60개 넘으면 "더 보기" 버튼 전환(클릭=CLS 예외·푸터접근·통제). 머지 `feature/products-loadmore-hybrid`→dev `8124d64`.
 - **스토어프론트 로딩 스켈레톤 전면 롤아웃** — 고객 화면 12개 페이지(상품목록/상세·장바구니·주문서·주문 목록/상세/결제·계정 4종·셀러 2종)의 raw "불러오는 중…"을 레이아웃 매칭 shimmer 스켈레톤으로 교체. 공용 `ProductGridSkeleton`. 12페이지 병렬 분석 워크플로→일괄 적용. tsc/lint 0. 머지 `feature/storefront-skeletons`→dev `5c1cbfe`.
 - **어드민/로그인 로딩 UX (스켈레톤 + 전환 오버레이)** — CSR 로딩 덜컹거림 정리. shimmer 스켈레톤(`globals.css .skeleton`·`Skeleton`·`DashboardSkeleton` 레이아웃 매칭·admin 게이트/대시보드)로 raw "불러오는 중…" 교체(`af965c1`) + 로그인 성공 후 `fixed z-50` 전환 오버레이(헤더 flip/네비 공백 마스킹·큰 스피너+워드마크·`sr-only`)(`eee5776`). 패턴 분리=스켈레톤(콘텐츠)/스피너(전환). 🐛 주석 `*/` 조기종료·`next dev` 중 `build`로 `.next` 손상 2건 겪고 복구(오답노트 기록). tsc/lint/build 0.
 
