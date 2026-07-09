@@ -18,6 +18,9 @@
 
 ## 📅 타임라인 — 2026-06 · [상세 →](dev-log/2026-06.md)
 
+**26일차 (07-09)**
+- **어드민/로그인 로딩 UX (스켈레톤 + 전환 오버레이)** — CSR 로딩 덜컹거림 정리. shimmer 스켈레톤(`globals.css .skeleton`·`Skeleton`·`DashboardSkeleton` 레이아웃 매칭·admin 게이트/대시보드)로 raw "불러오는 중…" 교체(`af965c1`) + 로그인 성공 후 `fixed z-50` 전환 오버레이(헤더 flip/네비 공백 마스킹·큰 스피너+워드마크·`sr-only`)(`eee5776`). 패턴 분리=스켈레톤(콘텐츠)/스피너(전환). 🐛 주석 `*/` 조기종료·`next dev` 중 `build`로 `.next` 손상 2건 겪고 복구(오답노트 기록). tsc/lint/build 0.
+
 **25일차 (07-07)**
 - **어드민 감사 로그 (AOP @Auditable/AuditAspect)** — VM 보류 중 새 기능. 5영역 병렬 코드스캔으로 갭 매핑→후보 4개→사용자 "감사 로그(AOP)" 선택. 새 `audit` 도메인: AuditLog(**V37**)·`@Auditable`+**AuditAspect(@Around)**(정상 SUCCESS/예외 FAILURE 자동기록·대상ID SpEL `#id`/`#result.body.data.id`·행위자 SecurityContext·detail HTTP·**REQUIRES_NEW**+best-effort)·조회 `GET /api/audit-logs`(ADMIN·QueryDSL 필터·행위자 이메일 enrich). 6도메인 **23개** 어드민 변경에 부착. FE `/admin/audit`(필터·페이지)+NAV. **431 tests**(+2 AuditAspectTest)·FE tsc/lint/build 0. 머지 `feature/admin-audit-log`→dev `--no-ff`(`01b8e86`). ⚠️V37 MySQL 검증=Docker 복귀 후. 다음=브라우저 확인·MySQL 스모크·배포 VM·다른 기능.
 
