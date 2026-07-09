@@ -8,6 +8,8 @@ import { PageResponse, Wishlist } from "@/lib/types";
 import { useAuth } from "@/lib/auth";
 import { useWishlist } from "@/lib/wishlist";
 import ProductThumb from "@/components/ui/ProductThumb";
+import Skeleton from "@/components/ui/Skeleton";
+import ProductGridSkeleton from "@/components/ui/ProductGridSkeleton";
 import Badge from "@/components/ui/Badge";
 import { productImageSrc } from "@/lib/productImage";
 
@@ -50,7 +52,15 @@ export default function WishlistPage() {
   };
 
   if (authLoading || (user && loading))
-    return <p className="p-12 text-center text-muted">불러오는 중…</p>;
+    return (
+      <main className="mx-auto max-w-6xl px-6 py-12">
+        <header className="mb-8">
+          <Skeleton className="h-3 w-20" />
+          <Skeleton className="mt-2 h-9 w-40" />
+        </header>
+        <ProductGridSkeleton count={6} />
+      </main>
+    );
   if (!user) return null;
 
   return (

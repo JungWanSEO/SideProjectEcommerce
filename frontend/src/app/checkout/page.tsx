@@ -7,6 +7,7 @@ import { apiGet, apiPost } from "@/lib/api";
 import { Cart, Address, Order, CouponPreview, MemberCoupon } from "@/lib/types";
 import { useAuth } from "@/lib/auth";
 import Badge from "@/components/ui/Badge";
+import Skeleton from "@/components/ui/Skeleton";
 import { formatDiscountOf } from "@/lib/coupon";
 
 /**
@@ -108,7 +109,81 @@ export default function CheckoutPage() {
   };
 
   if (authLoading || (user && loading))
-    return <p className="p-12 text-center text-muted">불러오는 중…</p>;
+    return (
+      <main className="mx-auto max-w-3xl px-6 py-12">
+        {/* 제목 */}
+        <Skeleton className="mb-8 h-9 w-32" />
+
+        {/* 배송지 */}
+        <section className="mb-8">
+          <div className="mb-3 flex items-center justify-between">
+            <Skeleton className="h-6 w-20" />
+            <Skeleton className="h-4 w-20" />
+          </div>
+          <ul className="flex flex-col gap-2">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <li key={i}>
+                <div className="flex items-start gap-3 rounded-2xl border border-line bg-paper p-4">
+                  <Skeleton className="mt-1 h-4 w-4 rounded-full" />
+                  <div className="min-w-0 flex-1">
+                    <Skeleton className="h-5 w-28" />
+                    <Skeleton className="mt-2 h-4 w-24" />
+                    <Skeleton className="mt-2 h-4 w-64 max-w-full" />
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <Skeleton className="mt-3 h-11 w-full rounded-xl" />
+        </section>
+
+        {/* 주문 상품 */}
+        <section className="mb-8">
+          <Skeleton className="mb-3 h-6 w-24" />
+          <ul className="overflow-hidden rounded-2xl border border-line bg-paper">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <li
+                key={i}
+                className={`flex items-center justify-between px-5 py-4 ${i > 0 ? "border-t border-line" : ""}`}
+              >
+                <div>
+                  <Skeleton className="h-5 w-40" />
+                  <Skeleton className="mt-2 h-4 w-28" />
+                </div>
+                <Skeleton className="h-5 w-20" />
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        {/* 쿠폰 */}
+        <section className="mb-6">
+          <Skeleton className="mb-3 h-6 w-16" />
+          <div className="rounded-2xl border border-line bg-paper p-4">
+            <Skeleton className="mb-2 h-11 w-full rounded-xl" />
+            <div className="flex gap-2">
+              <Skeleton className="h-11 flex-1 rounded-xl" />
+              <Skeleton className="h-11 w-20 rounded-full" />
+            </div>
+          </div>
+        </section>
+
+        {/* 결제 금액 */}
+        <div className="border-t border-line pt-5">
+          <div className="flex justify-between">
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-4 w-20" />
+          </div>
+          <div className="mt-3 flex items-center justify-between border-t border-line pt-3">
+            <Skeleton className="h-5 w-28" />
+            <Skeleton className="h-8 w-32" />
+          </div>
+        </div>
+
+        {/* 주문하고 결제하기 버튼 */}
+        <Skeleton className="mt-6 h-[3.25rem] w-full rounded-full" />
+      </main>
+    );
   if (!user) return null;
 
   const items = cart?.items ?? [];

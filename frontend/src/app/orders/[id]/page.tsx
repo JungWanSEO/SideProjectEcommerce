@@ -8,6 +8,7 @@ import { Order } from "@/lib/types";
 import { ORDER_STATUS_LABEL, ORDER_STATUS_BADGE } from "@/lib/orderStatus";
 import { useAuth } from "@/lib/auth";
 import { buttonClass } from "@/components/ui/Button";
+import Skeleton from "@/components/ui/Skeleton";
 
 /** 주문 상세 (/orders/[id]). 본인 주문만(서버가 403으로 차단). PENDING=결제/취소, PAID=취소(환불). */
 export default function OrderDetailPage() {
@@ -64,7 +65,51 @@ export default function OrderDetailPage() {
     }
   };
 
-  if (authLoading || (user && loading)) return <p className="p-12 text-center text-muted">불러오는 중…</p>;
+  if (authLoading || (user && loading))
+    return (
+      <main className="mx-auto max-w-3xl px-6 py-10">
+        <Skeleton className="h-4 w-20" />
+
+        <div className="mt-5 flex items-center justify-between">
+          <Skeleton className="h-9 w-40" />
+          <Skeleton className="h-6 w-16 rounded-full" />
+        </div>
+        <Skeleton className="mt-1 h-4 w-36" />
+
+        <ul className="mt-6 overflow-hidden rounded-2xl border border-line bg-paper">
+          {Array.from({ length: 2 }).map((_, i) => (
+            <li
+              key={i}
+              className={`flex items-center justify-between px-5 py-4 ${i > 0 ? "border-t border-line" : ""}`}
+            >
+              <div>
+                <Skeleton className="h-6 w-40" />
+                <Skeleton className="mt-1.5 h-4 w-48" />
+              </div>
+              <Skeleton className="h-5 w-20" />
+            </li>
+          ))}
+        </ul>
+
+        <div className="mt-6 border-t border-line pt-5">
+          <div className="flex items-center justify-between">
+            <Skeleton className="h-4 w-16" />
+            <Skeleton className="h-8 w-32" />
+          </div>
+        </div>
+
+        <section className="mt-6 rounded-2xl border border-line bg-paper p-5">
+          <Skeleton className="mb-3 h-6 w-20" />
+          <Skeleton className="h-5 w-44" />
+          <Skeleton className="mt-2 h-4 w-56" />
+        </section>
+
+        <div className="mt-7 flex gap-3">
+          <Skeleton className="h-11 w-28 rounded-full" />
+          <Skeleton className="h-11 w-28 rounded-full" />
+        </div>
+      </main>
+    );
   if (!user) return null;
 
   if (error && !order) {

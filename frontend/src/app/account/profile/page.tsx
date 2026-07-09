@@ -4,6 +4,7 @@ import { useEffect, useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { apiGet, apiPut } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import Skeleton from "@/components/ui/Skeleton";
 
 /** 내 정보 응답(백엔드 MyProfileResponse) — provider·hasPassword로 로컬/소셜 UI 분기. */
 interface MyProfile {
@@ -91,7 +92,32 @@ export default function ProfilePage() {
   };
 
   if (loading || !profile) {
-    return <main className="mx-auto max-w-md px-6 py-12 text-muted">불러오는 중…</main>;
+    return (
+      <main className="mx-auto max-w-md px-6 py-12">
+        <Skeleton className="h-9 w-32" />
+        <section className="mt-8 rounded-2xl border border-line bg-paper/50 p-5">
+          <div className="flex flex-col gap-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="flex justify-between">
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-4 w-32" />
+              </div>
+            ))}
+          </div>
+        </section>
+        <div className="mt-6 flex flex-col gap-3">
+          <Skeleton className="h-4 w-16" />
+          <Skeleton className="h-12 w-full rounded-xl" />
+          <Skeleton className="h-12 w-full rounded-full" />
+        </div>
+        <div className="mt-8 flex flex-col gap-3 border-t border-line pt-8">
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-12 w-full rounded-xl" />
+          <Skeleton className="h-12 w-full rounded-xl" />
+          <Skeleton className="h-12 w-full rounded-full" />
+        </div>
+      </main>
+    );
   }
 
   return (

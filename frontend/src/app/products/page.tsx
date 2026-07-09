@@ -9,6 +9,7 @@ import Badge from "@/components/ui/Badge";
 import Stars from "@/components/ui/Stars";
 import Select from "@/components/ui/Select";
 import WishlistButton from "@/components/ui/WishlistButton";
+import ProductGridSkeleton from "@/components/ui/ProductGridSkeleton";
 import { productImageSrc } from "@/lib/productImage";
 
 /**
@@ -355,7 +356,7 @@ export default function ProductsPage() {
 
       {/* 결과 */}
       {loading ? (
-        <p className="py-12 text-center text-muted">불러오는 중…</p>
+        <ProductGridSkeleton count={8} />
       ) : error ? (
         <p className="py-12 text-center text-danger">에러: {error}</p>
       ) : products.length === 0 ? (

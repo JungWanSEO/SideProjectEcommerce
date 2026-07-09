@@ -7,6 +7,7 @@ import { Address } from "@/lib/types";
 import { useAuth } from "@/lib/auth";
 import Badge from "@/components/ui/Badge";
 import { buttonClass } from "@/components/ui/Button";
+import Skeleton from "@/components/ui/Skeleton";
 
 /**
  * 배송지 관리 페이지 (/account/addresses). 인증 필요(httpOnly 쿠키).
@@ -120,7 +121,31 @@ export default function AddressBookPage() {
   };
 
   if (authLoading || (user && loading))
-    return <p className="p-12 text-center text-muted">불러오는 중…</p>;
+    return (
+      <main className="mx-auto max-w-3xl px-6 py-12">
+        <div className="mb-8 flex items-center justify-between">
+          <Skeleton className="h-9 w-40" />
+          <Skeleton className="h-11 w-32 rounded-full" />
+        </div>
+        <ul className="flex flex-col gap-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <li key={i} className="rounded-2xl border border-line bg-paper p-5">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0 space-y-2">
+                  <Skeleton className="h-5 w-32" />
+                  <Skeleton className="h-4 w-28" />
+                  <Skeleton className="h-4 w-64" />
+                </div>
+                <div className="flex shrink-0 flex-col items-end gap-2">
+                  <Skeleton className="h-8 w-20 rounded-full" />
+                  <Skeleton className="h-4 w-20" />
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </main>
+    );
   if (!user) return null; // 리다이렉트 중
 
   const inputClass =

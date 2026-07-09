@@ -7,6 +7,7 @@ import { apiGet, apiPost } from "@/lib/api";
 import { Order, Payment } from "@/lib/types";
 import { PROVIDERS } from "@/lib/provider";
 import { useAuth } from "@/lib/auth";
+import Skeleton from "@/components/ui/Skeleton";
 
 // 모의 결제수단 (백엔드는 method 문자열만 받음 — 기본 MOCK_CARD)
 const METHODS = [
@@ -70,7 +71,59 @@ export default function PaymentPage() {
     }
   };
 
-  if (authLoading || (user && loading)) return <p className="p-12 text-center text-muted">불러오는 중…</p>;
+  if (authLoading || (user && loading))
+    return (
+      <main className="mx-auto max-w-md px-6 py-10">
+        <Skeleton className="h-4 w-20" />
+        <Skeleton className="mt-4 h-9 w-24" />
+        <Skeleton className="mt-2 h-4 w-20" />
+
+        <ul className="mt-6 overflow-hidden rounded-2xl border border-line bg-paper">
+          {Array.from({ length: 2 }).map((_, i) => (
+            <li
+              key={i}
+              className={`flex items-center justify-between px-4 py-3 ${i > 0 ? "border-t border-line" : ""}`}
+            >
+              <Skeleton className="h-4 w-44" />
+              <Skeleton className="h-4 w-20" />
+            </li>
+          ))}
+        </ul>
+
+        <div className="mt-4 border-t border-line pt-3">
+          <div className="flex items-center justify-between">
+            <Skeleton className="h-4 w-16" />
+            <Skeleton className="h-8 w-28" />
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-xl border border-line bg-paper px-4 py-3">
+          <Skeleton className="h-4 w-48" />
+          <Skeleton className="mt-1.5 h-4 w-56" />
+        </div>
+
+        <div className="mt-7">
+          <Skeleton className="mb-2 h-4 w-16" />
+          <div className="grid grid-cols-3 gap-2">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Skeleton key={i} className="h-10 rounded-full" />
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-6">
+          <Skeleton className="mb-2 h-4 w-16" />
+          <div className="flex flex-col gap-2">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <Skeleton key={i} className="h-12 rounded-xl" />
+            ))}
+          </div>
+        </div>
+
+        <Skeleton className="mt-7 h-14 w-full rounded-full" />
+        <Skeleton className="mx-auto mt-3 h-3 w-52" />
+      </main>
+    );
   if (!user) return null;
 
   if (error && !order) {
