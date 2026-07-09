@@ -18,6 +18,9 @@
 
 ## 📅 타임라인 — 2026-06 · [상세 →](dev-log/2026-06.md)
 
+**27일차 (07-10)**
+- **상품목록 크롤러빌리티/SEO** — 사용자 지적("동적페이지는 헤드리스로 스크롤해야 크롤됨")에서 출발. deep-research 4앵글(Google 공식·Splitt/Mueller·Vercel-MERJ)로 "Googlebot은 스크롤·버튼클릭 안 함 → CSR 무한스크롤 미색인, 반대로 커서 API는 무방비" 확인. **정석 처방**: `sitemap.ts`+`robots.ts`(상품 86 URL 동적 발견) + `/products` 서버 컴포넌트화(클라 PLP는 ProductsClient 분리) + `generateMetadata`(자기참조 canonical) + **`<noscript>` 크롤 폴백**(상품 `<a href>` + `?page=n` 페이지네이션, 각 페이지 실제 SSR). progressive enhancement라 JS 무한스크롤 그대로. tsc/lint 0. 머지 `feature/crawlable-plp-seo`→dev `69d3ce1`.
+
 **26일차 (07-09)**
 - **상품 그리드 무한스크롤 → Baymard 하이브리드**(리서치 기반) — deep-research(102 에이전트·Baymard·NN/g·web.dev, 23 confirmed)로 "무한스크롤 append 로딩 표현" 조사 → append=스켈레톤 카드 한 줄(role=status·CLS 안전) + 누적 60개 넘으면 "더 보기" 버튼 전환(클릭=CLS 예외·푸터접근·통제). 머지 `feature/products-loadmore-hybrid`→dev `8124d64`.
 - **스토어프론트 로딩 스켈레톤 전면 롤아웃** — 고객 화면 12개 페이지(상품목록/상세·장바구니·주문서·주문 목록/상세/결제·계정 4종·셀러 2종)의 raw "불러오는 중…"을 레이아웃 매칭 shimmer 스켈레톤으로 교체. 공용 `ProductGridSkeleton`. 12페이지 병렬 분석 워크플로→일괄 적용. tsc/lint 0. 머지 `feature/storefront-skeletons`→dev `5c1cbfe`.
