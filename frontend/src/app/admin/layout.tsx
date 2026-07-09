@@ -4,6 +4,7 @@ import { ReactNode, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
+import Skeleton from "@/components/ui/Skeleton";
 
 /**
  * 어드민(운영 콘솔) 레이아웃 — 스토어프론트와 분리된 사이드바 셸.
@@ -40,8 +41,8 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     }
   }, [loading, user, router]);
 
-  if (loading) return <div className="p-8 text-gray-500">불러오는 중…</div>;
-  if (!user || user.role !== "ADMIN") return null; // 리다이렉트 진행 중
+  // 인증 확인 중(CSR로 /me 조회) 또는 권한 없어 리다이렉트 중 — blank/raw 텍스트 대신 콘솔 형태 스켈레톤.
+  if (loading || !user || user.role !== "ADMIN") return <AdminGateSkeleton />;
 
   return (
     <div className="flex min-h-screen bg-gray-50">
@@ -81,6 +82,45 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           </div>
         </header>
         <main className="flex-1 p-6">{children}</main>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 인증 확인/리다이렉트 중 보여줄 콘솔 형태 스켈레톤 — 실제 어드민 셸(사이드바 + 상단바 + KPI 그리드)을
+ * 본떠 shimmer 골격을 깐다. 사이드바 라벨은 노출하지 않아(그냥 블록) 권한 확인 전 정보 누출이 없다.
+ */
+function AdminGateSkeleton() {
+  return (
+    <div className="flex min-h-screen bg-gray-50">
+      {/* 사이드바 자리 */}
+      <aside className="w-56 shrink-0 border-r border-gray-200 bg-white p-4">
+        <Skeleton className="h-6 w-28" />
+        <div className="mt-6 flex flex-col gap-2">
+          {Array.from({ length: 9 }).map((_, i) => (
+            <Skeleton key={i} className="h-8 w-full rounded" />
+          ))}
+        </div>
+      </aside>
+
+      {/* 본문 자리 */}
+      <div className="flex flex-1 flex-col">
+        <header className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-3">
+          <Skeleton className="h-4 w-20" />
+          <Skeleton className="h-4 w-40" />
+        </header>
+        <main className="flex-1 p-6">
+          <Skeleton className="h-7 w-40" />
+          <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-5">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="rounded-2xl border border-gray-200 bg-white p-5">
+                <Skeleton className="h-3 w-16" />
+                <Skeleton className="mt-3 h-7 w-24" />
+              </div>
+            ))}
+          </div>
+        </main>
       </div>
     </div>
   );
