@@ -7,6 +7,7 @@ import { apiGet } from "@/lib/api";
 import { OrderSummary, PageResponse } from "@/lib/types";
 import { ORDER_STATUS_LABEL, ORDER_STATUS_BADGE } from "@/lib/orderStatus";
 import { useAuth } from "@/lib/auth";
+import Skeleton from "@/components/ui/Skeleton";
 
 /** 내 주문 목록 (/orders). 인증 필요. 목록은 요약(대표상품명+항목수). */
 export default function OrdersPage() {
@@ -29,7 +30,24 @@ export default function OrdersPage() {
       .finally(() => setLoading(false));
   }, [user]);
 
-  if (authLoading || (user && loading)) return <p className="p-12 text-center text-muted">불러오는 중…</p>;
+  if (authLoading || (user && loading))
+    return (
+      <main className="mx-auto max-w-3xl px-6 py-12">
+        <Skeleton className="mb-8 h-9 w-40" />
+        <ul className="flex flex-col gap-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <li key={i} className="rounded-2xl border border-line bg-paper p-5">
+              <div className="flex items-center justify-between">
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-5 w-16 rounded-full" />
+              </div>
+              <Skeleton className="mt-2 h-6 w-48" />
+              <Skeleton className="mt-2 h-5 w-24" />
+            </li>
+          ))}
+        </ul>
+      </main>
+    );
   if (!user) return null;
   if (error) return <p className="p-12 text-center text-danger">에러: {error}</p>;
 

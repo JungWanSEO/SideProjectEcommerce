@@ -3,6 +3,7 @@
 import { ReactNode, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
+import Skeleton from "@/components/ui/Skeleton";
 
 /**
  * 셀러 콘솔 레이아웃 — 스토어/어드민과 분리된 셸. (SELLER 전용)
@@ -23,8 +24,8 @@ export default function SellerLayout({ children }: { children: ReactNode }) {
     }
   }, [loading, user, router]);
 
-  if (loading) return <div className="p-8 text-gray-500">불러오는 중…</div>;
-  if (!user || user.role !== "SELLER") return null; // 리다이렉트 진행 중
+  // 인증 확인 중(CSR로 /me 조회) 또는 권한 없어 리다이렉트 중 — blank/raw 텍스트 대신 콘솔 형태 스켈레톤.
+  if (loading || !user || user.role !== "SELLER") return <SellerGateSkeleton />;
 
   return (
     <div className="flex min-h-screen bg-gray-50">
@@ -48,6 +49,44 @@ export default function SellerLayout({ children }: { children: ReactNode }) {
           </div>
         </header>
         <main className="flex-1 p-6">{children}</main>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 인증 확인/리다이렉트 중 보여줄 콘솔 형태 스켈레톤 — 실제 셀러 셸(사이드바 + 상단바 + 콘텐츠)을
+ * 본떠 shimmer 골격을 깐다. 사이드바 라벨은 노출하지 않아 권한 확인 전 정보 누출이 없다.
+ */
+function SellerGateSkeleton() {
+  return (
+    <div className="flex min-h-screen bg-gray-50">
+      {/* 사이드바 자리 */}
+      <aside className="w-56 shrink-0 border-r border-gray-200 bg-white p-4">
+        <Skeleton className="h-6 w-28" />
+        <div className="mt-6 flex flex-col gap-2">
+          <Skeleton className="h-8 w-full rounded" />
+        </div>
+      </aside>
+
+      {/* 본문 자리 */}
+      <div className="flex flex-1 flex-col">
+        <header className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-3">
+          <Skeleton className="h-4 w-20" />
+          <Skeleton className="h-4 w-40" />
+        </header>
+        <main className="flex-1 p-6">
+          <Skeleton className="h-6 w-48" />
+          <Skeleton className="mt-2 h-4 w-72" />
+          <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-5">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="rounded-2xl border border-gray-200 bg-white p-5">
+                <Skeleton className="h-3 w-16" />
+                <Skeleton className="mt-3 h-7 w-24" />
+              </div>
+            ))}
+          </div>
+        </main>
       </div>
     </div>
   );

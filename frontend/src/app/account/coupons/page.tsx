@@ -6,6 +6,7 @@ import { apiGet, apiPost } from "@/lib/api";
 import { ClaimableCoupon, MemberCoupon } from "@/lib/types";
 import { useAuth } from "@/lib/auth";
 import Badge from "@/components/ui/Badge";
+import Skeleton from "@/components/ui/Skeleton";
 import { formatDiscountOf } from "@/lib/coupon";
 
 /**
@@ -64,7 +65,30 @@ export default function CouponWalletPage() {
   };
 
   if (authLoading || (user && loading))
-    return <p className="p-12 text-center text-muted">불러오는 중…</p>;
+    return (
+      <main className="mx-auto max-w-3xl px-6 py-12">
+        <Skeleton className="mb-8 h-9 w-32" />
+        {Array.from({ length: 2 }).map((_, s) => (
+          <section key={s} className="mb-10">
+            <Skeleton className="mb-3 h-6 w-40" />
+            <ul className="flex flex-col gap-3">
+              {Array.from({ length: 2 }).map((_, i) => (
+                <li key={i} className="rounded-2xl border border-line bg-paper p-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-2">
+                      <Skeleton className="h-6 w-40" />
+                      <Skeleton className="h-4 w-52" />
+                      <Skeleton className="h-3 w-64" />
+                    </div>
+                    <Skeleton className="h-7 w-16 rounded-full" />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </main>
+    );
   if (!user) return null;
 
   return (

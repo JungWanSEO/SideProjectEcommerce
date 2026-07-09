@@ -7,6 +7,7 @@ import { apiGet, apiDelete, apiPut } from "@/lib/api";
 import { Cart, CartItem } from "@/lib/types";
 import { useAuth } from "@/lib/auth";
 import Badge from "@/components/ui/Badge";
+import Skeleton from "@/components/ui/Skeleton";
 
 /**
  * 장바구니 페이지 (/cart). 인증 필요(httpOnly 쿠키 자동 전송).
@@ -59,7 +60,42 @@ export default function CartPage() {
     }
   };
 
-  if (authLoading || (user && loading)) return <p className="p-12 text-center text-muted">불러오는 중…</p>;
+  if (authLoading || (user && loading))
+    return (
+      <main className="mx-auto max-w-3xl px-6 py-12">
+        {/* 제목 */}
+        <Skeleton className="mb-8 h-9 w-40" />
+
+        {/* 항목 목록 */}
+        <ul className="overflow-hidden rounded-2xl border border-line bg-paper">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <li
+              key={i}
+              className={`flex items-center justify-between gap-4 px-5 py-4 ${i > 0 ? "border-t border-line" : ""}`}
+            >
+              <div>
+                <Skeleton className="h-5 w-40" />
+                <Skeleton className="mt-2 h-4 w-24" />
+              </div>
+              <div className="flex items-center gap-4">
+                <Skeleton className="h-9 w-28 rounded-full" />
+                <Skeleton className="h-5 w-20" />
+                <Skeleton className="h-4 w-8" />
+              </div>
+            </li>
+          ))}
+        </ul>
+
+        {/* 요약 행 */}
+        <div className="mt-6 flex items-center justify-between">
+          <Skeleton className="h-5 w-16" />
+          <Skeleton className="h-8 w-28" />
+        </div>
+
+        {/* 주문하기 버튼 */}
+        <Skeleton className="mt-6 h-[3.25rem] w-full rounded-full" />
+      </main>
+    );
   if (!user) return null; // 리다이렉트 중
 
   const items = cart?.items ?? [];

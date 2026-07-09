@@ -6,6 +6,7 @@ import { PageResponse, Payout, Seller, SellerSettlementSummary, Settlement, Sett
 import { SETTLEMENT_STATUS_BADGE, SETTLEMENT_STATUS_LABEL } from "@/lib/settlementStatus";
 import { PROVIDER_BADGE, formatRate, providerLabel } from "@/lib/provider";
 import StatCard from "@/components/admin/StatCard";
+import Skeleton from "@/components/ui/Skeleton";
 
 /**
  * 셀러 콘솔 (/seller, SELLER 전용) — 본인 셀러의 정산서만 조회(읽기 전용).
@@ -106,11 +107,37 @@ export default function SellerConsolePage() {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {loading ? (
-              <tr>
-                <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
-                  불러오는 중…
-                </td>
-              </tr>
+              Array.from({ length: 5 }).map((_, i) => (
+                <tr key={i}>
+                  <td className="px-4 py-3">
+                    <Skeleton className="h-4 w-8" />
+                  </td>
+                  <td className="px-4 py-3">
+                    <Skeleton className="h-5 w-16 rounded" />
+                  </td>
+                  <td className="px-4 py-3">
+                    <Skeleton className="ml-auto h-4 w-16" />
+                  </td>
+                  <td className="px-4 py-3">
+                    <Skeleton className="ml-auto h-4 w-14" />
+                  </td>
+                  <td className="px-4 py-3">
+                    <Skeleton className="ml-auto h-4 w-14" />
+                  </td>
+                  <td className="px-4 py-3">
+                    <Skeleton className="ml-auto h-4 w-10" />
+                  </td>
+                  <td className="px-4 py-3">
+                    <Skeleton className="ml-auto h-4 w-16" />
+                  </td>
+                  <td className="px-4 py-3">
+                    <Skeleton className="h-5 w-14 rounded" />
+                  </td>
+                  <td className="px-4 py-3">
+                    <Skeleton className="h-4 w-20" />
+                  </td>
+                </tr>
+              ))
             ) : items.length === 0 ? (
               <tr>
                 <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
