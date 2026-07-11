@@ -18,6 +18,9 @@
 
 ## 📅 타임라인 — 2026-06 · [상세 →](dev-log/2026-06.md)
 
+**29일차 (07-12)**
+- **상품 피드 API 레이트리밋(스크래핑 억제)** — 커서 feed가 스크래핑 무방비라던 리서치 지적 반영. `/api/products/feed`에 IP당 60/분(기존 RateLimiter 포트·`feed:{IP}`), 초과 429. feed만(브라우저 전용)·offset은 SSR/sitemap이 써서 제외. **433 tests**(+2)·🟢 런타임 `/feed` 65회→200×60·429×5. 머지 `feature/feed-ratelimit`→dev `9d5bf6c`.
+
 **28일차 (07-11)**
 - **상품 상세 SSR화(메타데이터·JSON-LD·noscript)** — 크롤러빌리티 세트 마무리. `/products/[id]`를 서버 컴포넌트로(클라는 ProductDetailClient 분리): `generateMetadata`(상품별 title·canonical·OG) + **JSON-LD schema.org Product**(가격·재고·평점 리치스니펫) + `<noscript>` 코어 콘텐츠. 무JS 크롤러(Bing/AI)에도 상세 노출. curl 검증(title/canonical/JSON-LD price/noscript)·없는상품 404 graceful·tsc/lint 0. 머지 `feature/product-detail-ssr`→dev `cd1aa15`. 🎉 sitemap+페이지네이션+상세 SSR 완성.
 
