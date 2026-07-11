@@ -3,6 +3,7 @@ package com.commerce.api.product.controller;
 import com.commerce.api.audit.aspect.Auditable;
 import com.commerce.api.global.common.ApiResponse;
 import com.commerce.api.global.common.PageResponse;
+import com.commerce.api.global.ratelimit.RateLimiter;
 import com.commerce.api.product.dto.ProductCreateRequest;
 import com.commerce.api.product.dto.ProductCursorResponse;
 import com.commerce.api.product.dto.ProductImageCreateRequest;
@@ -14,6 +15,7 @@ import com.commerce.api.product.dto.ProductUpdateRequest;
 import com.commerce.api.product.service.ProductService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springdoc.core.annotations.ParameterObject;
@@ -45,7 +47,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class ProductController {
 
+    // 공개 피드의 IP당 분당 상한 — 사람의 무한스크롤엔 넉넉(20개×60=1200개/분), 대량 스크래핑엔 제동.
+    private static final int FEED_LIMIT_PER_MIN = 60;
+
     private final ProductService productService;
+    private final RateLimiter rateLimiter;
 
     @Operation(summary = "상품 등록", description = "상품명/가격(원)/재고/설명으로 상품을 등록한다. 등록 시 상태는 ON_SALE.")
     @Auditable(action = "PRODUCT_CREATE", targetType = "PRODUCT", targetId = "#result.body.data.id")
@@ -84,8 +90,20 @@ public class ProductController {
     @GetMapping("/feed")
     public ResponseEntity<ApiResponse<ProductCursorResponse>> feed(
             @RequestParam(required = false) Long cursor,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") int size,
+            HttpServletRequest request) {
+        // 스크래핑 억제: 커서 피드는 브라우저 무한스크롤 전용(SSR/sitemap은 offset API 사용)이라 IP 기준
+        //   레이트리밋이 SSR을 안 건드리고 대량 수집만 제동한다. 초과 시 429. (app.ratelimit.enabled 로 토글)
+        rateLimiter.check("feed:" + clientIp(request), FEED_LIMIT_PER_MIN);
         return ResponseEntity.ok(ApiResponse.success(productService.feed(cursor, size)));
+    }
+
+    /**
+     * 클라이언트 IP. 리버스 프록시(Caddy) 뒤에선 {@code server.forward-headers-strategy=framework} 가
+     * X-Forwarded-For를 반영해 실제 클라 IP가 된다(프록시 IP 아님). 로컬은 127.0.0.1.
+     */
+    private String clientIp(HttpServletRequest request) {
+        return request.getRemoteAddr();
     }
 
     @Operation(summary = "상품 단건 조회", description = "상품 ID로 상품 정보를 조회한다. 없으면 404.")
