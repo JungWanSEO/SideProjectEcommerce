@@ -18,6 +18,9 @@
 
 ## 📅 타임라인 — 2026-06 · [상세 →](dev-log/2026-06.md)
 
+**28일차 (07-11)**
+- **상품 상세 SSR화(메타데이터·JSON-LD·noscript)** — 크롤러빌리티 세트 마무리. `/products/[id]`를 서버 컴포넌트로(클라는 ProductDetailClient 분리): `generateMetadata`(상품별 title·canonical·OG) + **JSON-LD schema.org Product**(가격·재고·평점 리치스니펫) + `<noscript>` 코어 콘텐츠. 무JS 크롤러(Bing/AI)에도 상세 노출. curl 검증(title/canonical/JSON-LD price/noscript)·없는상품 404 graceful·tsc/lint 0. 머지 `feature/product-detail-ssr`→dev `cd1aa15`. 🎉 sitemap+페이지네이션+상세 SSR 완성.
+
 **27일차 (07-10)**
 - **상품목록 크롤러빌리티/SEO** — 사용자 지적("동적페이지는 헤드리스로 스크롤해야 크롤됨")에서 출발. deep-research 4앵글(Google 공식·Splitt/Mueller·Vercel-MERJ)로 "Googlebot은 스크롤·버튼클릭 안 함 → CSR 무한스크롤 미색인, 반대로 커서 API는 무방비" 확인. **정석 처방**: `sitemap.ts`+`robots.ts`(상품 86 URL 동적 발견) + `/products` 서버 컴포넌트화(클라 PLP는 ProductsClient 분리) + `generateMetadata`(자기참조 canonical) + **`<noscript>` 크롤 폴백**(상품 `<a href>` + `?page=n` 페이지네이션, 각 페이지 실제 SSR). progressive enhancement라 JS 무한스크롤 그대로. tsc/lint 0. 머지 `feature/crawlable-plp-seo`→dev `69d3ce1`.
 
