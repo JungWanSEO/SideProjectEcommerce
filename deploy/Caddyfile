@@ -12,6 +12,15 @@
 #   로그인 쿠키가 first-party가 되어 크로스도메인 쿠키 함정이 사라진다.
 
 api.example.com {
+	# ── 보안: actuator는 health만 외부 허용 ─────────────────────────────
+	# prometheus/metrics/caches는 JVM·Hikari·엔드포인트별 트래픽·캐시 통계를 흘린다(정찰 정보).
+	# 앱에서도 MANAGEMENT_ENDPOINTS=health로 노출을 줄이지만, 프록시에서 한 겹 더 막는다(심층방어).
+	@actuatorPrivate {
+		path /actuator/*
+		not path /actuator/health
+	}
+	respond @actuatorPrivate 404
+
 	# 백엔드 컨테이너(호스트 루프백 8080)로 프록시. Caddy가 X-Forwarded-Proto/Host/For 를 자동 부착.
 	reverse_proxy 127.0.0.1:8080
 

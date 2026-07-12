@@ -9,8 +9,9 @@ import { Brand, Category, PageResponse, Product, ProductStatus } from "@/lib/typ
  * 상품을 골라 사이즈 옵션(재고)·상태(판매중/품절/판매중지)·이미지(갤러리)를 관리한다.
  * 옵션/상태/이미지 API(/api/products/{id}/options·/status·/images)를 쓴다.
  *
- * 참고: 상품 목록은 공개 목록 API(GET /api/products)를 재사용하므로 판매중지(DISCONTINUED)는 보이지 않는다
- * (전용 어드민 상품 목록은 후속). 각 옵션 변경 응답이 갱신된 상품이라 그걸로 로컬 상태를 바꾼다.
+ * 목록은 **어드민 전용 API(GET /api/products/admin)** 를 쓴다 — 공개 목록은 판매중·품절만 노출하므로
+ * 그걸 재사용하면 판매중지로 바꾼 상품이 어드민에서도 사라져 되돌릴 수 없다(데이터 잠금). 상태 필터로
+ * 판매중지만 골라 다시 판매중으로 되돌릴 수 있다. 각 변경 응답이 갱신된 상품이라 그걸로 로컬 상태를 바꾼다.
  */
 const STATUS_BADGE: Record<ProductStatus, string> = {
   ON_SALE: "bg-green-100 text-green-700",
@@ -81,13 +82,19 @@ export default function AdminProductsPage() {
   const [bCategory, setBCategory] = useState("");
   const [bBrand, setBBrand] = useState("");
 
+  // 상태 필터(어드민은 판매중지 포함 전 상태를 본다)
+  const [statusFilter, setStatusFilter] = useState<ProductStatus | "ALL">("ALL");
+
   const load = useCallback(() => {
     setLoading(true);
-    apiGet<PageResponse<Product>>("/api/products?size=100")
+    const q = new URLSearchParams({ size: "100" });
+    if (statusFilter !== "ALL") q.set("status", statusFilter);
+    // 어드민 전용 목록: 판매중지 포함 전 상태 (공개 목록 API 재사용 금지 — 데이터 잠금 방지)
+    apiGet<PageResponse<Product>>(`/api/products/admin?${q.toString()}`)
       .then((page) => setProducts(page.content))
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [statusFilter]);
 
   useEffect(() => {
     load();
@@ -350,7 +357,30 @@ export default function AdminProductsPage() {
 
       <div className="grid gap-6 md:grid-cols-2">
         {/* 상품 목록 */}
-        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+        <div>
+          {/* 상태 필터 — 어드민은 판매중지 포함 전 상태를 본다(판매중지 골라 다시 판매중으로 되돌리기 가능) */}
+          <div className="mb-3 flex flex-wrap gap-2">
+            {([
+              ["ALL", "전체"],
+              ["ON_SALE", STATUS_LABEL.ON_SALE],
+              ["SOLD_OUT", STATUS_LABEL.SOLD_OUT],
+              ["DISCONTINUED", STATUS_LABEL.DISCONTINUED],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                onClick={() => setStatusFilter(value as ProductStatus | "ALL")}
+                className={`rounded-full border px-3 py-1 text-xs ${
+                  statusFilter === value
+                    ? "border-gray-900 bg-gray-900 text-white"
+                    : "border-gray-300 bg-white text-gray-600 hover:bg-gray-100"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
               <tr>
@@ -396,6 +426,7 @@ export default function AdminProductsPage() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
 
         {/* 선택 상품의 옵션 편집 */}

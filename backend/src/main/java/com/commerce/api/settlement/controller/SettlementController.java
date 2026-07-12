@@ -1,5 +1,6 @@
 package com.commerce.api.settlement.controller;
 
+import com.commerce.api.audit.aspect.Auditable;
 import com.commerce.api.global.common.ApiResponse;
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.settlement.dto.SellerSettlementSummary;
@@ -46,6 +47,7 @@ public class SettlementController {
     @Operation(summary = "정산 배치 실행",
             description = "PAID 결제 중 아직 정산되지 않은 건을 모아 정산 항목(SCHEDULED)을 만든다. "
                     + "수수료를 떼고 실입금(매출)을 계산한다. 여러 번 실행해도 중복 생성되지 않는다(멱등).")
+    @Auditable(action = "SETTLEMENT_RUN", targetType = "SETTLEMENT")
     @PostMapping("/run")
     public ResponseEntity<ApiResponse<SettlementRunResponse>> run() {
         SettlementRunResponse response = settlementService.run();
@@ -72,6 +74,7 @@ public class SettlementController {
 
     @Operation(summary = "환불 상계(역분개) 배치",
             description = "부분환불로 취소된 항목의 정산을 음수(역분개) 항목으로 상계한다. 멱등(여러 번 실행해도 안전).")
+    @Auditable(action = "SETTLEMENT_REVERSE_REFUNDS", targetType = "SETTLEMENT")
     @PostMapping("/reverse-refunds")
     public ResponseEntity<ApiResponse<SettlementReverseResponse>> reverseRefunds() {
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -92,6 +95,7 @@ public class SettlementController {
 
     @Operation(summary = "입금 확인",
             description = "정산 항목을 입금 완료(PAID_OUT)로 표시한다. SCHEDULED 상태에서만 가능(아니면 409), 없으면 404.")
+    @Auditable(action = "SETTLEMENT_MARK_PAID", targetType = "SETTLEMENT", targetId = "#id")
     @PostMapping("/{id}/payout")
     public ResponseEntity<ApiResponse<SettlementResponse>> payout(@PathVariable Long id) {
         SettlementResponse response = settlementService.payout(id);

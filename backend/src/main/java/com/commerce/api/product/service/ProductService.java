@@ -57,11 +57,33 @@ public class ProductService {
 
     /**
      * 공개 상품 목록 조회 / 검색·필터 (페이지).
-     * 정책(VISIBLE_STATUSES)은 서비스가 쥐고 쿼리 조립은 리포지토리에 위임. 결과의 카테고리·브랜드
-     * 이름은 id를 모아 한 번에 조회해 채운다(N+1 회피 — Cart enrich와 동일 발상).
+     * 정책(VISIBLE_STATUSES)은 서비스가 쥐고 쿼리 조립은 리포지토리에 위임.
      */
     public PageResponse<ProductResponse> getProducts(ProductSearchCondition condition, Pageable pageable) {
-        Page<Product> page = productRepository.search(VISIBLE_STATUSES, condition, pageable);
+        return searchPage(VISIBLE_STATUSES, condition, pageable);
+    }
+
+    /**
+     * <b>어드민(백오피스) 상품 목록</b> — 판매중지(DISCONTINUED)를 포함한 <b>전 상태</b>를 본다.
+     *
+     * <p>운영 콘솔이 공개 목록 API를 재사용하면 상품을 판매중지로 바꾸는 순간 어드민 화면에서도 사라져
+     * <b>되돌릴 수 없는 데이터 잠금</b>이 생긴다 → 공개 뷰(가시 상태만)와 백오피스 뷰(전 상태)의 경계를 분리한다.
+     *
+     * @param status 특정 상태만 보고 싶을 때(선택). null이면 전 상태.
+     */
+    public PageResponse<ProductResponse> getProductsForAdmin(
+            ProductStatus status, ProductSearchCondition condition, Pageable pageable) {
+        List<ProductStatus> statuses = (status != null) ? List.of(status) : List.of(ProductStatus.values());
+        return searchPage(statuses, condition, pageable);
+    }
+
+    /**
+     * 상태 집합 + 검색 조건으로 페이지 조회 후 enrich.
+     * 카테고리·브랜드 이름은 id를 모아 한 번에 조회해 채운다(N+1 회피 — Cart enrich와 동일 발상).
+     */
+    private PageResponse<ProductResponse> searchPage(
+            List<ProductStatus> statuses, ProductSearchCondition condition, Pageable pageable) {
+        Page<Product> page = productRepository.search(statuses, condition, pageable);
 
         Map<Long, String> categoryNames = categoryNameMap(page.getContent());
         Map<Long, String> brandNames = brandNameMap(page.getContent());

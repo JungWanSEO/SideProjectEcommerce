@@ -1,5 +1,6 @@
 package com.commerce.api.settlement.controller;
 
+import com.commerce.api.audit.aspect.Auditable;
 import com.commerce.api.global.common.ApiResponse;
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.settlement.dto.PayoutCreateRequest;
@@ -41,6 +42,7 @@ public class PayoutController {
 
     @Operation(summary = "지급 묶음 생성(ADMIN)",
             description = "셀러의 SCHEDULED·미지급 정산 항목을 정산일 기간으로 묶는다. 대상 없으면 400.")
+    @Auditable(action = "PAYOUT_CREATE", targetType = "PAYOUT", targetId = "#result.body.data.id")
     @PostMapping
     public ResponseEntity<ApiResponse<PayoutResponse>> create(@Valid @RequestBody PayoutCreateRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -48,6 +50,8 @@ public class PayoutController {
     }
 
     @Operation(summary = "지급 완료(ADMIN)", description = "묶음을 지급 완료로 처리하고 묶인 항목을 PAID_OUT으로. 이미 지급이면 409.")
+    // 💸 실제 지급 처리 — "누가 이 지급을 실행했는가"가 반드시 남아야 하는 지점.
+    @Auditable(action = "PAYOUT_PAY", targetType = "PAYOUT", targetId = "#id")
     @PostMapping("/{id}/pay")
     public ResponseEntity<ApiResponse<PayoutResponse>> pay(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.success("지급 완료로 처리했습니다.", payoutService.pay(id)));

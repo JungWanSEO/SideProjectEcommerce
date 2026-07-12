@@ -88,10 +88,21 @@ jwt:
 # Actuator: 운영 모니터링 엔드포인트. metrics/caches/prometheus 노출.
 #   예: /actuator/metrics/cache.gets?tag=cache:productDetail · /actuator/caches · /actuator/prometheus(Prometheus 스크레이프)
 management:
+  health:
+    # ⚠️ RabbitMQ·Redis는 opt-in(기본 미사용)인데도 헬스 인디케이터가 "연결 불가 → DOWN"을 집계해
+    #   /actuator/health 가 503이 된다. 그러면 배포에서 UptimeRobot 핑·프록시 헬스체크가 항상 실패로 오탐한다
+    #   (Oracle VM 유휴회수 방지 핑이 무력화됨). 실제로 쓸 때만 env로 켠다.
+    rabbit:
+      enabled: ${MANAGEMENT_HEALTH_RABBIT:false}
+    redis:
+      enabled: ${MANAGEMENT_HEALTH_REDIS:false}
   endpoints:
     web:
       exposure:
-        include: health, info, metrics, caches, prometheus
+        # ⚠️ 공개 배포 시 노출 축소: prometheus/metrics/caches는 JVM·트래픽·캐시 통계를 그대로 흘린다(정찰 정보).
+        #   로컬/관측성 실습은 아래 기본값(전체)을, 운영은 env로 MANAGEMENT_ENDPOINTS=health 만 노출한다.
+        #   (노출 목록에서 빠지면 엔드포인트 자체가 404 → SecurityConfig permitAll 여부와 무관하게 안전.)
+        include: ${MANAGEMENT_ENDPOINTS:health,info,metrics,caches,prometheus}
   metrics:
     tags:
       application: commerce-api   # 모든 메트릭에 application 라벨 부여(여러 앱 구분)

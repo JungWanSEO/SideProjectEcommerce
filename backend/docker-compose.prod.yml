@@ -53,6 +53,8 @@ services:
       APP_COOKIE_SAME_SITE: ${APP_COOKIE_SAME_SITE:-None}
       # Caddy 리버스 프록시 뒤 → X-Forwarded-* 신뢰(OAuth2 redirect_uri가 외부 https 도메인으로 생성되게).
       SERVER_FORWARD_HEADERS_STRATEGY: ${SERVER_FORWARD_HEADERS_STRATEGY:-framework}
+      # 공개 배포 보안: actuator는 health만 노출(prometheus/metrics/caches는 JVM·트래픽·캐시 통계 유출).
+      MANAGEMENT_ENDPOINTS: ${MANAGEMENT_ENDPOINTS:-health}
       # 소셜 로그인 성공 후 돌아갈 FE 주소(소셜 켤 때 필수). 안 켜면 무시됨.
       APP_OAUTH2_REDIRECT: ${APP_OAUTH2_REDIRECT:-}
       # 데모 시드(빈 사이트 방지). 비우려면 .env.prod에서 지운다.

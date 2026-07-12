@@ -124,6 +124,8 @@ public class OrderController {
     @Operation(summary = "주문 취소",
             description = "주문을 취소한다. 결제 완료(PAID) 주문이면 차감했던 재고를 복원하고 결제를 환불(PG 취소)한다. "
                     + "본인 주문 또는 ADMIN만 가능(아니면 403). 이미 취소된 주문이면 409. 환불 실패 시 502(전체 롤백).")
+    // 💸 돈이 되돌아가는 지점(환불) — 본인/ADMIN 누가 실행했든 감사 이력을 남긴다.
+    @Auditable(action = "ORDER_CANCEL", targetType = "ORDER", targetId = "#id")
     @PostMapping("/{id}/cancel")
     public ResponseEntity<ApiResponse<OrderResponse>> cancel(@PathVariable Long id) {
         OrderResponse response = paymentService.cancelOrder(
@@ -134,6 +136,7 @@ public class OrderController {
     @Operation(summary = "주문 항목 부분 취소(환불)",
             description = "주문의 특정 항목(라인)만 취소·환불한다. PAID 주문이면 그 항목 재고 복원 + 금액만큼 부분 환불. "
                     + "본인 주문 또는 ADMIN만(아니면 403). 이미 취소된 항목이면 409.")
+    @Auditable(action = "ORDER_ITEM_CANCEL", targetType = "ORDER", targetId = "#orderId")
     @PostMapping("/{orderId}/items/{itemId}/cancel")
     public ResponseEntity<ApiResponse<OrderResponse>> cancelItem(
             @PathVariable Long orderId, @PathVariable Long itemId) {
