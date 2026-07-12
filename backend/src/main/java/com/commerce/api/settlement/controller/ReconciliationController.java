@@ -1,5 +1,6 @@
 package com.commerce.api.settlement.controller;
 
+import com.commerce.api.audit.aspect.Auditable;
 import com.commerce.api.global.common.ApiResponse;
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.settlement.dto.MismatchResolveRequest;
@@ -48,6 +49,7 @@ public class ReconciliationController {
                     + "from/to(정산일 기준, ISO yyyy-MM-dd, 둘 다 포함)를 주면 그 일자별 윈도우만 대조하고, "
                     + "비우면 전체를 본다. 이전 OPEN은 다시 스냅샷하되(윈도우면 그 거래키만) 이미 처리(RESOLVED/IGNORED)한 "
                     + "거래키는 다시 열지 않는다. 일치/새 불일치/이미 처리 건수를 요약 반환.")
+    @Auditable(action = "RECONCILIATION_RUN", targetType = "RECONCILIATION")
     @PostMapping("/run")
     public ResponseEntity<ApiResponse<ReconciliationResult>> run(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
@@ -75,6 +77,7 @@ public class ReconciliationController {
     @Operation(summary = "불일치 처리(resolve)",
             description = "불일치를 처리 완료(RESOLVED)로 표시한다. 처리 사유(note)는 선택. "
                     + "OPEN 상태에서만 가능(이미 종료면 409), 없으면 404. 처리된 거래키는 재대사에서 다시 열리지 않는다.")
+    @Auditable(action = "MISMATCH_RESOLVE", targetType = "MISMATCH", targetId = "#id")
     @PostMapping("/mismatches/{id}/resolve")
     public ResponseEntity<ApiResponse<MismatchResponse>> resolve(
             @PathVariable Long id,
@@ -86,6 +89,7 @@ public class ReconciliationController {
 
     @Operation(summary = "불일치 무시(ignore)",
             description = "불일치를 무시(IGNORED, 오탐·허용)로 표시한다. OPEN에서만 가능(아니면 409), 없으면 404.")
+    @Auditable(action = "MISMATCH_IGNORE", targetType = "MISMATCH", targetId = "#id")
     @PostMapping("/mismatches/{id}/ignore")
     public ResponseEntity<ApiResponse<MismatchResponse>> ignore(
             @PathVariable Long id,

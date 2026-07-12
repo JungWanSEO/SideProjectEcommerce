@@ -2,12 +2,14 @@ package com.commerce.api.global.exception;
 
 import com.commerce.api.global.common.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
  * 전역 예외 처리기.
@@ -50,6 +52,20 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
         return ResponseEntity.badRequest()
                 .body(ApiResponse.error("요청 파라미터 '" + e.getName() + "' 의 형식이 올바르지 않습니다."));
+    }
+
+    /**
+     * 존재하지 않는 경로 → 404 (500 아님).
+     *
+     * <p>Spring 6/Boot 3.2+ 는 매핑 없는 요청에 {@link NoResourceFoundException}("No static resource ...")을
+     * 던지는데, 이게 아래 catch-all(Exception)에 걸려 <b>500</b>으로 뭉개지고 있었다. 그러면
+     * ①클라이언트가 오탐 500을 받고 ②운영에선 5xx 알림룰(Prometheus)이 단순 오타 경로에도 울린다.
+     * (예: actuator 노출을 줄여 /actuator/prometheus 가 사라지면 404여야 하는데 500이 났다.)
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNoResource(NoResourceFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.error("요청하신 경로를 찾을 수 없습니다."));
     }
 
     /** 그 외 예상 못 한 예외 → 500 (원인을 반드시 로그로 남긴다) */

@@ -91,12 +91,17 @@ public class SecurityConfig {
                                 "/api/auth/login", "/api/auth/refresh", "/api/auth/logout").permitAll()
                         // /api/auth/me 는 인증 필요 → 아래 anyRequest().authenticated()로 처리
                         .requestMatchers(HttpMethod.POST, "/api/members").permitAll()
+                        // ⚠️ 순서 주의: 아래 공개 GET /api/products/** 보다 반드시 먼저 와야 한다.
+                        //   매처는 위에서부터 첫 매치가 이기므로, 뒤에 두면 어드민 목록이 공개로 뚫린다.
+                        .requestMatchers(HttpMethod.GET, "/api/products/admin").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/products/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/categories/**", "/api/brands/**").permitAll()
                         // 함께 산 상품(상품 통계, 개인정보 아님)은 상품 상세처럼 공개
                         .requestMatchers(HttpMethod.GET, "/api/recommendations/products/*/together").permitAll()
-                        // actuator: health·prometheus만 공개(Prometheus 스크레이프용). 나머지 actuator는 인증 필요.
-                        // ⚠️ 운영에선 메트릭 노출을 막아야 한다 — 관리 포트 분리(management.server.port) + 네트워크 제한이 정석.
+                        // actuator: health·prometheus만 공개(로컬 Prometheus 스크레이프용). 나머지 actuator는 인증 필요.
+                        // 🔒 공개 배포에선 이 permitAll에 기대지 않는다 — 운영은 MANAGEMENT_ENDPOINTS=health 로
+                        //   노출 목록 자체를 줄여 prometheus/metrics/caches를 404로 만들고(application.yml),
+                        //   Caddy에서 /actuator/* 중 health 외 전부 차단한다(deploy/Caddyfile, 심층방어).
                         .requestMatchers("/swagger-ui/**", "/swagger-ui.html",
                                 "/v3/api-docs/**", "/actuator/health", "/actuator/prometheus").permitAll()
                         // 소셜 로그인 시작(/oauth2/authorization/**)·콜백(/login/oauth2/code/**)은 인증 전 접근 필요

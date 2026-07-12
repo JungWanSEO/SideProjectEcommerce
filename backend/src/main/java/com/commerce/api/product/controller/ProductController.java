@@ -12,6 +12,7 @@ import com.commerce.api.product.dto.ProductResponse;
 import com.commerce.api.product.dto.ProductSearchCondition;
 import com.commerce.api.product.dto.ProductStatusUpdateRequest;
 import com.commerce.api.product.dto.ProductUpdateRequest;
+import com.commerce.api.product.entity.ProductStatus;
 import com.commerce.api.product.service.ProductService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -81,6 +82,22 @@ public class ProductController {
             Pageable pageable) {
         PageResponse<ProductResponse> response = productService.getProducts(condition, pageable);
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @Operation(summary = "상품 목록 조회 (ADMIN · 백오피스)",
+            description = "운영자용 상품 목록 — **판매중지(DISCONTINUED) 포함 전 상태**를 본다. "
+                    + "공개 목록(GET /api/products)은 판매중·품절만 노출하므로, 그걸 재사용하면 판매중지로 바꾼 "
+                    + "상품이 어드민에서도 사라져 되돌릴 수 없다(데이터 잠금). status로 특정 상태만 필터 가능(비우면 전체). "
+                    + "검색/정렬 파라미터는 공개 목록과 동일.")
+    @GetMapping("/admin")
+    public ResponseEntity<ApiResponse<PageResponse<ProductResponse>>> getProductsForAdmin(
+            @RequestParam(required = false) ProductStatus status,
+            @ParameterObject ProductSearchCondition condition,
+            @ParameterObject
+            @PageableDefault(size = 20, sort = "createdAt", direction = Direction.DESC)
+            Pageable pageable) {
+        return ResponseEntity.ok(
+                ApiResponse.success(productService.getProductsForAdmin(status, condition, pageable)));
     }
 
     @Operation(summary = "상품 피드 (커서 기반 무한 스크롤)",
