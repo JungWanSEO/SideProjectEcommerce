@@ -18,6 +18,9 @@
 
 ## 📅 타임라인 — 2026-06 · [상세 →](dev-log/2026-06.md)
 
+**30일차 (07-12)**
+- **배포 전 필수 3종(전수 스캔 → 차단급 결함)** — 현재 코드 5영역 스캔(44후보) 후 배포 차단급만 선처리. ①**판매중지 데이터잠금 실버그**(어드민이 공개 목록 API 재사용 → DISCONTINUED 복귀 불가): `GET /api/products/admin`(전 상태·status 필터)+FE 필터칩, ⚠️매처 순서 함정 ②**Actuator 공개 노출**(prometheus permitAll → 배포 시 JVM/트래픽 통계 유출): `MANAGEMENT_ENDPOINTS` env(운영=health)+Caddy 404, 파생=rabbit/redis 헬스가 `/actuator/health` 503로 만들어 **UptimeRobot 오탐**→200 UP ③**돈흐름 감사 사각지대**: @Auditable 10곳(정산·**PAYOUT_PAY**·대사·환불). 파생=`NoResourceFoundException`→404(catch-all 500 = 5xx 알림 오탐). **433 tests**·🟢런타임 PASS. 머지 `feature/pre-deploy-hardening`→dev `a6962cb`. 백로그 READY 8건 재충전.
+
 **29일차 (07-12)**
 - **상품 피드 API 레이트리밋(스크래핑 억제)** — 커서 feed가 스크래핑 무방비라던 리서치 지적 반영. `/api/products/feed`에 IP당 60/분(기존 RateLimiter 포트·`feed:{IP}`), 초과 429. feed만(브라우저 전용)·offset은 SSR/sitemap이 써서 제외. **433 tests**(+2)·🟢 런타임 `/feed` 65회→200×60·429×5. 머지 `feature/feed-ratelimit`→dev `9d5bf6c`.
 
