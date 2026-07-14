@@ -18,6 +18,9 @@
 
 ## 📅 타임라인 — 2026-06 · [상세 →](dev-log/2026-06.md)
 
+**31일차 (07-14)**
+- **최근 본 상품 (조회 로그 → 읽는 화면)** — 백로그 READY 1번(자율진행). `activity_log`가 쌓기만 하고 읽는 화면이 없던 갭. `GET /api/activity/recently-viewed`: 로그가 **append-only**라 그대로 정렬하면 한 상품이 레일을 도배 → **`group by product_id` + `order by max(created_at) desc`**로 상품별 1건(마지막 조회순), 판매중지·삭제 상품은 후보 3배 조회 후 제외, 폴백 없음(빈 목록=섹션 숨김). **마이그0**(V29 인덱스 그대로). FE `RecentlyViewedSection`(홈·상세, 상세는 현재 상품 exclude) + 카드 그리드 3중 복붙 해소용 **공용 `ProductRail` 추출**. **결정=엔드포인트를 product 아닌 activity 도메인에**(역방향 의존 회피 + `/api/products/**` 공개 매처 순서 함정 원천 차단). **439 tests**(+6, 그룹핑은 @DataJpaTest 슬라이스로 증명)·FE 0. 머지 `feature/recently-viewed`→dev `d147793`. ⚠️MySQL 스모크=Docker 복귀 후.
+
 **30일차 (07-12)**
 - **배포 전 필수 3종(전수 스캔 → 차단급 결함)** — 현재 코드 5영역 스캔(44후보) 후 배포 차단급만 선처리. ①**판매중지 데이터잠금 실버그**(어드민이 공개 목록 API 재사용 → DISCONTINUED 복귀 불가): `GET /api/products/admin`(전 상태·status 필터)+FE 필터칩, ⚠️매처 순서 함정 ②**Actuator 공개 노출**(prometheus permitAll → 배포 시 JVM/트래픽 통계 유출): `MANAGEMENT_ENDPOINTS` env(운영=health)+Caddy 404, 파생=rabbit/redis 헬스가 `/actuator/health` 503로 만들어 **UptimeRobot 오탐**→200 UP ③**돈흐름 감사 사각지대**: @Auditable 10곳(정산·**PAYOUT_PAY**·대사·환불). 파생=`NoResourceFoundException`→404(catch-all 500 = 5xx 알림 오탐). **433 tests**·🟢런타임 PASS. 머지 `feature/pre-deploy-hardening`→dev `a6962cb`. 백로그 READY 8건 재충전.
 

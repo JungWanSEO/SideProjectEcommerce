@@ -6,7 +6,6 @@
 
 ## READY (결정 완료 · 외부 무관 · 자율 진행 가능 · 위에서부터)
 > 2026-07-12 전수 스캔(5영역·44후보, 파일/grep 근거)에서 추린 것. 위에서부터 처리.
-- **최근 본 상품** (S·BE+FE·마이그0) — `activity_log`(VIEW)는 이미 쌓는데 읽는 화면이 없다. `GET /api/products/recently-viewed`(회원·상품별 최신 1건 그룹핑) + 홈/상세 하단 레일(`RecommendedSection` 재사용).
 - **어드민 회원 관리** (M·BE+FE) — 회원 목록/검색 자체가 없어 셀러 온보딩·CS 진입점이 없다. `GET /api/members`(ADMIN·페이지·검색) + `/admin/members`. 권한 변경은 @Auditable로 이력.
 - **재고 임박·품절 리포트** (M·BE+FE) — 재고 임계치 이하 옵션 집계 API + 어드민 위젯(QueryDSL 집계). 품절 방치 = 커머스 손실 1순위인데 대시보드는 매출만 본다.
 - **감사로그 드릴다운 + CSV 내보내기** (M·BE+FE) — 감사는 "뽑아서 보관"이 용도인데 화면 조회만 가능. `GET /api/audit-logs/export`(text/csv·UTF-8 BOM·StreamingResponseBody) + 행 클릭 상세. 리포 전체에 CSV가 0개.
@@ -25,6 +24,7 @@
 - (비어 있음) — 외부 무관 후보 소진. 다음은 "함께(외부)" 학습 또는 새 기능 결정.
 
 ## DONE (완료 — 기록)
+- [x] (07-14) **최근 본 상품** — `feature/recently-viewed`→dev `d147793` (439 tests·FE 0·마이그0). `GET /api/activity/recently-viewed`(로그인·limit·exclude): append-only 로그를 **`group by product_id` + `order by max(created_at) desc`**로 상품별 1건(마지막 조회순), 판매중지·삭제 상품 제외(후보 3배 조회 후 컷), 폴백 없음. FE `RecentlyViewedSection`(홈·상세[현재 상품 exclude]) + **공용 `ProductRail` 추출**(추천·함께산상품 카드 복붙 해소). 결정=**activity 도메인에 배치**(product→activity 역방향 의존·공개 매처 순서 함정 회피). ⚠️MySQL 스모크=Docker 복귀 후.
 - [x] (07-12) **배포 전 필수 3종** — `feature/pre-deploy-hardening`→dev `a6962cb` (433 tests·FE 0·🟢런타임 PASS). ①**판매중지 데이터잠금 실버그**(어드민이 공개 API 재사용 → DISCONTINUED 복귀 불가): `GET /api/products/admin`(전 상태·status 필터)+FE 필터칩, ⚠️매처 순서(공개 GET 앞) ②**Actuator 공개 노출 차단**: `MANAGEMENT_ENDPOINTS` env(운영=health)+Caddy 404, 파생=rabbit/redis 헬스로 `/actuator/health` 503→**200 UP**(UptimeRobot 오탐 해결) ③**돈흐름 감사** @Auditable 10곳(정산·payout·대사·환불). 파생=`NoResourceFoundException`→404(catch-all 500·5xx 알림 오탐 제거).
 - [x] (07-07) **어드민 감사 로그 (AOP)** — `feature/admin-audit-log`→dev `01b8e86` (431 tests·FE 0). 새 `audit` 도메인: `@Auditable`+AuditAspect(@Around, 성공/실패 자동기록·SpEL 대상ID·REQUIRES_NEW·best-effort)·`GET /api/audit-logs`(ADMIN·QueryDSL 필터·행위자 enrich)·**V37**·6도메인 23개 어드민 변경 부착·FE `/admin/audit`. **🟢 V37 MySQL 런타임 스모크 PASS**(07-07: Flyway v37·validate 통과 / CATEGORY_CREATE SUCCESS·CATEGORY_UPDATE FAILURE 적재·SpEL 대상ID·REQUIRES_NEW 증명). 후속=상세 드릴다운·CSV 내보내기·failure 감사 알림.
 - [x] (06-29) **파라미터 타입 불일치 400** — `def391d`. 비숫자 PathVariable 500→400(MethodArgumentTypeMismatch 핸들러). 411 tests.
