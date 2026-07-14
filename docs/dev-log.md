@@ -19,6 +19,7 @@
 ## 📅 타임라인 — 2026-06 · [상세 →](dev-log/2026-06.md)
 
 **31일차 (07-14)**
+- **어드민 회원 관리 (목록·검색 + 권한 변경)** — 백로그 READY 2번. 회원 목록/검색이 없어 셀러 온보딩·CS 진입점이 없던 갭. `GET /api/members/admin`(ADMIN·QueryDSL: 키워드=이메일 OR 닉네임·role 필터·가입 최신순) + `PATCH /api/members/{id}/role`(**@Auditable MEMBER_ROLE_UPDATE**) + FE `/admin/members`(필터칩·검색·인라인 권한 변경). **가드 3종**: 자기 자신 변경 금지(409·**관리자 락아웃 방지**)·SELLER 지정 불가(400·sellerId 연결 필요 → 셀러 운영자 지정 API로)·SELLER 강등 시 sellerId 해제(유령 링크 방지). 파생=어드민 게이트 스켈레톤 NAV 하드코딩(9≠10) 자동화 + **감사 필터에서 누락돼 있던 돈흐름 대상**(SETTLEMENT·PAYOUT·RECONCILIATION·MISMATCH) 복구. **452 tests**(+13)·FE 0. 머지 `feature/admin-members`→dev `d15e28f`.
 - **최근 본 상품 (조회 로그 → 읽는 화면)** — 백로그 READY 1번(자율진행). `activity_log`가 쌓기만 하고 읽는 화면이 없던 갭. `GET /api/activity/recently-viewed`: 로그가 **append-only**라 그대로 정렬하면 한 상품이 레일을 도배 → **`group by product_id` + `order by max(created_at) desc`**로 상품별 1건(마지막 조회순), 판매중지·삭제 상품은 후보 3배 조회 후 제외, 폴백 없음(빈 목록=섹션 숨김). **마이그0**(V29 인덱스 그대로). FE `RecentlyViewedSection`(홈·상세, 상세는 현재 상품 exclude) + 카드 그리드 3중 복붙 해소용 **공용 `ProductRail` 추출**. **결정=엔드포인트를 product 아닌 activity 도메인에**(역방향 의존 회피 + `/api/products/**` 공개 매처 순서 함정 원천 차단). **439 tests**(+6, 그룹핑은 @DataJpaTest 슬라이스로 증명)·FE 0. 머지 `feature/recently-viewed`→dev `d147793`. ⚠️MySQL 스모크=Docker 복귀 후.
 
 **30일차 (07-12)**
