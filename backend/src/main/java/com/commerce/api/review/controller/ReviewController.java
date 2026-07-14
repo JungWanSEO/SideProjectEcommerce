@@ -5,6 +5,8 @@ import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.security.SecurityUtil;
 import com.commerce.api.review.dto.ReviewCreateRequest;
 import com.commerce.api.review.dto.ReviewResponse;
+import com.commerce.api.review.dto.ReviewSearchCondition;
+import com.commerce.api.review.dto.ReviewSummaryResponse;
 import com.commerce.api.review.service.ReviewService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -54,16 +56,27 @@ public class ReviewController {
                 .body(ApiResponse.success("리뷰가 등록되었습니다.", response));
     }
 
-    @Operation(summary = "상품 리뷰 목록 조회",
-            description = "특정 상품의 리뷰를 페이지로 조회한다(공개). 기본 정렬은 최신순(createdAt desc), 기본 크기 10.")
+    @Operation(summary = "상품 리뷰 목록 조회 (필터·정렬)",
+            description = "특정 상품의 리뷰를 페이지로 조회한다(공개). 선택 필터: rating(그 별점만 1~5)·"
+                    + "photoOnly(사진 있는 리뷰만). 정렬(sort): createdAt(최신), rating(평점 높은/낮은순). "
+                    + "기본 최신순(createdAt desc), 기본 크기 10. 예: ?rating=5&sort=createdAt,desc")
     @GetMapping("/api/products/{productId}/reviews")
     public ResponseEntity<ApiResponse<PageResponse<ReviewResponse>>> list(
             @PathVariable Long productId,
+            @ParameterObject ReviewSearchCondition condition,
             @ParameterObject
             @PageableDefault(size = 10, sort = "createdAt", direction = Direction.DESC)
             Pageable pageable) {
-        PageResponse<ReviewResponse> response = reviewService.getReviews(productId, pageable);
+        PageResponse<ReviewResponse> response = reviewService.getReviews(productId, condition, pageable);
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @Operation(summary = "상품 리뷰 평점 요약 (분포)",
+            description = "별점 분포(5★~1★, 없는 별점은 0)·총 리뷰 수·평균을 반환한다(공개). "
+                    + "평균은 분포에서 계산해 분포와 항상 일치한다.")
+    @GetMapping("/api/products/{productId}/reviews/summary")
+    public ResponseEntity<ApiResponse<ReviewSummaryResponse>> summary(@PathVariable Long productId) {
+        return ResponseEntity.ok(ApiResponse.success(reviewService.getSummary(productId)));
     }
 
     @Operation(summary = "리뷰 수정",

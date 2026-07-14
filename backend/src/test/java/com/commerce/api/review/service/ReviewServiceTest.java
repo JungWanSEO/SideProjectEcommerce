@@ -17,8 +17,11 @@ import com.commerce.api.order.repository.OrderRepository;
 import com.commerce.api.product.repository.ProductRepository;
 import com.commerce.api.review.dto.ReviewCreateRequest;
 import com.commerce.api.review.dto.ReviewResponse;
+import com.commerce.api.review.dto.ReviewSummaryResponse;
+import com.commerce.api.review.dto.ReviewSummaryResponse.RatingCount;
 import com.commerce.api.review.entity.Review;
 import com.commerce.api.review.repository.ReviewRepository;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -179,5 +182,49 @@ class ReviewServiceTest {
                 .extracting("status").isEqualTo(HttpStatus.FORBIDDEN);
         verify(reviewRepository, never()).delete(any());
         verify(productRepository, never()).decrementRating(any(), anyInt());
+    }
+
+    // === 평점 분포 요약 ===
+
+    @Test
+    @DisplayName("평점 요약 - 없는 별점은 0으로 채워 항상 5행(5★→1★), 평균은 분포에서 계산")
+    void getSummary_zeroFillsAndAverages() {
+        // 5★ 두 개, 2★ 한 개 → 총 3개, 합 12 → 평균 4.0
+        given(reviewRepository.countGroupByRating(PRODUCT_ID)).willReturn(List.of(
+                new Object[]{5, 2L},
+                new Object[]{2, 1L}));
+
+        ReviewSummaryResponse summary = reviewService.getSummary(PRODUCT_ID);
+
+        assertThat(summary.total()).isEqualTo(3);
+        assertThat(summary.average()).isEqualTo(4.0);   // (5+5+2)/3 = 4.0
+        assertThat(summary.distribution()).extracting(RatingCount::rating)
+                .containsExactly(5, 4, 3, 2, 1);        // 화면 막대가 늘 같은 모양이도록
+        assertThat(summary.distribution()).extracting(RatingCount::count)
+                .containsExactly(2L, 0L, 0L, 1L, 0L);
+    }
+
+    @Test
+    @DisplayName("평점 요약 - 리뷰가 없으면 total 0·평균 0(0으로 나누지 않는다)")
+    void getSummary_empty() {
+        given(reviewRepository.countGroupByRating(PRODUCT_ID)).willReturn(List.of());
+
+        ReviewSummaryResponse summary = reviewService.getSummary(PRODUCT_ID);
+
+        assertThat(summary.total()).isZero();
+        assertThat(summary.average()).isZero();
+        assertThat(summary.distribution()).extracting(RatingCount::count)
+                .containsExactly(0L, 0L, 0L, 0L, 0L);
+    }
+
+    @Test
+    @DisplayName("평점 요약 - 평균은 소수 1자리로 반올림(3.6666… → 3.7)")
+    void getSummary_roundsAverage() {
+        given(reviewRepository.countGroupByRating(PRODUCT_ID)).willReturn(List.of(
+                new Object[]{5, 1L},
+                new Object[]{4, 1L},
+                new Object[]{2, 1L}));   // (5+4+2)/3 = 3.666…
+
+        assertThat(reviewService.getSummary(PRODUCT_ID).average()).isEqualTo(3.7);
     }
 }

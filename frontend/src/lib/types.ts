@@ -128,6 +128,16 @@ export interface Review {
   createdAt: string;
 }
 
+/** 리뷰 정렬 키 — 백엔드 Pageable의 sort 파라미터로 그대로 전달 */
+export type ReviewSort = "createdAt,desc" | "rating,desc" | "rating,asc";
+
+/** 리뷰 평점 요약 (ReviewSummaryResponse) — 분포는 항상 5★→1★ 5행(없는 별점은 0) */
+export interface ReviewSummary {
+  total: number;
+  average: number; // 소수 1자리
+  distribution: { rating: number; count: number }[];
+}
+
 /** 장바구니 항목 (CartItemResponse) — size·stock·soldOut은 현재(라이브) 옵션 정보 */
 export interface CartItem {
   productId: number;

@@ -10,12 +10,16 @@ import com.commerce.api.order.repository.OrderRepository;
 import com.commerce.api.product.repository.ProductRepository;
 import com.commerce.api.review.dto.ReviewCreateRequest;
 import com.commerce.api.review.dto.ReviewResponse;
+import com.commerce.api.review.dto.ReviewSearchCondition;
+import com.commerce.api.review.dto.ReviewSummaryResponse;
+import com.commerce.api.review.dto.ReviewSummaryResponse.RatingCount;
 import com.commerce.api.review.entity.Review;
 import com.commerce.api.review.repository.ReviewRepository;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.data.domain.Page;
@@ -39,6 +43,10 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class ReviewService {
+
+    /** 평점 범위(엔티티·요청 DTO의 1~5와 같은 값). 분포를 이 범위로 zero-fill 한다. */
+    private static final int MIN_RATING = 1;
+    private static final int MAX_RATING = 5;
 
     private final ReviewRepository reviewRepository;
     private final ProductRepository productRepository;
@@ -79,9 +87,40 @@ public class ReviewService {
 
     /** 특정 상품의 리뷰 목록(페이지). 공개 — 작성자 닉네임은 한 번에 모아 enrich(N+1 회피). */
     public PageResponse<ReviewResponse> getReviews(Long productId, Pageable pageable) {
-        Page<Review> page = reviewRepository.findByProductId(productId, pageable);
+        return getReviews(productId, new ReviewSearchCondition(null, null), pageable);
+    }
+
+    /** 상품 리뷰 목록 — 평점·사진 필터 + 정렬(최신/평점). 리뷰가 쌓이면 첫 10건 최신순만으론 못 읽는다. */
+    public PageResponse<ReviewResponse> getReviews(
+            Long productId, ReviewSearchCondition condition, Pageable pageable) {
+        Page<Review> page = reviewRepository.search(productId, condition, pageable);
         Map<Long, String> writerNames = writerNames(page.getContent());
         return PageResponse.from(page.map(r -> ReviewResponse.of(r, writerNames.get(r.getMemberId()))));
+    }
+
+    /**
+     * 평점 분포 요약(5★~1★ · 총 개수 · 평균).
+     *
+     * <p>분포는 {@code group by rating}이라 <b>없는 별점은 행 자체가 없다</b> → 5~1을 모두 0으로 채워
+     * 화면 막대가 늘 같은 모양이게 한다(대시보드 zero-fill과 같은 결).
+     *
+     * <p>평균을 Product의 비정규화 카운터가 아니라 <b>분포에서 직접</b> 계산하는 이유: 같은 응답 안의 분포와
+     * 평균이 서로 어긋날 수 없게(단일 출처). 카운터는 목록 정렬·상품 카드용으로 그대로 둔다.
+     */
+    public ReviewSummaryResponse getSummary(Long productId) {
+        Map<Integer, Long> counts = reviewRepository.countGroupByRating(productId).stream()
+                .collect(Collectors.toMap(r -> (Integer) r[0], r -> (Long) r[1]));
+
+        List<RatingCount> distribution = IntStream.rangeClosed(MIN_RATING, MAX_RATING)
+                .map(i -> MAX_RATING - i + MIN_RATING)      // 5★ → 1★ 순
+                .mapToObj(rating -> new RatingCount(rating, counts.getOrDefault(rating, 0L)))
+                .toList();
+
+        long total = distribution.stream().mapToLong(RatingCount::count).sum();
+        long sum = distribution.stream().mapToLong(rc -> (long) rc.rating() * rc.count()).sum();
+        double average = total == 0 ? 0.0 : Math.round((double) sum / total * 10) / 10.0;   // 소수 1자리
+
+        return new ReviewSummaryResponse(total, average, distribution);
     }
 
     /** 리뷰 삭제: 본인 또는 ADMIN만(아니면 403). 삭제 시 상품 평점 카운터도 감소. */
