@@ -6,7 +6,6 @@
 
 ## READY (결정 완료 · 외부 무관 · 자율 진행 가능 · 위에서부터)
 > 2026-07-12 전수 스캔(5영역·44후보, 파일/grep 근거)에서 추린 것. 위에서부터 처리.
-- **리뷰 정렬·필터·평점 분포** (M·BE+FE·마이그0) — 상세가 첫 10건 최신순만 보여줘 리뷰가 쌓이면 못 읽는다. QueryDSL 동적정렬 + `GROUP BY rating` 분포.
 - **JaCoCo 커버리지 리포트** (S·infra) — 433 테스트가 "어디를" 덮는지 모른다. 정산·부분환불처럼 돈 걸린 경로의 빈 구멍을 찾는 가장 싼 방법.
 - **라우트 loading.tsx + metadataBase + 필터URL 색인 정책** (S·FE) — SSR 전환 후속 3종: 서버 fetch 대기 구간 스켈레톤 부재 / `metadataBase` 미설정(OG 상대경로 경고) / 필터 조합마다 자기참조 canonical → 중복 색인.
 
@@ -20,6 +19,7 @@
 - (비어 있음) — 외부 무관 후보 소진. 다음은 "함께(외부)" 학습 또는 새 기능 결정.
 
 ## DONE (완료 — 기록)
+- [x] (07-14) **리뷰 정렬·필터·평점 분포** — `feature/review-sort-distribution`→dev `9a0ea6a` (477 tests·FE 0·마이그0). `?rating=&photoOnly=&sort=`(QueryDSL 동적 where + Pageable 정렬·id desc tie-breaker) + `/reviews/summary`(group by rating → **5★~1★ zero-fill**·평균은 **분포에서 계산**해 단일 출처). FE=**분포 막대가 곧 필터**(누르면 그 별점만)·사진리뷰 토글·정렬 드롭다운.
 - [x] (07-14) **@RateLimit AOP 일반화 + 429 Retry-After** — `feature/ratelimit-aop`→dev `326a43f` (469 tests·마이그0). `@RateLimit(key, limit, by=SpEL)`+`RateLimitAspect`(@Auditable 패턴)로 3곳의 손조립 키 흡수(로그인 이메일 5/분·claim 회원 20/분·피드 IP 60/분)·컨텍스트 없으면 `unknown`(제한 무력화 방지)·**Retry-After 60**(`RateLimitExceededException`+전용 핸들러). ProductController에서 `HttpServletRequest` 제거. ⚠️@WebMvcTest엔 AOP 미로딩 → 검증은 아스펙트 단위 + @SpringBootTest 통합.
 - [x] (07-14) **감사로그 CSV 내보내기 + 드릴다운** — `feature/audit-csv-drilldown`→dev `30c326b` (466 tests·FE 0·마이그0). `GET /api/audit-logs/export`(ADMIN·같은 필터): StreamingResponseBody+1000행 청크·**스냅샷 경계**(to 미지정 시 시작 시각 고정 → 페이지 밀림/행 중복 방지)·**UTF-8 BOM**(엑셀 한글)·RFC 4180 이스케이프·상한 5만+절단 안내·**AUDIT_EXPORT 자체 감사**. FE=CSV 버튼·`apiDownload`(fetch+Blob)·행 클릭 상세 모달.
 - [x] (07-14) **재고 임박·품절 리포트** — `feature/low-stock-report`→dev `1dfc7f8` (457 tests·FE 0·마이그0). `GET /api/dashboard/low-stock`(ADMIN·threshold/limit 클램프): **옵션(SKU) 단위**(QueryDSL option→product 조인·재고 오름차순)·품절/임박 전체 카운트·판매중지 제외·**비캐시**(재고 신선도가 곧 기능). FE `/admin` 위젯(뱃지 카운트·기준칩 ≤3/5/10·상위 10건). `/api/dashboard/**` ADMIN 매처 재사용 → SecurityConfig 0.
