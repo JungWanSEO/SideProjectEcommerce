@@ -56,13 +56,32 @@ async function fetchPage(sp: Sp, page: number): Promise<{ items: ProductLite[]; 
   }
 }
 
+/**
+ * 필터가 걸린 목록인가(색인 정책의 기준).
+ *
+ * <p>필터 조합은 조합 폭발한다(키워드×카테고리×브랜드×가격×사이즈×정렬) — 전부 색인되면 <b>거의 같은
+ * 내용의 URL이 수천 개</b> 생겨 크롤 예산을 태우고 중복 색인이 된다. 페이지네이션(page)은 필터가 아니다
+ * (같은 시리즈의 다음 묶음이라 색인 대상).
+ */
+function hasFilter(sp: Sp): boolean {
+  const filtered = FILTER_KEYS.some((k) => typeof sp[k] === "string" && sp[k]);
+  const customSort = typeof sp.sort === "string" && sp.sort && sp.sort !== "createdAt,desc";
+  return filtered || Boolean(customSort);
+}
+
 export async function generateMetadata({ searchParams }: { searchParams: Promise<Sp> }): Promise<Metadata> {
   const sp = await searchParams;
   const page = Math.max(1, Number(sp.page) || 1);
+  const filtered = hasFilter(sp);
+
   return {
     title: page > 1 ? `전체 상품 · ${page}페이지` : "전체 상품",
     description: "패션 셀렉트샵 ATELIER의 전체 상품.",
-    alternates: { canonical: `${SITE}${pageHref(sp, page)}` }, // 각 페이지 자기참조 canonical
+    // 자기참조 canonical: 필터 URL을 깨끗한 /products로 정규화하면 noindex와 신호가 충돌한다
+    //   (색인하지 말라면서 "대표는 저쪽"이라고 가리키는 셈) → 자기 자신을 가리키고 색인만 막는다.
+    alternates: { canonical: `${SITE}${pageHref(sp, page)}` },
+    // 필터 걸린 목록: noindex(중복 색인 방지) + follow(상품 링크는 따라가 발견하게 — 크롤은 막지 않는다).
+    ...(filtered ? { robots: { index: false, follow: true } } : {}),
   };
 }
 
