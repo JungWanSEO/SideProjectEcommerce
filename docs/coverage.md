@@ -22,12 +22,25 @@ CI(GitHub Actions)는 매 push/PR마다 리포트를 만들어 **`jacoco-coverag
 | `**/global/config/**` | 설정 클래스(빈 배선) |
 | `CommerceApiApplication` | 부트 진입점 |
 
-## 기준선 (2026-07-14 · 477 tests)
+## 현재 (2026-07-14 · 496 tests · 구멍 메운 뒤)
+
+- **명령어(instruction) 84.5%** · **분기(branch) 71.9%**
+
+| 0%였던 클래스 | 지금 | 무엇으로 |
+|---|---|---|
+| `AuditLogRepositoryImpl` | **98.7%** | `AuditLogRepositoryTest`(@DataJpaTest — 행위자·액션·대상·결과·기간 윈도우·최신순) |
+| `SettlementController` | **100%** | `SettlementControllerTest`(@WebMvcTest — 배치/목록/역분개/셀러집계/입금·409) |
+| `ReconciliationController` | **93.3%** | `ReconciliationControllerTest`(대사 윈도우 바인딩·불일치 목록·해소/무시·409) |
+| `MemberCouponClaimService` | **100%** | `MemberCouponClaimServiceTest`(락 키가 쿠폰별인지 — 전역 키면 처리량 붕괴) |
+
+---
+
+## 기준선 (2026-07-14 · 477 tests · 도입 시점)
 
 - **명령어(instruction) 82.6%** (12,364 / 14,963)
 - **분기(branch) 70.1%** (585 / 834)
 
-### 🔴 0% — 테스트가 한 번도 실행하지 않은 클래스
+### 🔴 0% — 테스트가 한 번도 실행하지 않은 클래스 (아래 4개는 위 표대로 해소됨)
 
 | 클래스 | 왜 위험한가 |
 |---|---|
@@ -53,7 +66,7 @@ CI(GitHub Actions)는 매 push/PR마다 리포트를 만들어 **`jacoco-coverag
 
 `settlement/service/SettlementService` **91.9%** — "매출≠셀러 실수령" 코어(안분·역분개)는 두껍게 덮여 있다.
 
-## 다음 (백로그)
+## 다음
 
-0% 클래스 중 **운영에 실제로 쓰이는 것**부터: 감사 검색 슬라이스 → 정산·대사 컨트롤러 → claim 서비스.
-(시드·OAuth2 설정은 제외 대상으로 둔다.)
+- 남은 0%: `DemoDataSeeder`(dev 시드 — **의도적 제외**)·`OAuth2ClientConfig`(자격증명 있을 때만 활성 — 구조적으로 못 덮음)·얇은 위임 컨트롤러(activity·recommendation·wishlist).
+- 🟡 다음 우선순위는 **분기(branch) 71.9%** — 조건 분기(가드·예외 경로)가 라인보다 덜 덮여 있다. `PaymentService`(64.1%)·`MemberCouponService`(66.9%)의 실패/경계 경로부터.
