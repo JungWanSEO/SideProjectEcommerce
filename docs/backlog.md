@@ -6,7 +6,6 @@
 
 ## READY (결정 완료 · 외부 무관 · 자율 진행 가능 · 위에서부터)
 > 2026-07-12 전수 스캔(5영역·44후보, 파일/grep 근거)에서 추린 것. 위에서부터 처리.
-- **감사로그 드릴다운 + CSV 내보내기** (M·BE+FE) — 감사는 "뽑아서 보관"이 용도인데 화면 조회만 가능. `GET /api/audit-logs/export`(text/csv·UTF-8 BOM·StreamingResponseBody) + 행 클릭 상세. 리포 전체에 CSV가 0개.
 - **@RateLimit AOP 일반화 + 429 Retry-After** (M·BE) — `rateLimiter.check(...)`가 3곳에 손으로 박혀 있다. `@Auditable`처럼 애너테이션+Aspect(SpEL 키)로 승격 + Retry-After 헤더(현재 없음 → 클라가 재시도 시점을 모름).
 - **리뷰 정렬·필터·평점 분포** (M·BE+FE·마이그0) — 상세가 첫 10건 최신순만 보여줘 리뷰가 쌓이면 못 읽는다. QueryDSL 동적정렬 + `GROUP BY rating` 분포.
 - **JaCoCo 커버리지 리포트** (S·infra) — 433 테스트가 "어디를" 덮는지 모른다. 정산·부분환불처럼 돈 걸린 경로의 빈 구멍을 찾는 가장 싼 방법.
@@ -22,6 +21,7 @@
 - (비어 있음) — 외부 무관 후보 소진. 다음은 "함께(외부)" 학습 또는 새 기능 결정.
 
 ## DONE (완료 — 기록)
+- [x] (07-14) **감사로그 CSV 내보내기 + 드릴다운** — `feature/audit-csv-drilldown`→dev `30c326b` (466 tests·FE 0·마이그0). `GET /api/audit-logs/export`(ADMIN·같은 필터): StreamingResponseBody+1000행 청크·**스냅샷 경계**(to 미지정 시 시작 시각 고정 → 페이지 밀림/행 중복 방지)·**UTF-8 BOM**(엑셀 한글)·RFC 4180 이스케이프·상한 5만+절단 안내·**AUDIT_EXPORT 자체 감사**. FE=CSV 버튼·`apiDownload`(fetch+Blob)·행 클릭 상세 모달.
 - [x] (07-14) **재고 임박·품절 리포트** — `feature/low-stock-report`→dev `1dfc7f8` (457 tests·FE 0·마이그0). `GET /api/dashboard/low-stock`(ADMIN·threshold/limit 클램프): **옵션(SKU) 단위**(QueryDSL option→product 조인·재고 오름차순)·품절/임박 전체 카운트·판매중지 제외·**비캐시**(재고 신선도가 곧 기능). FE `/admin` 위젯(뱃지 카운트·기준칩 ≤3/5/10·상위 10건). `/api/dashboard/**` ADMIN 매처 재사용 → SecurityConfig 0.
 - [x] (07-14) **어드민 회원 관리** — `feature/admin-members`→dev `d15e28f` (452 tests·FE 0·마이그0). `GET /api/members/admin`(ADMIN·QueryDSL 키워드[이메일 OR 닉네임]·role·가입 최신순) + `PATCH /api/members/{id}/role`(@Auditable MEMBER_ROLE_UPDATE) + FE `/admin/members`. **가드**=자기자신 409(관리자 락아웃 방지)·SELLER 지정 400(sellerId 연결 필요)·SELLER 강등 시 sellerId 해제. 파생=게이트 스켈레톤 NAV 자동화·감사 필터 targetType 11종 복구.
 - [x] (07-14) **최근 본 상품** — `feature/recently-viewed`→dev `d147793` (439 tests·FE 0·마이그0). `GET /api/activity/recently-viewed`(로그인·limit·exclude): append-only 로그를 **`group by product_id` + `order by max(created_at) desc`**로 상품별 1건(마지막 조회순), 판매중지·삭제 상품 제외(후보 3배 조회 후 컷), 폴백 없음. FE `RecentlyViewedSection`(홈·상세[현재 상품 exclude]) + **공용 `ProductRail` 추출**(추천·함께산상품 카드 복붙 해소). 결정=**activity 도메인에 배치**(product→activity 역방향 의존·공개 매처 순서 함정 회피). ⚠️MySQL 스모크=Docker 복귀 후.
