@@ -5,9 +5,10 @@
 > 외부 프로그램 연동(RabbitMQ·외부 API·새 외부 도구)은 자율 금지 → "함께(학습)"에서 사용자와 직접.
 
 ## READY (결정 완료 · 외부 무관 · 자율 진행 가능 · 위에서부터)
-> 2026-07-12 전수 스캔(5영역·44후보, 파일/grep 근거)에서 추린 것. 위에서부터 처리.
-- **JaCoCo 커버리지 리포트** (S·infra) — 433 테스트가 "어디를" 덮는지 모른다. 정산·부분환불처럼 돈 걸린 경로의 빈 구멍을 찾는 가장 싼 방법.
-- **라우트 loading.tsx + metadataBase + 필터URL 색인 정책** (S·FE) — SSR 전환 후속 3종: 서버 fetch 대기 구간 스켈레톤 부재 / `metadataBase` 미설정(OG 상대경로 경고) / 필터 조합마다 자기참조 canonical → 중복 색인.
+> 2026-07-12 스캔분(8건)은 07-14 자율 배치로 **전부 소진**. 아래는 **JaCoCo 리포트(07-14)가 실제로 드러낸 구멍** — 추측이 아니라 측정 근거.
+- **커버리지 0% 구멍 메우기 ① 감사 검색 슬라이스** (S·BE) — `AuditLogRepositoryImpl` **0%**: 감사 로그 검색의 QueryDSL 동적 where(행위자·액션·대상·결과·기간)가 **한 번도 실행된 적 없다**. 필터가 틀려도 아무도 모른다 → `@DataJpaTest` 슬라이스(회원/리뷰와 동일 패턴).
+- **커버리지 0% 구멍 메우기 ② 정산·대사 컨트롤러** (S·BE) — `SettlementController`·`ReconciliationController` **0%**(서비스는 91.9%인데 **HTTP 경계는 미검증**). `@WebMvcTest`로 배치 실행·지급·대사·해소 엔드포인트(응답/상태코드) 커버.
+- **커버리지 0% 구멍 메우기 ③ claim 진입점** (S·BE) — `MemberCouponClaimService` **0%**: 선착순 claim의 **락 + 레이트리밋 진입점**(동시성 테스트는 안쪽 `MemberCouponService`만 친다) → 락 호출·위임을 단위 테스트로.
 
 ## 함께 (외부 연동 · 학습 — 자율 금지)
 - 🚧 **배포 ($0 라이브 데모) — 경로 A(Oracle VM) 확정** — 준비물 완료: env화·`Dockerfile`·`docs/deploy.md`(`feature/deploy-prep`) + **prod 산출물·배선 보강**(`feature/deploy-prep-hardening`→dev `06e7ff8`): `backend/docker-compose.prod.yml`(앱+MySQL)·`.env.prod.example`·datasource `${SPRING_DATASOURCE_USERNAME:${MYSQL_USER}}` 체인·`APP_OAUTH2_REDIRECT` 행·`.gitignore` `.env.prod` 차단. 로컬 검증=`bootJar`·`next build` PASS. **결정=경로 A**(Oracle Always Free VM: Vercel FE + VM에 Spring Boot+MySQL; 콜드스타트 없음·진짜 MySQL·쿠키 first-party). ⚠️경로 B는 Koyeb 무료 폐쇄(Mistral 인수)로 약화. **다음=사용자 계정 단계**: Oracle A1 VM 생성→레포 clone→`.env.prod`→`docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build`→Caddy HTTPS→Vercel FE→쿠키전략(Vercel rewrites `/api/*` 프록시=first-party 추천)→로그인 확인. MySQL 실런타임 검증=VM 첫 기동. **VM 준비물 `deploy/`**(vm-setup.sh·Caddyfile·README) + 프록시 뒤 OAuth2 헤더(`server.forward-headers-strategy`) 추가(`feature/deploy-vm-runbook`→dev `2832ed5`). (가이드=docs/deploy.md §3, deploy/README.md)
@@ -19,6 +20,8 @@
 - (비어 있음) — 외부 무관 후보 소진. 다음은 "함께(외부)" 학습 또는 새 기능 결정.
 
 ## DONE (완료 — 기록)
+- [x] (07-14) **SSR 후속 3종** — `feature/ssr-followups`→dev `4a34f26` (FE 0·build 0). `loading.tsx`(`/products`·`/products/[id]` 서버 fetch 대기 = 빈 화면이었음) · **`metadataBase`**(OG 상대경로 경고 소멸) · **필터 URL 색인 정책**=필터 걸린 목록 **noindex,follow**(조합 폭발 → 중복 색인 방지, 상품 링크는 계속 따라감)·**canonical은 자기참조 유지**(깨끗한 URL로 정규화하면 noindex와 모순 신호)·`page`는 필터가 아니라 색인 유지.
+- [x] (07-14) **JaCoCo 커버리지 리포트** — `feature/jacoco-coverage`→dev `a93ad54`. `test finalizedBy jacocoTestReport`(한 번에 리포트)·Q클래스/DTO/config 제외·CI 아티팩트 업로드·`docs/coverage.md`. **기준선 instruction 82.6%·branch 70.1%**. 🔴발견=`AuditLogRepositoryImpl`·`MemberCouponClaimService`·정산/대사/쿠폰 컨트롤러 **0%** / 🟢`SettlementService` 91.9%. → 구멍 3건을 READY로 재충전.
 - [x] (07-14) **리뷰 정렬·필터·평점 분포** — `feature/review-sort-distribution`→dev `9a0ea6a` (477 tests·FE 0·마이그0). `?rating=&photoOnly=&sort=`(QueryDSL 동적 where + Pageable 정렬·id desc tie-breaker) + `/reviews/summary`(group by rating → **5★~1★ zero-fill**·평균은 **분포에서 계산**해 단일 출처). FE=**분포 막대가 곧 필터**(누르면 그 별점만)·사진리뷰 토글·정렬 드롭다운.
 - [x] (07-14) **@RateLimit AOP 일반화 + 429 Retry-After** — `feature/ratelimit-aop`→dev `326a43f` (469 tests·마이그0). `@RateLimit(key, limit, by=SpEL)`+`RateLimitAspect`(@Auditable 패턴)로 3곳의 손조립 키 흡수(로그인 이메일 5/분·claim 회원 20/분·피드 IP 60/분)·컨텍스트 없으면 `unknown`(제한 무력화 방지)·**Retry-After 60**(`RateLimitExceededException`+전용 핸들러). ProductController에서 `HttpServletRequest` 제거. ⚠️@WebMvcTest엔 AOP 미로딩 → 검증은 아스펙트 단위 + @SpringBootTest 통합.
 - [x] (07-14) **감사로그 CSV 내보내기 + 드릴다운** — `feature/audit-csv-drilldown`→dev `30c326b` (466 tests·FE 0·마이그0). `GET /api/audit-logs/export`(ADMIN·같은 필터): StreamingResponseBody+1000행 청크·**스냅샷 경계**(to 미지정 시 시작 시각 고정 → 페이지 밀림/행 중복 방지)·**UTF-8 BOM**(엑셀 한글)·RFC 4180 이스케이프·상한 5만+절단 안내·**AUDIT_EXPORT 자체 감사**. FE=CSV 버튼·`apiDownload`(fetch+Blob)·행 클릭 상세 모달.
