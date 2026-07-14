@@ -123,6 +123,10 @@ public class SecurityConfig {
                         //  (내 주문 GET /api/orders·POST 등은 아래 anyRequest().authenticated()로 본인 스코핑)
                         .requestMatchers(HttpMethod.GET, "/api/orders/admin").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PATCH, "/api/orders/*/status").hasRole("ADMIN")
+                        // 어드민 회원 관리(목록·검색·권한 변경) → ADMIN
+                        //  (회원가입 POST /api/members는 위에서 공개, 본인 조회·수정 /me는 아래 authenticated)
+                        .requestMatchers(HttpMethod.GET, "/api/members/admin").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PATCH, "/api/members/*/role").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/categories", "/api/brands").hasRole("ADMIN")
                         // 카테고리 수정·삭제도 운영 업무 → ADMIN (GET /api/categories/** 는 위에서 공개)
                         .requestMatchers(HttpMethod.PUT, "/api/categories/*").hasRole("ADMIN")

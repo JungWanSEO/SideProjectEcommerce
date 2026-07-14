@@ -4,12 +4,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.member.dto.MemberResponse;
+import com.commerce.api.member.dto.MemberSearchCondition;
 import com.commerce.api.member.dto.MemberSignupRequest;
 import com.commerce.api.member.dto.MemberUpdateRequest;
 import com.commerce.api.member.dto.MyProfileResponse;
@@ -18,6 +21,7 @@ import com.commerce.api.member.entity.AuthProvider;
 import com.commerce.api.member.entity.Member;
 import com.commerce.api.member.entity.Role;
 import com.commerce.api.member.repository.MemberRepository;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -25,6 +29,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -229,5 +237,75 @@ class MemberServiceTest {
 
         assertThat(social.getPassword()).isEqualTo("SET_ENCODED");
         verify(passwordEncoder, never()).matches(anyString(), anyString());   // 현재 비번 검증 안 함
+    }
+
+    // === 어드민 회원 관리 (검색 · 권한 변경) ===
+
+    @Test
+    @DisplayName("회원 검색(ADMIN) - 리포지토리 결과를 PageResponse로 감싸 반환한다")
+    void search_wrapsPage() {
+        Member found = memberWithId(7L, "alice@commerce.com", "alice");
+        Pageable pageable = PageRequest.of(0, 20);
+        given(memberRepository.search(any(MemberSearchCondition.class), eq(pageable)))
+                .willReturn(new PageImpl<>(List.of(found), pageable, 1));
+
+        PageResponse<MemberResponse> page =
+                memberService.search(new MemberSearchCondition("alice", null), pageable);
+
+        assertThat(page.totalElements()).isEqualTo(1);
+        assertThat(page.content()).extracting(MemberResponse::email).containsExactly("alice@commerce.com");
+    }
+
+    @Test
+    @DisplayName("권한 변경 성공 - USER를 ADMIN으로 올린다")
+    void changeRole_promote() {
+        Member target = memberWithId(2L, "bob@commerce.com", "bob");
+        given(memberRepository.findById(2L)).willReturn(Optional.of(target));
+
+        MemberResponse response = memberService.changeRole(1L, 2L, Role.ADMIN);
+
+        assertThat(target.getRole()).isEqualTo(Role.ADMIN);
+        assertThat(response.role()).isEqualTo(Role.ADMIN);
+    }
+
+    @Test
+    @DisplayName("권한 변경 - SELLER에서 내려오면 셀러 연결(sellerId)도 끊는다")
+    void changeRole_demoteSellerClearsSellerId() {
+        Member seller = memberWithId(2L, "seller@commerce.com", "seller");
+        seller.assignAsSeller(9L);   // SELLER + sellerId=9
+        given(memberRepository.findById(2L)).willReturn(Optional.of(seller));
+
+        memberService.changeRole(1L, 2L, Role.USER);
+
+        assertThat(seller.getRole()).isEqualTo(Role.USER);
+        assertThat(seller.getSellerId()).isNull();   // 권한 없는 유령 링크가 남지 않는다
+    }
+
+    @Test
+    @DisplayName("권한 변경 실패 - 자기 자신은 변경 불가(409, 관리자 잠금 방지)")
+    void changeRole_self() {
+        assertThatThrownBy(() -> memberService.changeRole(1L, 1L, Role.USER))
+                .isInstanceOf(BusinessException.class)
+                .extracting("status").isEqualTo(HttpStatus.CONFLICT);
+        verify(memberRepository, never()).findById(any());
+    }
+
+    @Test
+    @DisplayName("권한 변경 실패 - SELLER 지정은 셀러 운영자 지정 API로(400)")
+    void changeRole_sellerNotAllowed() {
+        assertThatThrownBy(() -> memberService.changeRole(1L, 2L, Role.SELLER))
+                .isInstanceOf(BusinessException.class)
+                .extracting("status").isEqualTo(HttpStatus.BAD_REQUEST);
+        verify(memberRepository, never()).findById(any());
+    }
+
+    @Test
+    @DisplayName("권한 변경 실패 - 없는 회원이면 404")
+    void changeRole_notFound() {
+        given(memberRepository.findById(999L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> memberService.changeRole(1L, 999L, Role.ADMIN))
+                .isInstanceOf(BusinessException.class)
+                .extracting("status").isEqualTo(HttpStatus.NOT_FOUND);
     }
 }

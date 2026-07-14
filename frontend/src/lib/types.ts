@@ -525,6 +525,24 @@ export interface CacheStats {
   estimatedSize: number;
 }
 
+/** 회원 권한 (Role) — SELLER는 셀러 운영자 지정 API로만 부여된다(셀러 연결이 필요). */
+export type MemberRole = "USER" | "SELLER" | "ADMIN";
+
+/** 회원 (MemberResponse) — GET /api/members/admin (ADMIN). */
+export interface Member {
+  id: number;
+  email: string;
+  nickname: string;
+  role: MemberRole;
+  sellerId: number | null; // SELLER면 운영하는 셀러 ID (그 외 null)
+  createdAt: string;
+}
+
+/** 회원 권한 변경 입력 — PATCH /api/members/{id}/role (ADMIN, USER ↔ ADMIN) */
+export interface MemberRoleUpdateInput {
+  role: MemberRole;
+}
+
 /** 감사 로그 결과 (AuditResult). */
 export type AuditResult = "SUCCESS" | "FAILURE";
 

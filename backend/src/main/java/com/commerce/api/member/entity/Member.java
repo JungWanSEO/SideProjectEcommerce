@@ -77,6 +77,20 @@ public class Member extends BaseEntity {
         this.sellerId = sellerId;
     }
 
+    /**
+     * ADMIN이 이 회원의 권한을 변경한다(USER ↔ ADMIN).
+     *
+     * <p>SELLER로 <b>올리는</b> 길은 여기가 아니다 — 셀러 연결(sellerId) 없이 SELLER가 되면 셀러 콘솔이
+     * 빈 스코프로 깨지므로, 승격은 반드시 {@link #assignAsSeller(Long)}(셀러 운영자 지정 API)를 거친다.
+     * 반대로 SELLER에서 <b>내려올</b> 땐 셀러 연결을 함께 끊는다(권한 없는 유령 링크 방지).
+     */
+    public void changeRole(Role role) {
+        this.role = role;
+        if (role != Role.SELLER) {
+            this.sellerId = null;
+        }
+    }
+
     /** 프로필 수정 — 닉네임만. (email은 신원 식별자라 불변, role은 ADMIN만 변경) */
     public void updateProfile(String nickname) {
         this.nickname = nickname;
