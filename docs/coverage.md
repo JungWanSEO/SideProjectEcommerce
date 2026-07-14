@@ -1,0 +1,59 @@
+# 테스트 커버리지 (JaCoCo)
+
+> 목적: 477개 테스트가 **어디를 덮는지**가 아니라 **어디를 안 덮는지**를 본다.
+> 특히 정산·환불·쿠폰처럼 **돈이 걸린 경로**의 빈 구멍이 진짜 위험이다.
+
+## 실행
+
+```bash
+cd backend
+./gradlew test           # test가 jacocoTestReport를 finalizedBy로 물고 있어 리포트까지 함께 생성
+# 열기: backend/build/reports/jacoco/test/html/index.html
+```
+
+CI(GitHub Actions)는 매 push/PR마다 리포트를 만들어 **`jacoco-coverage` 아티팩트**로 올린다(14일 보관).
+
+## 측정 대상에서 뺀 것 (숫자가 의미를 갖게)
+
+| 제외 | 이유 |
+|---|---|
+| `**/Q*.class` | QueryDSL이 생성한 Q클래스 — 우리가 쓴 코드가 아니다 |
+| `**/dto/**` | record DTO — 로직 없는 데이터 홀더(생성자만 세도 숫자만 부풀린다) |
+| `**/global/config/**` | 설정 클래스(빈 배선) |
+| `CommerceApiApplication` | 부트 진입점 |
+
+## 기준선 (2026-07-14 · 477 tests)
+
+- **명령어(instruction) 82.6%** (12,364 / 14,963)
+- **분기(branch) 70.1%** (585 / 834)
+
+### 🔴 0% — 테스트가 한 번도 실행하지 않은 클래스
+
+| 클래스 | 왜 위험한가 |
+|---|---|
+| `audit/repository/AuditLogRepositoryImpl` | **감사 로그 검색의 QueryDSL 동적 where 전부**. 필터가 틀려도 아무도 모른다 |
+| `coupon/service/MemberCouponClaimService` | 선착순 쿠폰 claim의 **락 + 레이트리밋 진입점**(동시성 테스트는 안쪽 `MemberCouponService`만 친다) |
+| `settlement/controller/SettlementController` | 정산 배치 실행·지급 처리 **HTTP 경계**(서비스는 91.9% 덮였는데 컨트롤러는 0%) |
+| `settlement/controller/ReconciliationController` | 대사 실행·불일치 해소 HTTP 경계 |
+| `coupon/controller/MemberCouponController` | 쿠폰 발급/지갑 HTTP 경계 |
+| `activity`·`recommendation`·`wishlist` 컨트롤러 | 얇은 위임이지만 인가·바인딩 회귀를 못 잡는다 |
+| `global/init/DemoDataSeeder` | dev 프로파일 전용 시드(운영 무관) — **의도적으로 안 덮는다** |
+| `global/security/oauth2/OAuth2ClientConfig` | 소셜 자격증명 있을 때만 활성(테스트 환경엔 없음) — 구조적으로 못 덮음 |
+
+### 🟡 돈 흐름 중 낮은 쪽
+
+| 클래스 | 커버리지 |
+|---|---|
+| `payment/entity/Payment` | 55.1% |
+| `payment/service/PaymentService` | 64.1% |
+| `order/service/OrderService` | 66.5% |
+| `coupon/service/MemberCouponService` | 66.9% |
+
+### 🟢 잘 덮인 곳
+
+`settlement/service/SettlementService` **91.9%** — "매출≠셀러 실수령" 코어(안분·역분개)는 두껍게 덮여 있다.
+
+## 다음 (백로그)
+
+0% 클래스 중 **운영에 실제로 쓰이는 것**부터: 감사 검색 슬라이스 → 정산·대사 컨트롤러 → claim 서비스.
+(시드·OAuth2 설정은 제외 대상으로 둔다.)
