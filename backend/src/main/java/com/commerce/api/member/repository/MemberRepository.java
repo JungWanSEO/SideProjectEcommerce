@@ -9,8 +9,9 @@ import org.springframework.data.jpa.repository.JpaRepository;
  * 회원 DB 접근.
  * JpaRepository를 상속하면 save/findById/findAll/delete 등 기본 CRUD가 자동 제공된다.
  * 메서드 이름 규칙(existsByEmail/findByEmail)만으로 쿼리가 자동 생성된다.
+ * 어드민 회원 목록의 동적 검색은 {@link MemberRepositoryCustom}(QueryDSL)이 담당한다.
  */
-public interface MemberRepository extends JpaRepository<Member, Long> {
+public interface MemberRepository extends JpaRepository<Member, Long>, MemberRepositoryCustom {
 
     boolean existsByEmail(String email);
 

@@ -1,7 +1,9 @@
 package com.commerce.api.member.service;
 
+import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.member.dto.MemberResponse;
+import com.commerce.api.member.dto.MemberSearchCondition;
 import com.commerce.api.member.dto.MemberSignupRequest;
 import com.commerce.api.member.dto.MemberUpdateRequest;
 import com.commerce.api.member.dto.MyProfileResponse;
@@ -12,6 +14,7 @@ import com.commerce.api.member.entity.Role;
 import com.commerce.api.member.repository.MemberRepository;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -142,6 +145,39 @@ public class MemberService {
             throw new BusinessException(HttpStatus.CONFLICT, "관리자는 셀러로 지정할 수 없습니다.");
         }
         member.assignAsSeller(sellerId);   // 영속 엔티티 → dirty checking flush
+        return MemberResponse.from(member);
+    }
+
+    /** 회원 검색(ADMIN) — 키워드(이메일·닉네임)·권한 필터, 가입 최신순 페이지. */
+    public PageResponse<MemberResponse> search(MemberSearchCondition condition, Pageable pageable) {
+        return PageResponse.from(memberRepository.search(condition, pageable).map(MemberResponse::from));
+    }
+
+    /**
+     * 회원 권한 변경(ADMIN) — USER ↔ ADMIN.
+     *
+     * <p>가드 셋:
+     * <ul>
+     *   <li><b>자기 자신 변경 금지</b>(409) — 마지막 관리자가 스스로 강등하면 아무도 어드민에 못 들어온다(잠금).
+     *   <li><b>SELLER 지정 불가</b>(400) — 셀러 연결(sellerId)이 필요하므로 셀러 운영자 지정 API로 가야 한다.
+     *       여기서 SELLER를 허용하면 sellerId 없는 SELLER가 생겨 셀러 콘솔이 빈 스코프로 깨진다.
+     *   <li>없는 회원(404).
+     * </ul>
+     *
+     * <p>(권한은 JWT 클레임이라 대상 회원에겐 <b>다음 로그인부터</b> 적용된다 — assignAsSeller와 동일.)
+     */
+    @Transactional
+    public MemberResponse changeRole(Long actorMemberId, Long targetMemberId, Role role) {
+        if (targetMemberId.equals(actorMemberId)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "자기 자신의 권한은 변경할 수 없습니다.");
+        }
+        if (role == Role.SELLER) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST,
+                    "셀러 지정은 셀러 운영자 지정(POST /api/sellers/{id}/owner)으로 해야 합니다.");
+        }
+        Member member = memberRepository.findById(targetMemberId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "회원을 찾을 수 없습니다."));
+        member.changeRole(role);   // 영속 엔티티 → dirty checking flush (SELLER에서 내려오면 sellerId도 해제)
         return MemberResponse.from(member);
     }
 }

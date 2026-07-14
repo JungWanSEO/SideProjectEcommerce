@@ -16,7 +16,19 @@ const RESULT_FILTERS: { value: AuditResult | "ALL"; label: string }[] = [
 ];
 
 // 백엔드 @Auditable(targetType=...)에서 쓰는 대상 종류. 필터 드롭다운 옵션.
-const TARGET_TYPES = ["PRODUCT", "CATEGORY", "BRAND", "COUPON", "ORDER", "SELLER"];
+const TARGET_TYPES = [
+  "PRODUCT",
+  "CATEGORY",
+  "BRAND",
+  "COUPON",
+  "ORDER",
+  "SELLER",
+  "MEMBER",
+  "SETTLEMENT",
+  "PAYOUT",
+  "RECONCILIATION",
+  "MISMATCH",
+];
 
 const RESULT_BADGE: Record<AuditResult, string> = {
   SUCCESS: "bg-emerald-50 text-emerald-700",
@@ -70,7 +82,8 @@ export default function AdminAuditPage() {
       <div className="mb-6">
         <h1 className="text-xl font-bold">감사 로그</h1>
         <p className="text-sm text-gray-500">
-          운영자의 변경 이력입니다. 상품·카테고리·브랜드·쿠폰·주문·셀러 변경이 자동 기록되며(AOP), 실패한 시도도 함께 남습니다.
+          운영자의 변경 이력입니다. 상품·카테고리·브랜드·쿠폰·주문·셀러·회원 권한과 돈 흐름(정산·지급·대사) 변경이
+          자동 기록되며(AOP), 실패한 시도도 함께 남습니다.
         </p>
       </div>
 

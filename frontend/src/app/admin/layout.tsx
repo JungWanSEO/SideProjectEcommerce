@@ -20,6 +20,7 @@ const NAV = [
   { href: "/admin/categories", label: "카테고리" },
   { href: "/admin/brands", label: "브랜드" },
   { href: "/admin/orders", label: "주문" },
+  { href: "/admin/members", label: "회원" },
   { href: "/admin/settlements", label: "정산" },
   { href: "/admin/payouts", label: "지급" },
   { href: "/admin/reconciliations", label: "대사" },
@@ -98,8 +99,9 @@ function AdminGateSkeleton() {
       <aside className="w-56 shrink-0 border-r border-gray-200 bg-white p-4">
         <Skeleton className="h-6 w-28" />
         <div className="mt-6 flex flex-col gap-2">
-          {Array.from({ length: 9 }).map((_, i) => (
-            <Skeleton key={i} className="h-8 w-full rounded" />
+          {/* 네비 항목 수만큼 — NAV가 늘면 같이 늘려 스켈레톤이 실제 셸과 맞게 유지한다 */}
+          {NAV.map((n) => (
+            <Skeleton key={n.href} className="h-8 w-full rounded" />
           ))}
         </div>
       </aside>
