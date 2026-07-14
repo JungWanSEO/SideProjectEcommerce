@@ -1,6 +1,5 @@
 package com.commerce.api.global.ratelimit;
 
-import com.commerce.api.global.exception.BusinessException;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
@@ -9,7 +8,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 /**
@@ -87,8 +85,7 @@ public class RedisSlidingWindowRateLimiter implements RateLimiter {
         Long allowed = redis.execute(SLIDING_WINDOW_SCRIPT, List.of(KEY_PREFIX + key),
                 String.valueOf(now), String.valueOf(windowMs), String.valueOf(limitPerMinute), member);
         if (allowed == null || allowed == 0L) {
-            throw new BusinessException(HttpStatus.TOO_MANY_REQUESTS,
-                    "요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.");
+            throw new RateLimitExceededException();   // 429 + Retry-After(윈도우 1분)
         }
     }
 }

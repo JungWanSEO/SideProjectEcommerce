@@ -1,7 +1,9 @@
 package com.commerce.api.global.exception;
 
 import com.commerce.api.global.common.ApiResponse;
+import com.commerce.api.global.ratelimit.RateLimitExceededException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -18,6 +20,21 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    /**
+     * 레이트 리밋 초과 → 429 + <b>{@code Retry-After}</b>(초).
+     *
+     * <p>BusinessException보다 <b>더 구체적인 타입</b>이라 스프링이 이 핸들러를 먼저 고른다.
+     * 429만 주면 클라이언트는 언제 다시 와야 할지 몰라 즉시 재시도(=부하 증폭)하거나 과하게 오래 기다린다 →
+     * 표준 헤더로 "몇 초 뒤"를 알려준다(RFC 9110).
+     */
+    @ExceptionHandler(RateLimitExceededException.class)
+    public ResponseEntity<ApiResponse<Void>> handleRateLimit(RateLimitExceededException e) {
+        return ResponseEntity
+                .status(e.getStatus())
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(e.getRetryAfterSeconds()))
+                .body(ApiResponse.error(e.getMessage()));
+    }
 
     /** 비즈니스 예외 → 예외가 가진 상태코드로 응답 */
     @ExceptionHandler(BusinessException.class)

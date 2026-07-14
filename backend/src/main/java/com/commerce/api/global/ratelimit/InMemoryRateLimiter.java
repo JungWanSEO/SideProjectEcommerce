@@ -1,12 +1,10 @@
 package com.commerce.api.global.ratelimit;
 
-import com.commerce.api.global.exception.BusinessException;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 /**
@@ -33,8 +31,7 @@ public class InMemoryRateLimiter implements RateLimiter {
     public void check(String key, int limitPerMinute) {
         int count = counters.get(key, k -> new AtomicInteger()).incrementAndGet();
         if (count > limitPerMinute) {
-            throw new BusinessException(HttpStatus.TOO_MANY_REQUESTS,
-                    "요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.");
+            throw new RateLimitExceededException();   // 429 + Retry-After(윈도우 1분)
         }
     }
 }

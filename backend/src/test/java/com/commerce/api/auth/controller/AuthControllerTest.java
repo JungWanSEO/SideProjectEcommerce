@@ -10,7 +10,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.commerce.api.auth.dto.AuthResult;
 import com.commerce.api.auth.service.AuthService;
-import com.commerce.api.global.ratelimit.RateLimiter;
 import com.commerce.api.global.security.AuthCookieManager;
 import com.commerce.api.member.dto.MemberResponse;
 import com.commerce.api.member.entity.Role;
@@ -48,8 +47,6 @@ class AuthControllerTest {
     private MemberService memberService;
     @MockitoBean
     private AuthCookieManager cookieManager;
-    @MockitoBean
-    private RateLimiter rateLimiter;   // @WebMvcTest 슬라이스엔 @Component가 안 올라오므로 목 주입(check=no-op)
 
     private MemberResponse user() {
         return new MemberResponse(1L, "alice@commerce.com", "alice", Role.USER, null, null);
