@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { buttonClass } from "@/components/ui/Button";
 import RecommendedSection from "@/components/RecommendedSection";
+import RecentlyViewedSection from "@/components/RecentlyViewedSection";
 
 export default function Home() {
   return (
@@ -22,6 +23,9 @@ export default function Home() {
 
       {/* 로그인 사용자면 "나를 위한 추천"(없으면 인기 상품) 섹션이 붙는다 */}
       <RecommendedSection />
+
+      {/* 로그인 사용자면 "최근 본 상품" 레일 (조회 이력이 없으면 스스로 숨는다) */}
+      <RecentlyViewedSection />
     </>
   );
 }
