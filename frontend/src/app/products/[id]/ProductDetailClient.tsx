@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/api";
-import { Cart, PageResponse, Product, Review } from "@/lib/types";
+import { Cart, PageResponse, Product, Review, ReviewSort, ReviewSummary } from "@/lib/types";
 import { useAuth } from "@/lib/auth";
 import Stars, { StarInput } from "@/components/ui/Stars";
 import { buttonClass } from "@/components/ui/Button";
@@ -13,6 +13,7 @@ import CoOccurrenceSection from "@/components/CoOccurrenceSection";
 import RecentlyViewedSection from "@/components/RecentlyViewedSection";
 import ProductGallery from "@/components/ProductGallery";
 import Skeleton from "@/components/ui/Skeleton";
+import Select from "@/components/ui/Select";
 
 /**
  * 상품 상세 페이지 (/products/[id]).
@@ -41,6 +42,12 @@ export default function ProductDetailClient() {
   const [submitting, setSubmitting] = useState(false);
   const [reviewMsg, setReviewMsg] = useState<string | null>(null);
 
+  // 리뷰 정렬·필터 + 평점 분포 (리뷰가 쌓이면 첫 10건 최신순만으론 못 읽는다)
+  const [reviewSort, setReviewSort] = useState<ReviewSort>("createdAt,desc");
+  const [ratingFilter, setRatingFilter] = useState<number | null>(null); // null=전체
+  const [photoOnly, setPhotoOnly] = useState(false);
+  const [summary, setSummary] = useState<ReviewSummary | null>(null);
+
   // 인라인 수정 (본인 리뷰)
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editRating, setEditRating] = useState(5);
@@ -50,11 +57,23 @@ export default function ProductDetailClient() {
   const [editMsg, setEditMsg] = useState<string | null>(null);
 
   const loadProduct = useCallback(() => apiGet<Product>(`/api/products/${id}`).then(setProduct), [id]);
-  const loadReviews = useCallback(
+
+  /** 현재 정렬·필터로 리뷰를 다시 읽는다(필터가 바뀌면 자동 재조회). */
+  const loadReviews = useCallback(() => {
+    const q = new URLSearchParams({ sort: reviewSort, size: "10" });
+    if (ratingFilter !== null) q.set("rating", String(ratingFilter));
+    if (photoOnly) q.set("photoOnly", "true");
+    return apiGet<PageResponse<Review>>(`/api/products/${id}/reviews?${q.toString()}`)
+      .then((page) => setReviews(page.content))
+      .catch(() => setReviews([]));
+  }, [id, reviewSort, ratingFilter, photoOnly]);
+
+  /** 평점 분포(5★~1★) — 필터와 무관하게 상품 전체 기준(막대에서 필터를 고르는 UI라 필터를 태우면 순환). */
+  const loadSummary = useCallback(
     () =>
-      apiGet<PageResponse<Review>>(`/api/products/${id}/reviews`)
-        .then((page) => setReviews(page.content))
-        .catch(() => setReviews([])),
+      apiGet<ReviewSummary>(`/api/products/${id}/reviews/summary`)
+        .then(setSummary)
+        .catch(() => setSummary(null)),
     [id],
   );
 
@@ -62,8 +81,12 @@ export default function ProductDetailClient() {
     loadProduct()
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
+    loadSummary();
+  }, [loadProduct, loadSummary]);
+
+  useEffect(() => {
     loadReviews();
-  }, [loadProduct, loadReviews]);
+  }, [loadReviews]);
 
   // 로그인 사용자가 상품을 보면 조회를 기록한다(개인화 추천 신호). best-effort — 실패해도 화면엔 영향 없음.
   useEffect(() => {
@@ -114,7 +137,7 @@ export default function ProductDetailClient() {
       setReviewImageUrl("");
       setRating(5);
       setReviewMsg("리뷰가 등록되었습니다.");
-      await Promise.all([loadReviews(), loadProduct()]); // 목록 + 상품 평점 갱신
+      await Promise.all([loadReviews(), loadSummary(), loadProduct()]); // 목록 + 분포 + 상품 평점 갱신
     } catch (e) {
       setReviewMsg((e as Error).message); // 403(미구매)·409(중복) 등 서버 메시지
     } finally {
@@ -125,7 +148,7 @@ export default function ProductDetailClient() {
   const removeReview = async (reviewId: number) => {
     try {
       await apiDelete<void>(`/api/reviews/${reviewId}`);
-      await Promise.all([loadReviews(), loadProduct()]);
+      await Promise.all([loadReviews(), loadSummary(), loadProduct()]);
     } catch (e) {
       setReviewMsg((e as Error).message);
     }
@@ -158,7 +181,7 @@ export default function ProductDetailClient() {
         imageUrl: editImageUrl.trim() || null,
       });
       setEditingId(null);
-      await Promise.all([loadReviews(), loadProduct()]); // 목록 + 평점 갱신
+      await Promise.all([loadReviews(), loadSummary(), loadProduct()]); // 목록 + 분포 + 평점 갱신
     } catch (e) {
       setEditMsg((e as Error).message);
     } finally {
@@ -357,10 +380,83 @@ export default function ProductDetailClient() {
           )}
         </div>
 
+        {/* 평점 분포 — 막대를 누르면 그 별점만 본다(분포가 곧 필터) */}
+        {summary && summary.total > 0 && (
+          <div className="mt-8 rounded-2xl border border-line bg-paper p-5">
+            <div className="flex flex-col gap-2">
+              {summary.distribution.map((d) => {
+                const percent = summary.total === 0 ? 0 : (d.count / summary.total) * 100;
+                const active = ratingFilter === d.rating;
+                return (
+                  <button
+                    key={d.rating}
+                    onClick={() => setRatingFilter(active ? null : d.rating)} // 다시 누르면 해제
+                    className="flex items-center gap-3 text-left"
+                    aria-pressed={active}
+                  >
+                    <span className={`w-8 text-sm ${active ? "font-semibold text-clay" : "text-muted"}`}>
+                      {d.rating}★
+                    </span>
+                    <span className="h-2 flex-1 overflow-hidden rounded-full bg-line/60">
+                      <span
+                        className={`block h-full rounded-full transition-all ${active ? "bg-clay" : "bg-clay/50"}`}
+                        style={{ width: `${percent}%` }}
+                      />
+                    </span>
+                    <span className="w-10 text-right text-xs text-muted">{d.count}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-3 text-xs text-muted">
+              평균 {summary.average.toFixed(1)} · 총 {summary.total}개 · 별점을 눌러 그 평점만 볼 수 있어요.
+            </p>
+          </div>
+        )}
+
+        {/* 정렬·필터 툴바 */}
+        <div className="mt-6 flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setRatingFilter(null)}
+            className={`rounded-full border px-3 py-1 text-sm ${
+              ratingFilter === null
+                ? "border-clay bg-clay text-paper"
+                : "border-line bg-paper text-muted hover:border-clay"
+            }`}
+          >
+            전체
+          </button>
+          <button
+            onClick={() => setPhotoOnly((v) => !v)}
+            className={`rounded-full border px-3 py-1 text-sm ${
+              photoOnly
+                ? "border-clay bg-clay text-paper"
+                : "border-line bg-paper text-muted hover:border-clay"
+            }`}
+          >
+            사진리뷰
+          </button>
+          <span className="mx-1 h-4 w-px bg-line" />
+          <Select
+            value={reviewSort}
+            onChange={(v) => setReviewSort(v as ReviewSort)}
+            options={[
+              { value: "createdAt,desc", label: "최신순" },
+              { value: "rating,desc", label: "평점 높은순" },
+              { value: "rating,asc", label: "평점 낮은순" },
+            ]}
+            className="py-1.5 text-sm"
+          />
+        </div>
+
         {/* 목록 */}
         <ul className="mt-8 space-y-6">
           {reviews.length === 0 ? (
-            <li className="text-sm text-muted">아직 리뷰가 없어요. 첫 리뷰를 남겨보세요.</li>
+            <li className="text-sm text-muted">
+              {ratingFilter !== null || photoOnly
+                ? "조건에 맞는 리뷰가 없어요."
+                : "아직 리뷰가 없어요. 첫 리뷰를 남겨보세요."}
+            </li>
           ) : (
             reviews.map((r) => (
               <li key={r.id} className="border-b border-line pb-6">
