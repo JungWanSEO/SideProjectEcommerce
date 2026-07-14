@@ -1,12 +1,10 @@
 package com.commerce.api.global.ratelimit;
 
-import com.commerce.api.global.exception.BusinessException;
 import java.time.Duration;
 import org.redisson.api.RRateLimiter;
 import org.redisson.api.RateType;
 import org.redisson.api.RedissonClient;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 /**
@@ -39,8 +37,7 @@ public class RedissonRateLimiter implements RateLimiter {
         // 분당 limit개 — 키별 최초 1회만 실제 설정(이미 있으면 값 유지). OVERALL=모든 클라이언트 합산(분산 공유).
         limiter.trySetRate(RateType.OVERALL, limitPerMinute, Duration.ofMinutes(1));
         if (!limiter.tryAcquire()) {   // 토큰 1개 시도 — 없으면 거부
-            throw new BusinessException(HttpStatus.TOO_MANY_REQUESTS,
-                    "요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.");
+            throw new RateLimitExceededException();   // 429 + Retry-After(윈도우 1분)
         }
     }
 }

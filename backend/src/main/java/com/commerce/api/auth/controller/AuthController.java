@@ -4,7 +4,7 @@ import com.commerce.api.auth.dto.AuthResult;
 import com.commerce.api.auth.dto.LoginRequest;
 import com.commerce.api.auth.service.AuthService;
 import com.commerce.api.global.common.ApiResponse;
-import com.commerce.api.global.ratelimit.RateLimiter;
+import com.commerce.api.global.ratelimit.RateLimit;
 import com.commerce.api.global.security.AuthCookieManager;
 import com.commerce.api.global.security.SecurityUtil;
 import com.commerce.api.member.dto.MemberResponse;
@@ -38,12 +38,11 @@ public class AuthController {
     private final AuthService authService;
     private final MemberService memberService;
     private final AuthCookieManager cookieManager;
-    private final RateLimiter rateLimiter;
 
     @Operation(summary = "로그인", description = "이메일/비밀번호로 로그인. access·refresh 토큰을 httpOnly 쿠키로 내려주고 body엔 유저 정보. 실패 시 401.")
+    @RateLimit(key = "login", limit = 5, by = "#request.email()")   // 무차별 대입 방지: 이메일당 1분 5회
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<MemberResponse>> login(@Valid @RequestBody LoginRequest request) {
-        rateLimiter.check("login:" + request.email(), 5);   // 무차별 방지: 이메일당 1분 5회
         AuthResult result = authService.login(request);
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookieManager.accessCookie(result.accessToken()).toString())

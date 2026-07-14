@@ -2,9 +2,7 @@ package com.commerce.api.product.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.verify;
@@ -18,7 +16,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.exception.BusinessException;
-import com.commerce.api.global.ratelimit.RateLimiter;
 import com.commerce.api.product.dto.ProductImageResponse;
 import com.commerce.api.product.dto.ProductOptionResponse;
 import com.commerce.api.product.dto.ProductResponse;
@@ -53,9 +50,6 @@ class ProductControllerTest {
 
     @MockitoBean
     private ProductService productService;
-
-    @MockitoBean
-    private RateLimiter rateLimiter; // @WebMvcTest 슬라이스엔 @Component가 안 올라오므로 목 주입(check=no-op)
 
     @Test
     @DisplayName("POST /api/products - 등록 성공 시 201")
@@ -338,21 +332,10 @@ class ProductControllerTest {
     }
 
     @Test
-    @DisplayName("GET /api/products/feed - IP 기준 레이트리밋을 확인한다(feed: 키·60/분)")
-    void feed_callsRateLimiter() throws Exception {
+    @DisplayName("GET /api/products/feed - 커서 피드 200 (레이트리밋은 @RateLimit/AOP 담당 → RateLimitAspectTest·통합)")
+    void feed_success() throws Exception {
         mockMvc.perform(get("/api/products/feed").param("size", "20"))
-                .andExpect(status().isOk());
-
-        verify(rateLimiter).check(startsWith("feed:"), eq(60)); // 스크래핑 억제: IP당 분당 상한
-    }
-
-    @Test
-    @DisplayName("GET /api/products/feed - 레이트리밋 초과 시 429")
-    void feed_tooManyRequests() throws Exception {
-        willThrow(new BusinessException(HttpStatus.TOO_MANY_REQUESTS, "요청이 너무 많습니다."))
-                .given(rateLimiter).check(any(), anyInt());
-
-        mockMvc.perform(get("/api/products/feed"))
-                .andExpect(status().isTooManyRequests());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
     }
 }
