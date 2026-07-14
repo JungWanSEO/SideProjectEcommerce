@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.commerce.api.global.config.JpaConfig;
 import com.commerce.api.global.config.QuerydslConfig;
+import com.commerce.api.product.dto.LowStockOption;
 import com.commerce.api.product.dto.ProductSearchCondition;
 import com.commerce.api.product.entity.Product;
 import com.commerce.api.product.entity.ProductOption;
@@ -206,5 +207,51 @@ class ProductRepositoryTest {
         ReflectionTestUtils.setField(p, "ratingCount", ratingCount);
         ReflectionTestUtils.setField(p, "ratingSum", ratingSum);
         return p;
+    }
+
+    // === 재고 임박·품절 리포트 (옵션 단위) ===
+
+    /** 사이즈별 재고를 지정한 상품. (재고는 상품이 아니라 옵션에 있다.) */
+    private Product withStocks(String name, ProductStatus status, int... stocks) {
+        Product p = product(name, status);
+        for (int i = 0; i < stocks.length; i++) {
+            p.addOption(ProductOption.create("SIZE" + i, stocks[i]));
+        }
+        return p;
+    }
+
+    @Test
+    @DisplayName("findLowStockOptions - 임계치 이하 옵션만, 재고 적은 순(품절이 맨 위) / 판매중지 상품은 제외")
+    void findLowStockOptions_thresholdAndOrder() {
+        productRepository.save(withStocks("니트", ProductStatus.ON_SALE, 0, 3, 50));    // 0·3만 대상(50은 여유)
+        productRepository.save(withStocks("코트", ProductStatus.SOLD_OUT, 2));          // 품절 상품도 재입고 대상
+        productRepository.save(withStocks("단종옷", ProductStatus.DISCONTINUED, 0));     // 판매중지 → 제외
+
+        List<LowStockOption> items = productRepository.findLowStockOptions(VISIBLE, 5, 10);
+
+        assertThat(items).extracting(LowStockOption::stock).containsExactly(0, 2, 3);   // 재고 오름차순
+        assertThat(items).extracting(LowStockOption::productName)
+                .containsExactly("니트", "코트", "니트");
+        assertThat(items).noneMatch(i -> i.productStatus() == ProductStatus.DISCONTINUED);
+    }
+
+    @Test
+    @DisplayName("findLowStockOptions - limit으로 상위 N건만")
+    void findLowStockOptions_limit() {
+        productRepository.save(withStocks("니트", ProductStatus.ON_SALE, 0, 1, 2, 3));
+
+        List<LowStockOption> items = productRepository.findLowStockOptions(VISIBLE, 5, 2);
+
+        assertThat(items).extracting(LowStockOption::stock).containsExactly(0, 1);
+    }
+
+    @Test
+    @DisplayName("countOptionsWithStockBetween - 품절(0,0)과 임박(1,threshold)을 구간으로 센다")
+    void countOptionsWithStockBetween_bands() {
+        productRepository.save(withStocks("니트", ProductStatus.ON_SALE, 0, 0, 3, 50));
+        productRepository.save(withStocks("단종옷", ProductStatus.DISCONTINUED, 0));   // 세지 않는다
+
+        assertThat(productRepository.countOptionsWithStockBetween(VISIBLE, 0, 0)).isEqualTo(2);   // 품절 2
+        assertThat(productRepository.countOptionsWithStockBetween(VISIBLE, 1, 5)).isEqualTo(1);   // 임박 1(재고 3)
     }
 }

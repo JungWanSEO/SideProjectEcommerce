@@ -10,20 +10,24 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import Link from "next/link";
 import { apiGet } from "@/lib/api";
-import { CacheStats, Dashboard } from "@/lib/types";
+import { CacheStats, Dashboard, LowStockReport } from "@/lib/types";
 import { ORDER_STATUS_BADGE, ORDER_STATUS_LABEL } from "@/lib/orderStatus";
 import DashboardSkeleton from "@/components/admin/DashboardSkeleton";
 
 /**
  * 어드민 대시보드 (/admin 랜딩) — 운영 요약 한 화면.
- * KPI 카드 + 주문 상태별 분포 + 최근 매출 추이(recharts). 데이터는 GET /api/dashboard 한 번으로 받는다.
+ * KPI 카드 + 주문 상태별 분포 + 최근 매출 추이(recharts) + 재고 임박·품절.
+ * 매출은 GET /api/dashboard, 재고는 GET /api/dashboard/low-stock(캐시 안 함 — 재고는 실시간이어야 한다).
  * 권한 게이팅·셸은 admin/layout.tsx가 담당하므로 여기선 ADMIN을 가정한다.
  */
 export default function AdminDashboardPage() {
   const [days, setDays] = useState(30); // 매출 추이 기간(7/30일)
   const [data, setData] = useState<Dashboard | null>(null);
   const [cacheStats, setCacheStats] = useState<CacheStats[]>([]); // 캐시 적중률(부가 정보)
+  const [lowStock, setLowStock] = useState<LowStockReport | null>(null);
+  const [threshold, setThreshold] = useState(5); // 임박 기준 재고(이하)
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,6 +46,13 @@ export default function AdminDashboardPage() {
       .catch(() => setCacheStats([]));
   }, []);
 
+  // 재고 임박·품절 — 기준 재고를 바꾸면 다시 조회.
+  useEffect(() => {
+    apiGet<LowStockReport>(`/api/dashboard/low-stock?threshold=${threshold}&limit=10`)
+      .then(setLowStock)
+      .catch(() => setLowStock(null));
+  }, [threshold]);
+
   return (
     <div>
       <h1 className="mb-6 text-2xl font-bold text-ink">대시보드</h1>
@@ -59,6 +70,89 @@ export default function AdminDashboardPage() {
             <KpiCard label="회원 수" value={`${data.kpi.memberCount.toLocaleString()}명`} />
             <KpiCard label="판매 중 상품" value={`${data.kpi.activeProductCount.toLocaleString()}개`} />
           </section>
+
+          {/* 재고 임박·품절 — 매출만 보면 놓치는 손실(품절 방치). 재고는 옵션(사이즈) 단위. */}
+          {lowStock && (
+            <section className="rounded-2xl border border-gray-200 bg-white p-5">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <h2 className="text-sm font-semibold text-gray-500">재고 임박·품절</h2>
+                  <span className="rounded-full bg-red-50 px-2.5 py-0.5 text-xs font-medium text-red-700">
+                    품절 {lowStock.soldOutCount.toLocaleString()}
+                  </span>
+                  <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700">
+                    임박 {lowStock.lowStockCount.toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1 text-xs text-gray-500">
+                  <span>기준 재고</span>
+                  {[3, 5, 10].map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => setThreshold(t)}
+                      className={`rounded-full px-3 py-1 ${
+                        threshold === t ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-100"
+                      }`}
+                    >
+                      ≤{t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {lowStock.items.length === 0 ? (
+                <p className="py-6 text-center text-sm text-gray-400">
+                  재고 {threshold}개 이하인 옵션이 없습니다.
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-100 text-left text-xs text-gray-500">
+                        <th className="py-2 pr-4">상품</th>
+                        <th className="py-2 pr-4">사이즈</th>
+                        <th className="py-2 pr-4 text-right">재고</th>
+                        <th className="py-2 text-right">상태</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lowStock.items.map((i) => (
+                        <tr key={i.optionId} className="border-b border-gray-50">
+                          <td className="py-2 pr-4 font-medium text-ink">{i.productName}</td>
+                          <td className="py-2 pr-4 text-gray-600">{i.size}</td>
+                          <td
+                            className={`py-2 pr-4 text-right font-medium ${
+                              i.stock === 0 ? "text-red-600" : "text-amber-600"
+                            }`}
+                          >
+                            {i.stock}
+                          </td>
+                          <td className="py-2 text-right">
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                                i.stock === 0
+                                  ? "bg-red-50 text-red-700"
+                                  : "bg-amber-50 text-amber-700"
+                              }`}
+                            >
+                              {i.stock === 0 ? "품절" : "임박"}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <p className="mt-2 text-xs text-gray-400">
+                재고 적은 순 상위 {lowStock.items.length}건(판매중지 상품 제외). 재고 보충은{" "}
+                <Link href="/admin/products" className="underline hover:text-gray-600">
+                  상품 관리
+                </Link>
+                의 옵션 수정에서 합니다.
+              </p>
+            </section>
+          )}
 
           {/* 주문 상태별 분포 */}
           <section className="rounded-2xl border border-gray-200 bg-white p-5">

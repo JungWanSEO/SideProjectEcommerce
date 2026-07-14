@@ -525,6 +525,24 @@ export interface CacheStats {
   estimatedSize: number;
 }
 
+/** 재고 임박·품절 옵션 1건 (LowStockOption) — 재고는 상품이 아니라 옵션(사이즈=SKU) 단위 */
+export interface LowStockOption {
+  productId: number;
+  productName: string;
+  productStatus: ProductStatus;
+  optionId: number;
+  size: string;
+  stock: number; // 0이면 품절
+}
+
+/** 재고 임박·품절 리포트 (LowStockResponse) — GET /api/dashboard/low-stock (ADMIN) */
+export interface LowStockReport {
+  threshold: number; // 임박 기준 재고(이하)
+  soldOutCount: number; // 품절(재고 0) 옵션 수 — 전체 기준
+  lowStockCount: number; // 임박(1~threshold) 옵션 수 — 전체 기준
+  items: LowStockOption[]; // 재고 적은 순 상위 목록
+}
+
 /** 회원 권한 (Role) — SELLER는 셀러 운영자 지정 API로만 부여된다(셀러 연결이 필요). */
 export type MemberRole = "USER" | "SELLER" | "ADMIN";
 

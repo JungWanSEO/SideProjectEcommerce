@@ -2,6 +2,7 @@ package com.commerce.api.product.repository;
 
 import static com.commerce.api.product.entity.QProduct.product;
 
+import com.commerce.api.product.dto.LowStockOption;
 import com.commerce.api.product.dto.ProductSearchCondition;
 import com.commerce.api.product.entity.Product;
 import com.commerce.api.product.entity.ProductStatus;
@@ -9,6 +10,7 @@ import com.commerce.api.product.entity.QProductOption;
 import com.querydsl.core.BooleanBuilder;
 import com.querydsl.core.types.Order;
 import com.querydsl.core.types.OrderSpecifier;
+import com.querydsl.core.types.Projections;
 import com.querydsl.core.types.dsl.BooleanExpression;
 import com.querydsl.core.types.dsl.CaseBuilder;
 import com.querydsl.core.types.dsl.NumberExpression;
@@ -93,6 +95,36 @@ public class ProductRepositoryImpl implements ProductRepositoryCustom {
 
     private BooleanExpression eqBrand(Long brandId) {
         return brandId != null ? product.brandId.eq(brandId) : null;                  // brand_id = ?
+    }
+
+    /**
+     * 재고 임박·품절 옵션 목록. 상품이 아니라 <b>옵션 행</b>을 뽑으므로(사이즈별 재고) 여기선 exists가 아니라
+     * option → product 조인이다. 재고 적은 순(품절이 맨 위) → 같은 재고면 상품·옵션 id로 안정 정렬.
+     */
+    @Override
+    public List<LowStockOption> findLowStockOptions(Collection<ProductStatus> statuses, int threshold, int limit) {
+        QProductOption option = QProductOption.productOption;
+        return queryFactory
+                .select(Projections.constructor(LowStockOption.class,
+                        product.id, product.name, product.status, option.id, option.size, option.stock))
+                .from(option)
+                .join(option.product, product)
+                .where(product.status.in(statuses), option.stock.loe(threshold))
+                .orderBy(option.stock.asc(), product.id.asc(), option.id.asc())
+                .limit(limit)
+                .fetch();
+    }
+
+    @Override
+    public long countOptionsWithStockBetween(Collection<ProductStatus> statuses, int min, int max) {
+        QProductOption option = QProductOption.productOption;
+        Long count = queryFactory
+                .select(option.count())
+                .from(option)
+                .join(option.product, product)
+                .where(product.status.in(statuses), option.stock.between(min, max))
+                .fetchOne();
+        return count == null ? 0L : count;
     }
 
     /**
