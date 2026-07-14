@@ -5,6 +5,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.commerce.api.dashboard.dto.DashboardResponse;
 import com.commerce.api.dashboard.dto.DashboardResponse.DailyRevenue;
 import com.commerce.api.dashboard.dto.DashboardResponse.OrderStatusCount;
+import com.commerce.api.dashboard.dto.LowStockResponse;
+import com.commerce.api.product.dto.LowStockOption;
+import com.commerce.api.product.entity.ProductOption;
 import com.commerce.api.member.entity.Member;
 import com.commerce.api.member.entity.Role;
 import com.commerce.api.member.repository.MemberRepository;
@@ -18,6 +21,7 @@ import com.commerce.api.product.repository.ProductRepository;
 import com.commerce.api.settlement.entity.SettlementEntry;
 import com.commerce.api.settlement.repository.SettlementRepository;
 import java.time.LocalDate;
+import java.util.Comparator;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.DisplayName;
@@ -102,6 +106,42 @@ class DashboardServiceTest {
     void getDashboard_clampsDays() {
         assertThat(dashboardService.getDashboard(0).revenueTrend()).hasSize(1);    // 하한
         assertThat(dashboardService.getDashboard(500).revenueTrend()).hasSize(90); // 상한
+    }
+
+    @Test
+    @DisplayName("getLowStock - 품절/임박 건수가 추가한 옵션만큼 늘고(델타), 목록은 재고 적은 순")
+    void getLowStock_countsAndOrder() {
+        LowStockResponse before = dashboardService.getLowStock(5, 10);
+
+        // 판매중 상품: 품절(0) 2개 + 임박(3) 1개 + 여유(50) 1개
+        Product onSale = product(ProductStatus.ON_SALE);
+        onSale.addOption(ProductOption.create("S", 0));
+        onSale.addOption(ProductOption.create("M", 0));
+        onSale.addOption(ProductOption.create("L", 3));
+        onSale.addOption(ProductOption.create("XL", 50));
+        productRepository.save(onSale);
+
+        // 판매중지 상품의 품절 옵션은 리포트 대상이 아니다(재입고할 이유가 없음)
+        Product discontinued = product(ProductStatus.DISCONTINUED);
+        discontinued.addOption(ProductOption.create("FREE", 0));
+        productRepository.save(discontinued);
+
+        LowStockResponse after = dashboardService.getLowStock(5, 10);
+
+        assertThat(after.soldOutCount()).isEqualTo(before.soldOutCount() + 2);    // 판매중지 것은 안 셈
+        assertThat(after.lowStockCount()).isEqualTo(before.lowStockCount() + 1);  // 재고 3만 임박(50은 여유)
+        assertThat(after.items()).isSortedAccordingTo(Comparator.comparingInt(LowStockOption::stock));
+        assertThat(after.items()).allMatch(i -> i.stock() <= 5);
+        assertThat(after.items()).noneMatch(i -> i.productStatus() == ProductStatus.DISCONTINUED);
+    }
+
+    @Test
+    @DisplayName("getLowStock - threshold는 0~100, limit은 1~100으로 클램프된다")
+    void getLowStock_clamps() {
+        assertThat(dashboardService.getLowStock(-1, 10).threshold()).isZero();     // 하한(품절만)
+        assertThat(dashboardService.getLowStock(999, 10).threshold()).isEqualTo(100);  // 상한
+        assertThat(dashboardService.getLowStock(5, 0).items()).hasSizeLessThanOrEqualTo(1);    // limit 하한 1
+        assertThat(dashboardService.getLowStock(5, 999).items()).hasSizeLessThanOrEqualTo(100); // limit 상한
     }
 
     @Test

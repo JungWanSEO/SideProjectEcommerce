@@ -4,6 +4,7 @@ import com.commerce.api.dashboard.dto.DashboardResponse;
 import com.commerce.api.dashboard.dto.DashboardResponse.DailyRevenue;
 import com.commerce.api.dashboard.dto.DashboardResponse.Kpi;
 import com.commerce.api.dashboard.dto.DashboardResponse.OrderStatusCount;
+import com.commerce.api.dashboard.dto.LowStockResponse;
 import com.commerce.api.global.config.CacheConfig;
 import com.commerce.api.member.repository.MemberRepository;
 import com.commerce.api.order.entity.OrderStatus;
@@ -39,6 +40,16 @@ public class DashboardService {
     private static final int MIN_DAYS = 1;
     private static final int MAX_DAYS = 90;
 
+    /** 재고 임박 기준·목록 크기 한도(가드). */
+    private static final int MIN_THRESHOLD = 0;      // 0이면 "품절만"
+    private static final int MAX_THRESHOLD = 100;
+    private static final int MIN_LIMIT = 1;
+    private static final int MAX_LIMIT = 100;
+
+    /** 재입고 대상 상품 상태 — 판매중지는 채울 이유가 없어 리포트에서 제외한다. */
+    private static final List<ProductStatus> RESTOCKABLE =
+            List.of(ProductStatus.ON_SALE, ProductStatus.SOLD_OUT);
+
     private final OrderRepository orderRepository;
     private final SettlementRepository settlementRepository;
     private final MemberRepository memberRepository;
@@ -57,6 +68,25 @@ public class DashboardService {
                 productRepository.countByStatus(ProductStatus.ON_SALE));
 
         return new DashboardResponse(kpi, orderStatusDistribution(), revenueTrend(range));
+    }
+
+    /**
+     * 재고 임박·품절 리포트 — 재고가 threshold 이하인 <b>옵션</b>(사이즈=SKU)을 재고 적은 순으로.
+     *
+     * <p><b>캐시하지 않는다</b>(대시보드 집계와 다른 결정): 재고는 주문마다 줄어드는 값이라 30초 전 스냅샷을 보고
+     * "아직 여유 있네" 하면 품절을 방치하게 된다. 리포트의 목적 자체가 "지금 채워야 할 것"이므로 항상 최신 조회.
+     *
+     * <p>대상은 판매중·품절 상품뿐 — 판매중지(DISCONTINUED)는 재입고할 이유가 없다.
+     */
+    public LowStockResponse getLowStock(int threshold, int limit) {
+        int bound = Math.min(Math.max(threshold, MIN_THRESHOLD), MAX_THRESHOLD);
+        int size = Math.min(Math.max(limit, MIN_LIMIT), MAX_LIMIT);
+
+        return new LowStockResponse(
+                bound,
+                productRepository.countOptionsWithStockBetween(RESTOCKABLE, 0, 0),          // 품절
+                productRepository.countOptionsWithStockBetween(RESTOCKABLE, 1, bound),      // 임박(1~bound)
+                productRepository.findLowStockOptions(RESTOCKABLE, bound, size));
     }
 
     /** 모든 OrderStatus를 enum 순서로 — 한 건도 없는 상태는 0으로 채워 분포가 늘 같은 모양이게. */
