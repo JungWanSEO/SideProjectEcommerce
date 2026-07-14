@@ -10,6 +10,7 @@ import Stars, { StarInput } from "@/components/ui/Stars";
 import { buttonClass } from "@/components/ui/Button";
 import WishlistButton from "@/components/ui/WishlistButton";
 import CoOccurrenceSection from "@/components/CoOccurrenceSection";
+import RecentlyViewedSection from "@/components/RecentlyViewedSection";
 import ProductGallery from "@/components/ProductGallery";
 import Skeleton from "@/components/ui/Skeleton";
 
@@ -450,6 +451,12 @@ export default function ProductDetailClient() {
 
       {/* 함께 산 상품 (공개·상품 통계) — 리뷰 아래에 노출 */}
       <CoOccurrenceSection productId={Number(id)} />
+
+      {/* 최근 본 상품 (로그인) — 지금 보는 상품은 빼고(진입 시 조회로 기록되므로) */}
+      <RecentlyViewedSection
+        excludeProductId={Number(id)}
+        className="mt-16 border-t border-line pt-10"
+      />
     </main>
   );
 }
