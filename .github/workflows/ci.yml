@@ -28,8 +28,18 @@ jobs:
       # Windows에서 커밋된 gradlew는 실행권한(+x)이 없어 Linux 러너에서 chmod 필요.
       - name: gradlew 실행권한 부여
         run: chmod +x gradlew
-      - name: Test
+      # test가 jacocoTestReport를 finalizedBy로 물고 있어 커버리지 리포트까지 함께 생성된다.
+      - name: Test (+ JaCoCo 커버리지)
         run: ./gradlew test --no-daemon
+
+      # 실패해도(if: always()) 리포트는 올려서 "어디가 안 덮였나"를 PR에서 바로 볼 수 있게.
+      - name: 커버리지 리포트 업로드
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-coverage
+          path: backend/build/reports/jacoco/test/html/
+          retention-days: 14
 
   frontend:
     name: Frontend (tsc + lint)
