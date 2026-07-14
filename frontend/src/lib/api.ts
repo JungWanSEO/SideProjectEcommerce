@@ -59,3 +59,27 @@ export const apiPatch = <T>(path: string, body?: unknown): Promise<T> =>
   request<T>(path, "PATCH", body);
 
 export const apiDelete = <T>(path: string): Promise<T> => request<T>(path, "DELETE");
+
+/**
+ * 파일 내려받기 (CSV 등) — JSON 봉투(ApiResponse)가 아니라 <b>본문 그대로</b>가 파일인 응답용.
+ *
+ * <a href>로 직접 열지 않고 fetch(credentials:"include")로 받는 이유: API가 다른 origin이라
+ * 링크 이동에선 인증 쿠키가 안 실릴 수 있다(SameSite). fetch는 CORS + allowCredentials로 확실히 실린다.
+ * 받은 Blob은 임시 object URL로 만들어 <a download>를 눌러 저장한다.
+ */
+export async function apiDownload(path: string, filename: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}${path}`, { method: "GET", credentials: "include" });
+  if (!res.ok) {
+    throw new Error(`내려받기 실패 (HTTP ${res.status})`);
+  }
+
+  const url = URL.createObjectURL(await res.blob());
+  try {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+  } finally {
+    URL.revokeObjectURL(url); // 메모리 해제
+  }
+}
