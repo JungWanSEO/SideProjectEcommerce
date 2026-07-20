@@ -5,10 +5,23 @@
 > 외부 프로그램 연동(RabbitMQ·외부 API·새 외부 도구)은 자율 금지 → "함께(학습)"에서 사용자와 직접.
 
 ## READY (결정 완료 · 외부 무관 · 자율 진행 가능 · 위에서부터)
-> 2026-07-12 스캔분 8건 + JaCoCo가 지목한 0% 구멍 3건 모두 **07-14 자율 배치로 소진**. 아래는 그 다음 우선순위(측정 근거).
-- **분기(branch) 커버리지 보강 — 결제 실패·경계 경로** (M·BE) — 라인 84.5%인데 **분기 71.9%**: 가드·예외 경로가 덜 덮였다. `PaymentService` 64.1%(승인 실패·페일오버·환불 경계) → 실패 시나리오 단위 테스트.
-- **분기 커버리지 보강 — 쿠폰 적용 경계** (M·BE) — `MemberCouponService` 66.9%: 만료·최소주문금액 미달·이미 사용·타인 쿠폰 등 **거절 분기**가 비어 있다.
-- **얇은 컨트롤러 HTTP 경계** (S·BE) — activity·recommendation·wishlist 컨트롤러 0%(위임뿐이지만 인가·바인딩 회귀를 못 잡는다) → `@WebMvcTest` 최소 커버.
+> **2026-07-20 기능 전수 스캔**(5앵글 60후보 → 중복제거, 파일 근거) 결과. 사용자 요청이 "기능 추가"라 기능 항목을 위로, 커버리지 항목은 아래로 내림.
+> 랭킹 = (포트폴리오 가치 × 실사용 가치) ÷ 공수. 백엔드 깊이(동시성·상태머신·돈·스케줄링·검색) > CRUD 화면.
+
+- **① 상품 검색 키워드 확장** (S·BE·마이그0) — `keywordContains()`가 `product.name`만 본다 → "MAISON"(브랜드) 검색이 0건. 브랜드명·설명까지 OR 확장(brand는 **leftJoin** 필수 — 브랜드 없는 상품 탈락 방지).
+- **② 체크아웃 멱등키** (M·BE+FE·**V38**) — 더블클릭 한 번에 실주문 2건. 결제(`Payment.idempotencyKey`)에서 이미 푼 패턴을 **주문 계층으로 승격**. UNIQUE 위반 → 기존 주문 재조회로 같은 응답(재시도 안전).
+- **③ PENDING 주문 만료 스케줄러** (S·BE·마이그0) — 방치 PENDING이 영구 누적돼 KPI 오염. `@Scheduled` + TTL 설정값(`app.order.pending-ttl-minutes`). 재고 예약(결정필요 ②)의 전제.
+- **④ 주문 상태 이력 + 송장** (M·both·**V39**) — status가 제자리 덮어쓰기라 "언제 출고/왜 취소"를 복구 못 함 + 구매자에게 운송장이 없다. `order_status_history` + `courier`/`tracking_number`(외부 추적 API는 범위 밖·평문 표시까지).
+- **⑤ 어드민 주문 검색 심화** (M·BE+FE·마이그0) — `getAllOrders`가 status 필터 한 줄. **주문 도메인 유일한 QueryDSL 미적용 구역** → `OrderRepositoryCustom`이 ⑥·고객360·CSV의 공통 토대.
+- **⑥ 셀러 주문 목록("내 주문")** (M·BE+FE·마이그0) — 셀러가 **돈은 보는데 뭘 포장할지는 못 본다**. `OrderItem.sellerId`(V20)가 이미 스냅샷돼 있는데 읽는 쿼리가 0줄. ⑤에 조건 하나 추가. ⚠️출고 전이는 범위 밖(결정필요 ①).
+- **⑦ 쿠폰 중단(disable) + 발급/사용 현황** (S·BE+FE·마이그0) — `Coupon.disable()`이 **호출자 없는 죽은 코드**: 오타 난 쿠폰을 만료까지 못 멈춘다(돈이 샌다).
+- **⑧ FE 공통 기반 3종** (S~M·FE·마이그0) — toast **0개**(실패가 안 보임)·인증 가드 **10곳 복붙**·`error.tsx`/`not-found.tsx` **부재**(`/products/999999`가 **200** → SSR/SEO 작업 훼손).
+- **⑨ PLP 필터 상태를 URL로** (M·FE·마이그0) — 자기모순: 서버 셸은 필터를 파싱해 **크롤러엔 필터된 목록**을 주는데 실사용자는 `useState(EMPTY)`라 **필터가 무시된 목록**을 본다(`useSearchParams` 레포 전체 0회).
+
+### (후순위) 커버리지 보강 — 기능 9건 소진 후
+- **분기 커버리지 — 결제 실패·경계** (M·BE) — 라인 84.5% vs **분기 71.9%**. `PaymentService` 64.1%.
+- **분기 커버리지 — 쿠폰 적용 경계** (M·BE) — `MemberCouponService` 66.9%(만료·최소금액·중복사용 거절 분기).
+- **얇은 컨트롤러 HTTP 경계** (S·BE) — activity·recommendation·wishlist 0%.
 
 ## 함께 (외부 연동 · 학습 — 자율 금지)
 - 🚧 **배포 ($0 라이브 데모) — 경로 A(Oracle VM) 확정** — 준비물 완료: env화·`Dockerfile`·`docs/deploy.md`(`feature/deploy-prep`) + **prod 산출물·배선 보강**(`feature/deploy-prep-hardening`→dev `06e7ff8`): `backend/docker-compose.prod.yml`(앱+MySQL)·`.env.prod.example`·datasource `${SPRING_DATASOURCE_USERNAME:${MYSQL_USER}}` 체인·`APP_OAUTH2_REDIRECT` 행·`.gitignore` `.env.prod` 차단. 로컬 검증=`bootJar`·`next build` PASS. **결정=경로 A**(Oracle Always Free VM: Vercel FE + VM에 Spring Boot+MySQL; 콜드스타트 없음·진짜 MySQL·쿠키 first-party). ⚠️경로 B는 Koyeb 무료 폐쇄(Mistral 인수)로 약화. **다음=사용자 계정 단계**: Oracle A1 VM 생성→레포 clone→`.env.prod`→`docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build`→Caddy HTTPS→Vercel FE→쿠키전략(Vercel rewrites `/api/*` 프록시=first-party 추천)→로그인 확인. MySQL 실런타임 검증=VM 첫 기동. **VM 준비물 `deploy/`**(vm-setup.sh·Caddyfile·README) + 프록시 뒤 OAuth2 헤더(`server.forward-headers-strategy`) 추가(`feature/deploy-vm-runbook`→dev `2832ed5`). (가이드=docs/deploy.md §3, deploy/README.md)
@@ -17,7 +30,18 @@
 - ✅ CI (GitHub Actions, `.github/workflows/ci.yml`) — 도입 완료. **다음=스케줄 무인 운영(이 위에)**. 후속: Testcontainers 실DB 통합·브랜치 보호 규칙.
 
 ## 결정 필요 (외부 무관이나 결정 미정 — 정하면 READY로)
-- (비어 있음) — 외부 무관 후보 소진. 다음은 "함께(외부)" 학습 또는 새 기능 결정.
+> 2026-07-20 기능 스캔에서 나온 것들. **자율 진행 금지**(범위·정책·UX 결정) — 사용자가 고르면 READY로 내려온다.
+
+1. **멀티셀러 주문의 상태 단위** ⭐가장 아키텍처적 — 셀러 출고 기능들의 선행 결정. 한 주문에 여러 셀러 상품이 섞이는데 `advanceShipping`은 **Order 전체** status를 움직인다. → (a) 현행 유지·셀러는 조회만(ADMIN이 출고) / (b) 단일셀러 주문에만 셀러 전이 권한 / (c) 상태를 **item·shipment 단위로 내림**(정답에 가깝지만 정산·환불·대사까지 파급).
+2. **재고 예약 — 오버셀 구간 제거 여부** — PENDING이 재고를 **전혀 안 잡아** 결제 지연만큼 레이스 구간이 열려 있다. → (a) 현행(결제 시 차감) / (b) 주문 생성 시 차감+취소 복원 / (c) `stock_reservation` TTL 예약(READY ③ 스케줄러 재사용). **동시성 서사로는 (c)가 최고, 공수도 최고.**
+3. **반품/교환** — DELIVERED가 막다른 길. 반품창 기간·반품 배송비 부담자·교환=취소후재주문 vs 진짜 스왑·자동승인 vs 셀러승인, 4개가 정해져야 상태머신이 그려진다.
+4. **배송비** (`shippingFee` 레포 전체 0회) — `payable = totalPrice - discount`라 PG 금액에 배송비가 **구조적으로 없다**. 나중에 넣으면 결제·환불·정산·대사를 동시에 건드린다. → (a) 도입 안 함(명시) / (b) 정액+무료임계 / (c) 셀러별. + 부분취소 시 환불 여부.
+5. **상품 할인가(정가 vs 판매가)** — `Product.price` 단일 필드라 "30% OFF"·SALE 탭·할인율 정렬이 **모델상 불가능**. → (a) `originalPrice` 필드 하나(S) / (b) 기간형 `product_promotion` 테이블(M~L).
+6. **알림 인박스(벨) + 재입고 알림** — 아웃박스→RabbitMQ→핸들러는 **완성돼 있는데** `NotificationLog`에 `memberId`도 `readAt`도 없어 **아무도 못 읽는다**(컨트롤러 부재). → 알림 대상 이벤트·수신자 스코프·읽음처리 방식.
+7. **게스트 장바구니** — 담기 클릭 = 즉시 `/login`(전환 킬러). → (a) 현행 / (b) localStorage(S·FE) / (c) 서버 토큰 카트+로그인 시 병합(L·BE).
+8. **취소·환불 사유 taxonomy** — `Order.cancel()`이 **인자 0개**라 돈이 나가는데 "왜"가 안 남는다. 사유 enum + **정산 귀책·배송비 부담에 영향 주는지**. 정하면 READY ④에 컬럼 하나로 붙는다.
+
+> 그 외 정책 대기: 회원 탈퇴(보존기간·PII 마스킹)·적립금/등급·상품 일괄작업 부분실패 정책·셀러 자가수정 범위·`next/image` 도입(이미지 호스팅처).
 
 ## DONE (완료 — 기록)
 - [x] (07-14) **커버리지 0% 구멍 3종 메우기** — `feature/coverage-holes`→dev `00d4fa5` (496 tests·+19·프로덕션 코드 변경 0). `AuditLogRepositoryImpl` 0→**98.7%**(감사 검색 QueryDSL이 한 번도 실행된 적 없었음) · `SettlementController` 0→**100%** · `ReconciliationController` 0→**93.3%**(서비스는 91.9%인데 돈 움직이는 HTTP 경계가 0%였음) · `MemberCouponClaimService` 0→**100%**(락 키가 쿠폰별인지 — 전역 키면 처리량 붕괴). 전체 82.6%→**84.5%**.
