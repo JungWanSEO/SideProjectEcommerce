@@ -134,6 +134,11 @@ app:
     enabled: ${APP_RATELIMIT_ENABLED:true}
     # 구현: memory(기본·인메모리 고정 윈도우) | redis(DIY 슬라이딩 윈도우 Lua) | redisson(토큰 버킷 RRateLimiter)
     provider: ${APP_RATELIMIT_PROVIDER:memory}
+  # 주문 정책
+  order:
+    # 결제 대기(PENDING) 유효시간(분). 이 시간이 지난 PENDING 주문은 만료 배치가 취소한다
+    #   (방치 PENDING이 어드민 목록·주문 수 KPI를 오염시키는 것 방지). 재고 예약을 도입하면 해제 지점이기도 하다.
+    pending-ttl-minutes: ${APP_ORDER_PENDING_TTL_MINUTES:30}
   cors:
     # 브라우저 호출을 허용할 FE origin(콤마 구분). 운영: APP_CORS_ALLOWED_ORIGINS=https://<your-app>.vercel.app
     allowed-origins: http://localhost:3000
