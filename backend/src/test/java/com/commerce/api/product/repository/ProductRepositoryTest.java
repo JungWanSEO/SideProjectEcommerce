@@ -2,6 +2,8 @@ package com.commerce.api.product.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.commerce.api.brand.entity.Brand;
+import com.commerce.api.brand.repository.BrandRepository;
 import com.commerce.api.global.config.JpaConfig;
 import com.commerce.api.global.config.QuerydslConfig;
 import com.commerce.api.product.dto.LowStockOption;
@@ -33,6 +35,10 @@ class ProductRepositoryTest {
 
     @Autowired
     private ProductRepository productRepository;
+
+    // 브랜드명 검색 검증용 — 브랜드는 별도 애그리거트라 리포지토리로 직접 저장한다.
+    @Autowired
+    private BrandRepository brandRepository;
 
     private Product newProduct() {
         Product product = Product.builder()
@@ -101,6 +107,74 @@ class ProductRepositoryTest {
 
         assertThat(page.getContent()).extracting(Product::getName)
                 .containsExactlyInAnyOrder("반팔티셔츠", "긴팔티셔츠");
+    }
+
+    // === 키워드 검색: 상품명 · 브랜드명 · 설명 (OR) ===
+
+    @Test
+    @DisplayName("search - 브랜드명으로도 검색된다(상품명엔 브랜드가 없어도) — 예전엔 0건이던 케이스")
+    void search_byBrandName() {
+        Brand maison = brandRepository.save(Brand.create("MAISON CLAY"));
+        Brand other = brandRepository.save(Brand.create("아뜰리에"));
+        productRepository.save(branded("울 코트", maison.getId()));
+        productRepository.save(branded("린넨 셔츠", other.getId()));
+        productRepository.save(product("브랜드없는옷", ProductStatus.ON_SALE));   // brandId=null → 탈락하면 안 됨
+
+        Page<Product> page = productRepository.search(VISIBLE,
+                new ProductSearchCondition("MAISON", null, null, null, null, null),
+                PageRequest.of(0, 10, Sort.by(Sort.Direction.DESC, "createdAt")));
+
+        assertThat(page.getContent()).extracting(Product::getName).containsExactly("울 코트");
+    }
+
+    @Test
+    @DisplayName("search - 설명(description)으로도 검색된다")
+    void search_byDescription() {
+        Product cashmere = Product.builder()
+                .name("무지 니트").price(50000L).description("캐시미어 100% 혼방")
+                .status(ProductStatus.ON_SALE).build();
+        productRepository.save(cashmere);
+        productRepository.save(product("면 티셔츠", ProductStatus.ON_SALE));
+
+        Page<Product> page = productRepository.search(VISIBLE,
+                new ProductSearchCondition("캐시미어", null, null, null, null, null),
+                PageRequest.of(0, 10, Sort.by(Sort.Direction.DESC, "createdAt")));
+
+        assertThat(page.getContent()).extracting(Product::getName).containsExactly("무지 니트");
+    }
+
+    @Test
+    @DisplayName("search - 대소문자를 무시한다(소문자 maison → MAISON 브랜드 매칭)")
+    void search_ignoresCase() {
+        Brand maison = brandRepository.save(Brand.create("MAISON CLAY"));
+        productRepository.save(branded("울 코트", maison.getId()));
+
+        Page<Product> page = productRepository.search(VISIBLE,
+                new ProductSearchCondition("maison", null, null, null, null, null),
+                PageRequest.of(0, 10, Sort.by(Sort.Direction.DESC, "createdAt")));
+
+        assertThat(page.getContent()).extracting(Product::getName).containsExactly("울 코트");
+    }
+
+    @Test
+    @DisplayName("search - 상품명·브랜드명·설명 어디든 맞으면 나온다(OR·중복 없음)")
+    void search_matchesAnyFieldWithoutDuplicates() {
+        Brand tee = brandRepository.save(Brand.create("TEE LAB"));
+        productRepository.save(branded("TEE 반팔", tee.getId()));   // 이름·브랜드 둘 다 매칭 → 1건이어야(중복 X)
+
+        Page<Product> page = productRepository.search(VISIBLE,
+                new ProductSearchCondition("TEE", null, null, null, null, null),
+                PageRequest.of(0, 10, Sort.by(Sort.Direction.DESC, "createdAt")));
+
+        assertThat(page.getContent()).hasSize(1);        // 서브쿼리 방식이라 조인 중복이 없다
+        assertThat(page.getTotalElements()).isEqualTo(1);
+    }
+
+    /** 브랜드에 귀속된 상품(설명은 키워드와 무관하게). */
+    private Product branded(String name, Long brandId) {
+        return Product.builder()
+                .name(name).price(50000L).description("설명")
+                .status(ProductStatus.ON_SALE).brandId(brandId).build();
     }
 
     @Test
