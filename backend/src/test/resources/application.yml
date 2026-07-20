@@ -41,6 +41,11 @@ outbox:
 # 캐시 적중/무효화는 전용 테스트에서 @TestPropertySource(app.cache.enabled=true)로만 켜서 검증한다.
 # 레이트 리밋도 OFF — 공유 카운터가 여러 테스트의 로그인/claim에 누적돼 교차 간섭하는 것 방지(RateLimiterTest는 직접 인스턴스화).
 app:
+  # 결제 대기 만료 배치 OFF — 켜두면 테스트 도중 10분 경계에 배치가 돌아 다른 테스트의 PENDING 주문을
+  #   취소해 버려 간헐적 실패(flaky)를 만든다(아웃박스 폴러와 같은 이유).
+  order:
+    expiry:
+      enabled: false
   cache:
     enabled: false
   ratelimit:

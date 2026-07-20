@@ -23,6 +23,9 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     /** 멱등키로 주문 조회 — 체크아웃 중복 제출 판정(같은 키면 새로 만들지 않고 기존 주문을 돌려준다). */
     Optional<Order> findByIdempotencyKey(String idempotencyKey);
 
+    /** 특정 상태 + 지정 시각 이전 생성된 주문 — 결제 대기(PENDING) 만료 배치가 대상을 고를 때 사용. */
+    List<Order> findByStatusAndCreatedAtBefore(OrderStatus status, LocalDateTime createdAt);
+
     /**
      * 여러 상태(구매 완료 집합 등)의 모든 주문 — 추천 배치가 구매 신호를 모을 때 사용.
      * {@link OrderStatus#PURCHASED}(PAID·SHIPPING·DELIVERED)를 넘겨 "배송돼도 구매"를 포함한다.
