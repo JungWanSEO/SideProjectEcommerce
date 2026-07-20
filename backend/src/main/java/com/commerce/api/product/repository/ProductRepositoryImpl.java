@@ -2,6 +2,7 @@ package com.commerce.api.product.repository;
 
 import static com.commerce.api.product.entity.QProduct.product;
 
+import com.commerce.api.brand.entity.QBrand;
 import com.commerce.api.product.dto.LowStockOption;
 import com.commerce.api.product.dto.ProductSearchCondition;
 import com.commerce.api.product.entity.Product;
@@ -77,8 +78,35 @@ public class ProductRepositoryImpl implements ProductRepositoryCustom {
     }
 
     // --- 조건 헬퍼: 값이 없으면 null 반환 → 위 BooleanBuilder가 자동으로 무시 ---
+
+    /**
+     * 키워드 검색 — <b>상품명 · 브랜드명 · 설명</b>을 함께 훑는다(OR).
+     *
+     * <p>예전엔 상품명만 봐서 "MAISON"(브랜드)로 검색하면 0건이었다 — 쇼퍼가 브랜드로 찾는 건 아주 흔한데
+     * 빈 화면을 만나 이탈했다.
+     *
+     * <p><b>브랜드는 조인이 아니라 서브쿼리</b>: {@code Product.brandId}는 객체 연관이 아니라 <b>ID 참조</b>
+     * (애그리거트 경계 — DDD 결정)라 QueryDSL 조인 경로 자체가 없다. {@code brandId in (이름이 맞는 브랜드들)}로
+     * 푼다. 덤으로 조인이 없어 <b>상품 행이 중복되지 않고</b>, 브랜드가 없는 상품(brandId=null)도 이름·설명 조건으로
+     * 그대로 걸린다(잘못 leftJoin 했을 때 생기는 탈락 문제가 원천적으로 없다).
+     *
+     * <p>대소문자 무시: MySQL 기본 collation(utf8mb4_unicode_ci)은 이미 무시하지만 H2(테스트)는 다르다 →
+     * {@code containsIgnoreCase}로 두 환경의 동작을 맞춘다. (어차피 LIKE %kw% 는 선행 와일드카드라 인덱스를
+     * 못 타므로 LOWER() 추가 비용이 실질적으로 없다.)
+     */
     private BooleanExpression keywordContains(String keyword) {
-        return StringUtils.hasText(keyword) ? product.name.contains(keyword) : null;  // LIKE %kw%
+        if (!StringUtils.hasText(keyword)) {
+            return null;
+        }
+        QBrand brand = QBrand.brand;
+        BooleanExpression brandNameMatches = product.brandId.in(
+                JPAExpressions.select(brand.id)
+                        .from(brand)
+                        .where(brand.name.containsIgnoreCase(keyword)));
+
+        return product.name.containsIgnoreCase(keyword)
+                .or(brandNameMatches)
+                .or(product.description.containsIgnoreCase(keyword));
     }
 
     private BooleanExpression priceGoe(Long minPrice) {
