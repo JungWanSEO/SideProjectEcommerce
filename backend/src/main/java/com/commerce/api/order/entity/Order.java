@@ -75,6 +75,16 @@ public class Order extends BaseEntity {
     @Embedded
     private ShippingInfo shippingInfo;
 
+    /**
+     * 체크아웃 멱등키(중복 주문 방지) — 클라이언트가 체크아웃 화면 진입 시 1회 발급해 재시도에도 같은 값을 보낸다.
+     *
+     * <p>{@code Payment.idempotencyKey}와 같은 패턴을 <b>한 계층 위(주문)</b>로 올린 것. 결제와 달리
+     * <b>nullable</b>: 기존 주문 행에 백필할 값이 없고, 멱등키 없이 만드는 내부 경로(관리자·배치)를 막지 않는다.
+     * (MySQL UNIQUE는 NULL 중복을 허용한다.)
+     */
+    @Column(name = "idempotency_key", unique = true, length = 80)
+    private String idempotencyKey;
+
     private Order(Long memberId) {
         this.memberId = memberId;
         this.status = OrderStatus.PENDING;   // 생성 시점 = 결제 대기
@@ -85,6 +95,16 @@ public class Order extends BaseEntity {
     /** 빈 주문 생성 (항목은 addItem으로 추가) */
     public static Order create(Long memberId) {
         return new Order(memberId);
+    }
+
+    /**
+     * 멱등키 부여 — 체크아웃 경로에서 저장 <b>직전</b>에 찍는다. 이미 있으면 덮어쓰지 않는다
+     * (한 주문의 멱등키는 불변이어야 재시도 판정이 흔들리지 않는다).
+     */
+    public void assignIdempotencyKey(String key) {
+        if (this.idempotencyKey == null) {
+            this.idempotencyKey = key;
+        }
     }
 
     /** 주문 항목 추가 + 양방향 연관 설정 + 총액 누적 */

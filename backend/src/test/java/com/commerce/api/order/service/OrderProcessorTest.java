@@ -37,9 +37,11 @@ import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
 import org.springframework.test.util.ReflectionTestUtils;
 
 /**
@@ -164,7 +166,7 @@ class OrderProcessorTest {
         given(addressService.getOwnedAddress(100L, 5L)).willReturn(
                 new AddressResponse(5L, "홍길동", "010-1234-5678", "06236", "서울 강남구", "4층", true, null));
 
-        OrderResponse response = orderProcessor.checkout(100L, new CheckoutRequest(5L, "문 앞에 놔주세요", null));
+        OrderResponse response = orderProcessor.checkout(100L, new CheckoutRequest(5L, "문 앞에 놔주세요", null, null));
 
         assertThat(response.status()).isEqualTo(OrderStatus.PENDING);
         assertThat(response.totalPrice()).isEqualTo(20000L);              // 10000 x 2
@@ -196,7 +198,7 @@ class OrderProcessorTest {
                 .willReturn(new CouponApplyResult("WELCOME5000", 5000L, CouponFundedBy.PLATFORM, null));
 
         OrderResponse response = orderProcessor.checkout(100L,
-                new CheckoutRequest(5L, null, "WELCOME5000"));
+                new CheckoutRequest(5L, null, "WELCOME5000", null));
 
         assertThat(response.totalPrice()).isEqualTo(20000L);     // gross(항목 소계 합) 보존
         assertThat(response.discountAmount()).isEqualTo(5000L);
@@ -205,13 +207,85 @@ class OrderProcessorTest {
         assertThat(response.items().get(0).subtotal()).isEqualTo(20000L);   // 항목 원가는 안 깎임(정산 Step 2 기준)
     }
 
+    // === 멱등키(중복 주문 방지) ===
+
+    @Test
+    @DisplayName("체크아웃 멱등 - 같은 키로 다시 오면 새 주문을 만들지 않고 기존 주문을 그대로 돌려준다(장바구니도 안 건드림)")
+    void checkout_replaysExistingOrderForSameKey() {
+        Order existing = Order.create(100L);
+        existing.addItem(OrderItem.builder()
+                .productId(1L).optionId(10L).productName("반팔티셔츠").size("M")
+                .orderPrice(10000L).quantity(2).build());
+        ReflectionTestUtils.setField(existing, "id", 77L);
+        given(orderRepository.findByIdempotencyKey("key-1")).willReturn(Optional.of(existing));
+
+        OrderResponse response = orderProcessor.checkout(100L,
+                new CheckoutRequest(5L, null, null, "key-1"));
+
+        assertThat(response.id()).isEqualTo(77L);                    // 처음 만든 그 주문
+        verify(orderRepository, never()).save(any(Order.class));     // 새 주문 없음
+        verify(cartRepository, never()).findByMemberId(any());       // 장바구니를 다시 비우지도 않음
+    }
+
+    @Test
+    @DisplayName("체크아웃 멱등 - 남의 멱등키면 그 주문을 돌려주지 않고 409(IDOR 차단)")
+    void checkout_rejectsOtherMembersKey() {
+        Order othersOrder = Order.create(999L);   // 다른 회원의 주문
+        ReflectionTestUtils.setField(othersOrder, "id", 88L);
+        given(orderRepository.findByIdempotencyKey("stolen-key")).willReturn(Optional.of(othersOrder));
+
+        assertThatThrownBy(() -> orderProcessor.checkout(100L,
+                new CheckoutRequest(5L, null, null, "stolen-key")))
+                .isInstanceOf(BusinessException.class)
+                .extracting("status").isEqualTo(HttpStatus.CONFLICT);
+        verify(orderRepository, never()).save(any(Order.class));
+    }
+
+    @Test
+    @DisplayName("체크아웃 멱등 - 처음 보는 키면 주문을 만들고 그 키를 주문에 새긴다")
+    void checkout_stampsIdempotencyKeyOnNewOrder() {
+        Product product = productWithOption(1L, 10L, "반팔티셔츠", 10000L, 10);
+        Cart cart = Cart.create(100L);
+        cart.addItem(1L, 10L, 1);
+        given(orderRepository.findByIdempotencyKey("fresh-key")).willReturn(Optional.empty());
+        given(cartRepository.findByMemberId(100L)).willReturn(Optional.of(cart));
+        given(productRepository.findByOptionId(10L)).willReturn(Optional.of(product));
+        given(orderRepository.save(any(Order.class))).willAnswer(inv -> inv.getArgument(0));
+        given(addressService.getOwnedAddress(100L, 5L)).willReturn(
+                new AddressResponse(5L, "홍길동", "010-1234-5678", "06236", "서울 강남구", "4층", true, null));
+
+        orderProcessor.checkout(100L, new CheckoutRequest(5L, null, null, "fresh-key"));
+
+        ArgumentCaptor<Order> captor = ArgumentCaptor.forClass(Order.class);
+        verify(orderRepository).save(captor.capture());
+        assertThat(captor.getValue().getIdempotencyKey()).isEqualTo("fresh-key");
+    }
+
+    @Test
+    @DisplayName("체크아웃 멱등 - 키가 없으면(구버전 클라이언트) 조회 없이 기존 동작 그대로")
+    void checkout_withoutKeySkipsLookup() {
+        Product product = productWithOption(1L, 10L, "반팔티셔츠", 10000L, 10);
+        Cart cart = Cart.create(100L);
+        cart.addItem(1L, 10L, 1);
+        given(cartRepository.findByMemberId(100L)).willReturn(Optional.of(cart));
+        given(productRepository.findByOptionId(10L)).willReturn(Optional.of(product));
+        given(orderRepository.save(any(Order.class))).willAnswer(inv -> inv.getArgument(0));
+        given(addressService.getOwnedAddress(100L, 5L)).willReturn(
+                new AddressResponse(5L, "홍길동", "010-1234-5678", "06236", "서울 강남구", "4층", true, null));
+
+        orderProcessor.checkout(100L, new CheckoutRequest(5L, null, null, null));
+
+        verify(orderRepository, never()).findByIdempotencyKey(any());
+        verify(orderRepository).save(any(Order.class));
+    }
+
     @Test
     @DisplayName("체크아웃 실패 - 빈 장바구니면 400, 저장 안 됨 (주소 조회 전에 막힘)")
     void checkout_emptyCart() {
         Cart cart = Cart.create(100L);   // 항목 없음
         given(cartRepository.findByMemberId(100L)).willReturn(Optional.of(cart));
 
-        assertThatThrownBy(() -> orderProcessor.checkout(100L, new CheckoutRequest(5L, null, null)))
+        assertThatThrownBy(() -> orderProcessor.checkout(100L, new CheckoutRequest(5L, null, null, null)))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("장바구니가 비어 있습니다");
         verify(orderRepository, never()).save(any(Order.class));

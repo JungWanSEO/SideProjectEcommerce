@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { apiGet, apiPost } from "@/lib/api";
@@ -33,6 +33,13 @@ export default function CheckoutPage() {
   const [couponError, setCouponError] = useState<string | null>(null);
   const [applyingCoupon, setApplyingCoupon] = useState(false);
   const [wallet, setWallet] = useState<MemberCoupon[]>([]); // 내 쿠폰함(사용 가능한 발급 쿠폰)
+
+  /**
+   * 멱등키 — 이 체크아웃 화면에서 딱 한 번 발급하고, 재시도(더블클릭·네트워크 타임아웃 후 재요청)에도 같은 값을 보낸다.
+   * 서버는 같은 키를 다시 받으면 새 주문을 만들지 않고 처음 만든 주문을 그대로 돌려준다(중복 주문 방지).
+   * useRef라 리렌더에도 값이 유지되고, 화면을 새로 들어오면 새 키가 발급된다(= 새 주문 의도).
+   */
+  const idempotencyKey = useRef<string>(crypto.randomUUID());
 
   useEffect(() => {
     if (!authLoading && !user) router.replace("/login");
@@ -100,6 +107,7 @@ export default function CheckoutPage() {
         addressId: selectedId,
         deliveryMemo: memo.trim() || null,
         couponCode: coupon ? coupon.couponCode : null, // "적용"한 쿠폰만 전송
+        idempotencyKey: idempotencyKey.current, // 재시도해도 주문은 하나
       });
       router.push(`/orders/${order.id}/pay`); // 주문(PENDING) 생성됨 → 결제 화면으로
     } catch (e) {

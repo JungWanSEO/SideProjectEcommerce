@@ -24,10 +24,12 @@ import com.commerce.api.product.repository.ProductRepository;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 /**
  * 주문 처리 트랜잭션 워커.
@@ -50,7 +52,7 @@ public class OrderProcessor {
     /** 명시적 항목 목록으로 주문 생성 (POST /api/orders). 배송지·쿠폰은 없다(null). */
     @Transactional
     public OrderResponse place(Long memberId, OrderCreateRequest request) {
-        return placeOrder(memberId, request.items(), null, null);
+        return placeOrder(memberId, request.items(), null, null, null);   // 명시적 생성 경로엔 멱등키 없음
     }
 
     /**
@@ -60,6 +62,13 @@ public class OrderProcessor {
      */
     @Transactional
     public OrderResponse checkout(Long memberId, CheckoutRequest request) {
+        // 멱등: 같은 키로 이미 만든 주문이 있으면 새로 만들지 않고 그 주문을 그대로 돌려준다.
+        //   (더블클릭·타임아웃 후 재시도로 주문이 2건 생기고 장바구니가 두 번 비워지는 것을 막는다.)
+        Optional<OrderResponse> replayed = findByIdempotencyKey(memberId, request.idempotencyKey());
+        if (replayed.isPresent()) {
+            return replayed.get();
+        }
+
         Cart cart = cartRepository.findByMemberId(memberId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.BAD_REQUEST, "장바구니가 비어 있습니다."));
 
@@ -75,9 +84,33 @@ public class OrderProcessor {
         ShippingInfo shipping = ShippingInfo.of(addr.recipient(), addr.phone(), addr.zipcode(),
                 addr.address1(), addr.address2(), request.deliveryMemo());
 
-        OrderResponse response = placeOrder(memberId, items, shipping, request.couponCode());
+        OrderResponse response = placeOrder(memberId, items, shipping, request.couponCode(),
+                request.idempotencyKey());
         cart.clearItems();   // 주문 성공 후 장바구니 비우기 (orphanRemoval로 DB 삭제, 같은 트랜잭션)
         return response;
+    }
+
+    /**
+     * 멱등키로 이미 만들어진 주문을 찾는다(재시도 판정). 키가 없거나 처음 보는 키면 빈 Optional(= 새로 만들어라).
+     *
+     * <p><b>소유권 확인은 필수</b>: 멱등키는 전역 UNIQUE라, 남의 키를 추측·탈취해 보내면 <b>남의 주문이 그대로
+     * 응답에 실릴 수 있다</b>(IDOR). 주인이 다르면 재시도가 아니라 키 충돌로 보고 409를 준다 —
+     * 조회 결과를 숨기므로 "그 키가 존재하는지"조차 흘리지 않는다.
+     *
+     * <p>{@code OrderService}가 UNIQUE 위반(동시 중복 제출)을 잡은 뒤 <b>새 트랜잭션</b>으로 다시 부르므로 public.
+     */
+    @Transactional(readOnly = true)
+    public Optional<OrderResponse> findByIdempotencyKey(Long memberId, String idempotencyKey) {
+        if (!StringUtils.hasText(idempotencyKey)) {
+            return Optional.empty();   // 멱등키 미사용(구버전 클라이언트·내부 호출) — 기존 동작 그대로
+        }
+        return orderRepository.findByIdempotencyKey(idempotencyKey)
+                .map(existing -> {
+                    if (!existing.getMemberId().equals(memberId)) {
+                        throw new BusinessException(HttpStatus.CONFLICT, "이미 사용된 요청 키입니다.");
+                    }
+                    return OrderResponse.from(existing);
+                });
     }
 
     /**
@@ -119,10 +152,13 @@ public class OrderProcessor {
      * 주문은 PENDING(결제 대기)으로 생성되며, <b>재고는 차감하지 않는다</b> — 재고 차감은 결제 승인(pay) 시점.
      */
     private OrderResponse placeOrder(Long memberId, List<OrderItemRequest> items, ShippingInfo shipping,
-            String couponCode) {
+            String couponCode, String idempotencyKey) {
         Order order = Order.create(memberId);
         if (shipping != null) {
             order.ship(shipping);
+        }
+        if (StringUtils.hasText(idempotencyKey)) {
+            order.assignIdempotencyKey(idempotencyKey);   // UNIQUE 위반 = 동시 중복 제출(OrderService가 처리)
         }
 
         for (OrderItemRequest itemRequest : items) {

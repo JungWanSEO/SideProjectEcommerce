@@ -21,6 +21,13 @@ public record CheckoutRequest(
 
         @Schema(description = "적용할 쿠폰 코드(선택). 비우면 할인 없음.", example = "WELCOME5000")
         @Size(max = 40, message = "쿠폰 코드는 40자 이내여야 합니다.")
-        String couponCode
+        String couponCode,
+
+        @Schema(description = "멱등키(선택·권장) — 같은 키로 다시 보내면 새 주문을 만들지 않고 처음 만든 주문을 그대로 "
+                + "돌려준다. 더블클릭·네트워크 타임아웃 후 재시도로 주문이 두 건 생기는 것을 막는다. "
+                + "클라이언트가 체크아웃 화면 진입 시 UUID로 1회 발급해 재시도에도 같은 값을 보낸다.",
+                example = "3f1b2c8e-9a44-4f0e-8f5a-7b2f0a1d9c33")
+        @Size(max = 80, message = "멱등키는 80자 이내여야 합니다.")
+        String idempotencyKey
 ) {
 }
