@@ -5,6 +5,7 @@ import com.commerce.api.order.entity.OrderStatus;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -18,6 +19,9 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
     /** 특정 회원의 주문을 페이지로 조회 (정렬·페이지 크기는 Pageable에 따름). */
     Page<Order> findByMemberId(Long memberId, Pageable pageable);
+
+    /** 멱등키로 주문 조회 — 체크아웃 중복 제출 판정(같은 키면 새로 만들지 않고 기존 주문을 돌려준다). */
+    Optional<Order> findByIdempotencyKey(String idempotencyKey);
 
     /**
      * 여러 상태(구매 완료 집합 등)의 모든 주문 — 추천 배치가 구매 신호를 모을 때 사용.

@@ -15,6 +15,7 @@ import com.commerce.api.order.repository.OrderRepository;
 import com.commerce.api.product.repository.ProductRepository;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
@@ -58,7 +59,16 @@ public class OrderService {
             maxAttempts = 3,
             backoff = @Backoff(delay = 100))
     public OrderResponse checkout(Long memberId, CheckoutRequest request) {
-        return orderProcessor.checkout(memberId, request);
+        try {
+            return orderProcessor.checkout(memberId, request);
+        } catch (DataIntegrityViolationException e) {
+            // 동시 중복 제출(더블클릭): 두 요청이 모두 "기존 주문 없음"을 보고 각자 INSERT → 멱등키 UNIQUE 위반.
+            //   진 쪽 트랜잭션은 롤백됐고 이긴 쪽 주문은 커밋돼 있으므로, 그 주문을 찾아 같은 응답을 돌려준다
+            //   (사용자에겐 "한 번 눌린 것"으로 보인다). 트랜잭션이 이미 롤백돼 조회는 새 트랜잭션에서 — 그래서 프록시 경유.
+            return orderProcessor.findByIdempotencyKey(memberId, request.idempotencyKey())
+                    .orElseThrow(() -> e);   // 멱등키와 무관한 무결성 위반이면 원래 예외를 그대로
+
+        }
     }
 
     /** 쿠폰 미리보기(주문 생성 없음) — 현재 장바구니 기준 할인·예상 결제액. 읽기 전용이라 재시도 불필요. */
