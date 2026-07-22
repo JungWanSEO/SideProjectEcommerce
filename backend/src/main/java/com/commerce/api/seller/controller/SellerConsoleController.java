@@ -3,6 +3,8 @@ package com.commerce.api.seller.controller;
 import com.commerce.api.global.common.ApiResponse;
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.security.SecurityUtil;
+import com.commerce.api.order.dto.OrderSearchCondition;
+import com.commerce.api.order.dto.OrderSummaryResponse;
 import com.commerce.api.seller.dto.SellerResponse;
 import com.commerce.api.seller.service.SellerConsoleService;
 import com.commerce.api.settlement.dto.PayoutResponse;
@@ -78,5 +80,17 @@ public class SellerConsoleController {
             @ParameterObject @PageableDefault(size = 20, sort = "id", direction = Direction.DESC) Pageable pageable) {
         return ResponseEntity.ok(ApiResponse.success(
                 sellerConsoleService.getMyPayouts(SecurityUtil.getCurrentMemberId(), status, pageable)));
+    }
+
+    @Operation(summary = "내 주문",
+            description = "내 셀러 상품이 하나라도 든 주문 목록(무엇을 포장해 보낼지). keyword(수령인·주문번호)·"
+                    + "status·기간·금액 필터. 셀러 스코프는 서버가 강제하므로 남의 셀러 주문은 보이지 않는다. 최신순.")
+    @GetMapping("/me/orders")
+    public ResponseEntity<ApiResponse<PageResponse<OrderSummaryResponse>>> getMyOrders(
+            @ParameterObject OrderSearchCondition condition,
+            @ParameterObject @PageableDefault(size = 20, sort = "createdAt", direction = Direction.DESC)
+            Pageable pageable) {
+        return ResponseEntity.ok(ApiResponse.success(
+                sellerConsoleService.getMyOrders(SecurityUtil.getCurrentMemberId(), condition, pageable)));
     }
 }

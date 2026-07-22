@@ -4,6 +4,9 @@ import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.member.entity.Member;
 import com.commerce.api.member.repository.MemberRepository;
+import com.commerce.api.order.dto.OrderSearchCondition;
+import com.commerce.api.order.dto.OrderSummaryResponse;
+import com.commerce.api.order.service.OrderService;
 import com.commerce.api.seller.dto.SellerResponse;
 import com.commerce.api.settlement.dto.PayoutResponse;
 import com.commerce.api.settlement.dto.SellerSettlementSummary;
@@ -36,10 +39,20 @@ public class SellerConsoleService {
     private final SellerService sellerService;
     private final SettlementService settlementService;
     private final PayoutService payoutService;
+    private final OrderService orderService;   // "내 주문"(내 셀러 상품이 든 주문) 조회 — 셀러 스코프는 서비스가 강제
 
     /** 내 셀러 정보. */
     public SellerResponse getMySeller(Long memberId) {
         return sellerService.getSeller(requireSellerId(memberId));
+    }
+
+    /**
+     * 내 주문 — 이 셀러의 상품이 하나라도 든 주문 목록. 셀러가 "무엇을 포장해 보낼지"를 보는 화면.
+     * 셀러 스코프는 {@link OrderService#searchSellerOrders}가 로그인 셀러로 강제(요청값 무시)한다 — 남의 셀러 주문 차단.
+     */
+    public PageResponse<OrderSummaryResponse> getMyOrders(
+            Long memberId, OrderSearchCondition condition, Pageable pageable) {
+        return orderService.searchSellerOrders(requireSellerId(memberId), condition, pageable);
     }
 
     /** 내 정산 항목(상태·기간 필터). */

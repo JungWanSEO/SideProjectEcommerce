@@ -1,9 +1,16 @@
 "use client";
 
 import { ReactNode, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 import Skeleton from "@/components/ui/Skeleton";
+
+// 셀러 콘솔 내비게이션. /seller = 정산(랜딩), /seller/orders = 내 주문.
+const NAV = [
+  { href: "/seller", label: "내 정산" },
+  { href: "/seller/orders", label: "내 주문" },
+];
 
 /**
  * 셀러 콘솔 레이아웃 — 스토어/어드민과 분리된 셸. (SELLER 전용)
@@ -14,6 +21,7 @@ import Skeleton from "@/components/ui/Skeleton";
 export default function SellerLayout({ children }: { children: ReactNode }) {
   const { user, loading, logout } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     if (loading) return;
@@ -34,7 +42,21 @@ export default function SellerLayout({ children }: { children: ReactNode }) {
           commerce <span className="text-gray-400">seller</span>
         </div>
         <nav className="flex flex-col gap-1 px-3">
-          <span className="rounded bg-gray-900 px-3 py-2 text-sm text-white">내 정산</span>
+          {NAV.map((n) => {
+            // "/seller"(정산 랜딩)는 정확히 일치할 때만 활성(하위 경로가 startsWith로 잡히지 않게).
+            const active = n.href === "/seller" ? pathname === "/seller" : pathname.startsWith(n.href);
+            return (
+              <Link
+                key={n.href}
+                href={n.href}
+                className={`rounded px-3 py-2 text-sm ${
+                  active ? "bg-gray-900 text-white" : "text-gray-700 hover:bg-gray-100"
+                }`}
+              >
+                {n.label}
+              </Link>
+            );
+          })}
         </nav>
       </aside>
 

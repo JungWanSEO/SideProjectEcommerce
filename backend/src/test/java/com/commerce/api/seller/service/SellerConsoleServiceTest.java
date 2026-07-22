@@ -41,6 +41,8 @@ class SellerConsoleServiceTest {
     private SettlementService settlementService;
     @Mock
     private PayoutService payoutService;
+    @Mock
+    private com.commerce.api.order.service.OrderService orderService;
     @InjectMocks
     private SellerConsoleService sellerConsoleService;
 
@@ -75,6 +77,22 @@ class SellerConsoleServiceTest {
         assertThatThrownBy(() -> sellerConsoleService.getMySeller(1L))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("셀러 계정이 아닙니다");
+    }
+
+    @Test
+    @DisplayName("내 주문 - 내 sellerId로 스코핑해 주문 검색에 위임(남의 셀러 주문 차단)")
+    void getMyOrders_scopedToMySeller() {
+        given(memberRepository.findById(1L)).willReturn(Optional.of(memberWithSeller(1L, 5L)));
+        var pageable = org.springframework.data.domain.PageRequest.of(0, 20);
+        var condition = new com.commerce.api.order.dto.OrderSearchCondition(
+                null, null, null, null, null, null, null, null);
+
+        sellerConsoleService.getMyOrders(1L, condition, pageable);
+
+        verify(orderService).searchSellerOrders(
+                org.mockito.ArgumentMatchers.eq(5L),
+                org.mockito.ArgumentMatchers.eq(condition),
+                org.mockito.ArgumentMatchers.eq(pageable));
     }
 
     @Test
