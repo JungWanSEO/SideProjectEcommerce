@@ -8,7 +8,8 @@
 > **2026-07-21 무결정 스캔 8건 전부 소진(07-22)** → 아래 DONE. **자율 진행 가능한 READY = 0** — 다음 배치는 **새 무결정 스캔** 필요(아래 "여유 시" 저긴급 3건은 남아 있음).
 
 ### (여유 시·무결정이나 저긴급) — 남은 저긴급 자율 후보
-- 대사 `reconcile`이 findAll 후 Java 필터 → `findBySettledDateBetween`(+인덱스). / 체크아웃·결제 항목당 findByOptionId N+1 → `findByOptionIdIn` 배치. / 순수 테스트 추가(JwtAuthenticationFilter·getProductsForAdmin 회귀·소셜로그인 find-or-create). / #8 감사 targetId **FE 필터 입력**(백엔드는 완료).
+- 대사 `reconcile`이 findAll 후 Java 필터 → `findBySettledDateBetween`(+인덱스). / 체크아웃·결제 항목당 findByOptionId N+1 → `findByOptionIdIn` 배치. / 순수 테스트 추가(JwtAuthenticationFilter·getProductsForAdmin 회귀·소셜로그인 find-or-create).
+- ✅ (07-22) #8 감사 targetId **FE 필터 입력 + 드릴다운** — `feature/audit-targetid-fe`→dev `0ff9243`.
 
 ## 함께 (외부 연동 · 학습 — 자율 금지)
 - 🚧 **배포 ($0 라이브 데모) — 경로 A(Oracle VM) 확정** — 준비물 완료: env화·`Dockerfile`·`docs/deploy.md`(`feature/deploy-prep`) + **prod 산출물·배선 보강**(`feature/deploy-prep-hardening`→dev `06e7ff8`): `backend/docker-compose.prod.yml`(앱+MySQL)·`.env.prod.example`·datasource `${SPRING_DATASOURCE_USERNAME:${MYSQL_USER}}` 체인·`APP_OAUTH2_REDIRECT` 행·`.gitignore` `.env.prod` 차단. 로컬 검증=`bootJar`·`next build` PASS. **결정=경로 A**(Oracle Always Free VM: Vercel FE + VM에 Spring Boot+MySQL; 콜드스타트 없음·진짜 MySQL·쿠키 first-party). ⚠️경로 B는 Koyeb 무료 폐쇄(Mistral 인수)로 약화. **다음=사용자 계정 단계**: Oracle A1 VM 생성→레포 clone→`.env.prod`→`docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build`→Caddy HTTPS→Vercel FE→쿠키전략(Vercel rewrites `/api/*` 프록시=first-party 추천)→로그인 확인. MySQL 실런타임 검증=VM 첫 기동. **VM 준비물 `deploy/`**(vm-setup.sh·Caddyfile·README) + 프록시 뒤 OAuth2 헤더(`server.forward-headers-strategy`) 추가(`feature/deploy-vm-runbook`→dev `2832ed5`). (가이드=docs/deploy.md §3, deploy/README.md)
