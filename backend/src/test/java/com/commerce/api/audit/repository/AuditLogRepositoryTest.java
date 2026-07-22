@@ -97,6 +97,22 @@ class AuditLogRepositoryTest {
     }
 
     @Test
+    @DisplayName("search - 대상 종류+식별자로 그 대상의 이력만 뽑는다(예: PRODUCT 42)")
+    void search_byTargetTypeAndId() {
+        auditLogRepository.save(AuditLog.builder().actorMemberId(1L).action("PRODUCT_UPDATE")
+                .targetType("PRODUCT").targetId("42").detail("PUT /api/products/42")
+                .result(AuditResult.SUCCESS).build());
+        auditLogRepository.save(AuditLog.builder().actorMemberId(1L).action("PRODUCT_UPDATE")
+                .targetType("PRODUCT").targetId("99").detail("PUT /api/products/99")
+                .result(AuditResult.SUCCESS).build());
+
+        Page<AuditLog> page = auditLogRepository.search(
+                new AuditLogSearchCondition(null, null, "PRODUCT", "42", null, null, null), FIRST_PAGE);
+
+        assertThat(page.getContent()).extracting(AuditLog::getTargetId).containsExactly("42");
+    }
+
+    @Test
     @DisplayName("search - 결과(SUCCESS/FAILURE)로 거른다 — 실패한 시도만 뽑는 게 감사의 핵심 용도")
     void search_byResult() {
         auditLogRepository.save(log(1L, "CATEGORY_UPDATE", "CATEGORY", AuditResult.SUCCESS));

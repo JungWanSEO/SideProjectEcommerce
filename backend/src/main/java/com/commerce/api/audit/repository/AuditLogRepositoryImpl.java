@@ -33,6 +33,7 @@ public class AuditLogRepositoryImpl implements AuditLogRepositoryCustom {
                 .and(eqActor(condition.actorMemberId()))
                 .and(eqAction(condition.action()))
                 .and(eqTargetType(condition.targetType()))
+                .and(eqTargetId(condition.targetId()))
                 .and(eqResult(condition.result()))
                 .and(createdGoe(condition.from()))
                 .and(createdLt(condition.to()));
@@ -65,6 +66,10 @@ public class AuditLogRepositoryImpl implements AuditLogRepositoryCustom {
 
     private BooleanExpression eqTargetType(String targetType) {
         return StringUtils.hasText(targetType) ? auditLog.targetType.eq(targetType) : null;
+    }
+
+    private BooleanExpression eqTargetId(String targetId) {
+        return StringUtils.hasText(targetId) ? auditLog.targetId.eq(targetId) : null;
     }
 
     private BooleanExpression eqResult(AuditResult result) {
