@@ -5,23 +5,11 @@
 > 외부 프로그램 연동(RabbitMQ·외부 API·새 외부 도구)은 자율 금지 → "함께(학습)"에서 사용자와 직접.
 
 ## READY (결정 완료 · 외부 무관 · 자율 진행 가능 · 위에서부터)
-> **2026-07-20 기능 전수 스캔**(5앵글 60후보 → 중복제거, 파일 근거) 결과. 사용자 요청이 "기능 추가"라 기능 항목을 위로, 커버리지 항목은 아래로 내림.
-> 랭킹 = (포트폴리오 가치 × 실사용 가치) ÷ 공수. 백엔드 깊이(동시성·상태머신·돈·스케줄링·검색) > CRUD 화면.
+> **2026-07-20 기능 전수 스캔**(5앵글 60후보)에서 뽑은 기능 9건은 07-20~21 자율 배치로 **전부 소진**(①~⑨ → DONE). 남은 READY는 커버리지 보강뿐.
 
-- **① 상품 검색 키워드 확장** (S·BE·마이그0) — `keywordContains()`가 `product.name`만 본다 → "MAISON"(브랜드) 검색이 0건. 브랜드명·설명까지 OR 확장(brand는 **leftJoin** 필수 — 브랜드 없는 상품 탈락 방지).
-- **② 체크아웃 멱등키** (M·BE+FE·**V38**) — 더블클릭 한 번에 실주문 2건. 결제(`Payment.idempotencyKey`)에서 이미 푼 패턴을 **주문 계층으로 승격**. UNIQUE 위반 → 기존 주문 재조회로 같은 응답(재시도 안전).
-- **③ PENDING 주문 만료 스케줄러** (S·BE·마이그0) — 방치 PENDING이 영구 누적돼 KPI 오염. `@Scheduled` + TTL 설정값(`app.order.pending-ttl-minutes`). 재고 예약(결정필요 ②)의 전제.
-- **④ 주문 상태 이력 + 송장** (M·both·**V39**) — status가 제자리 덮어쓰기라 "언제 출고/왜 취소"를 복구 못 함 + 구매자에게 운송장이 없다. `order_status_history` + `courier`/`tracking_number`(외부 추적 API는 범위 밖·평문 표시까지).
-- **⑤ 어드민 주문 검색 심화** (M·BE+FE·마이그0) — `getAllOrders`가 status 필터 한 줄. **주문 도메인 유일한 QueryDSL 미적용 구역** → `OrderRepositoryCustom`이 ⑥·고객360·CSV의 공통 토대.
-- **⑥ 셀러 주문 목록("내 주문")** (M·BE+FE·마이그0) — 셀러가 **돈은 보는데 뭘 포장할지는 못 본다**. `OrderItem.sellerId`(V20)가 이미 스냅샷돼 있는데 읽는 쿼리가 0줄. ⑤에 조건 하나 추가. ⚠️출고 전이는 범위 밖(결정필요 ①).
-- **⑦ 쿠폰 중단(disable) + 발급/사용 현황** (S·BE+FE·마이그0) — `Coupon.disable()`이 **호출자 없는 죽은 코드**: 오타 난 쿠폰을 만료까지 못 멈춘다(돈이 샌다).
-- **⑧ FE 공통 기반 3종** (S~M·FE·마이그0) — toast **0개**(실패가 안 보임)·인증 가드 **10곳 복붙**·`error.tsx`/`not-found.tsx` **부재**(`/products/999999`가 **200** → SSR/SEO 작업 훼손).
-- **⑨ PLP 필터 상태를 URL로** (M·FE·마이그0) — 자기모순: 서버 셸은 필터를 파싱해 **크롤러엔 필터된 목록**을 주는데 실사용자는 `useState(EMPTY)`라 **필터가 무시된 목록**을 본다(`useSearchParams` 레포 전체 0회).
-
-### (후순위) 커버리지 보강 — 기능 9건 소진 후
-- **분기 커버리지 — 결제 실패·경계** (M·BE) — 라인 84.5% vs **분기 71.9%**. `PaymentService` 64.1%.
+- **분기 커버리지 — 결제 실패·경계** (M·BE) — 라인 84.5% vs **분기 71.9%**. `PaymentService` 64.1%(승인 실패·페일오버·환불 경계).
 - **분기 커버리지 — 쿠폰 적용 경계** (M·BE) — `MemberCouponService` 66.9%(만료·최소금액·중복사용 거절 분기).
-- **얇은 컨트롤러 HTTP 경계** (S·BE) — activity·recommendation·wishlist 0%.
+- **얇은 컨트롤러 HTTP 경계** (S·BE) — activity·recommendation·wishlist 0%(위임뿐이나 인가·바인딩 회귀 미검출).
 
 ## 함께 (외부 연동 · 학습 — 자율 금지)
 - 🚧 **배포 ($0 라이브 데모) — 경로 A(Oracle VM) 확정** — 준비물 완료: env화·`Dockerfile`·`docs/deploy.md`(`feature/deploy-prep`) + **prod 산출물·배선 보강**(`feature/deploy-prep-hardening`→dev `06e7ff8`): `backend/docker-compose.prod.yml`(앱+MySQL)·`.env.prod.example`·datasource `${SPRING_DATASOURCE_USERNAME:${MYSQL_USER}}` 체인·`APP_OAUTH2_REDIRECT` 행·`.gitignore` `.env.prod` 차단. 로컬 검증=`bootJar`·`next build` PASS. **결정=경로 A**(Oracle Always Free VM: Vercel FE + VM에 Spring Boot+MySQL; 콜드스타트 없음·진짜 MySQL·쿠키 first-party). ⚠️경로 B는 Koyeb 무료 폐쇄(Mistral 인수)로 약화. **다음=사용자 계정 단계**: Oracle A1 VM 생성→레포 clone→`.env.prod`→`docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build`→Caddy HTTPS→Vercel FE→쿠키전략(Vercel rewrites `/api/*` 프록시=first-party 추천)→로그인 확인. MySQL 실런타임 검증=VM 첫 기동. **VM 준비물 `deploy/`**(vm-setup.sh·Caddyfile·README) + 프록시 뒤 OAuth2 헤더(`server.forward-headers-strategy`) 추가(`feature/deploy-vm-runbook`→dev `2832ed5`). (가이드=docs/deploy.md §3, deploy/README.md)
@@ -44,6 +32,8 @@
 > 그 외 정책 대기: 회원 탈퇴(보존기간·PII 마스킹)·적립금/등급·상품 일괄작업 부분실패 정책·셀러 자가수정 범위·`next/image` 도입(이미지 호스팅처).
 
 ## DONE (완료 — 기록)
+- [x] (07-20~21) **기능 스캔 READY 9건 전부** (508→**518 tests**·FE 0·⚠️V38·V39 MySQL 스모크=복귀 후):
+  - ① 상품 검색 브랜드명·설명 확장(서브쿼리) `d93b6ab` · ② 체크아웃 멱등키(V38·IDOR 가드·경쟁조건) `4d89ad8` · ③ PENDING 만료 배치(TTL 설정값·테스트 토글) `72f496d` · ④ 주문 상태 이력+송장(V39·엔티티 소유 타임라인) `2543ed9` · ⑤ 어드민 주문 검색(OrderRepositoryCustom·셀러 스코프 토대) `39e28c4` · ⑥ 셀러 내 주문(searchSellerOrders 재사용·스코프 강제) `dcacb8b` · ⑦ 쿠폰 중단+발급/사용 현황(usedCount 배치집계) `51afc52` · ⑧ FE 기반 3종(Toast·returnTo 가드·error/not-found·soft-404) `92eb6ae` · ⑨ PLP 필터 URL화(자기모순 해소·공유·뒤로가기) `ddf8fc8`.
 - [x] (07-14) **커버리지 0% 구멍 3종 메우기** — `feature/coverage-holes`→dev `00d4fa5` (496 tests·+19·프로덕션 코드 변경 0). `AuditLogRepositoryImpl` 0→**98.7%**(감사 검색 QueryDSL이 한 번도 실행된 적 없었음) · `SettlementController` 0→**100%** · `ReconciliationController` 0→**93.3%**(서비스는 91.9%인데 돈 움직이는 HTTP 경계가 0%였음) · `MemberCouponClaimService` 0→**100%**(락 키가 쿠폰별인지 — 전역 키면 처리량 붕괴). 전체 82.6%→**84.5%**.
 - [x] (07-14) **SSR 후속 3종** — `feature/ssr-followups`→dev `4a34f26` (FE 0·build 0). `loading.tsx`(`/products`·`/products/[id]` 서버 fetch 대기 = 빈 화면이었음) · **`metadataBase`**(OG 상대경로 경고 소멸) · **필터 URL 색인 정책**=필터 걸린 목록 **noindex,follow**(조합 폭발 → 중복 색인 방지, 상품 링크는 계속 따라감)·**canonical은 자기참조 유지**(깨끗한 URL로 정규화하면 noindex와 모순 신호)·`page`는 필터가 아니라 색인 유지.
 - [x] (07-14) **JaCoCo 커버리지 리포트** — `feature/jacoco-coverage`→dev `a93ad54`. `test finalizedBy jacocoTestReport`(한 번에 리포트)·Q클래스/DTO/config 제외·CI 아티팩트 업로드·`docs/coverage.md`. **기준선 instruction 82.6%·branch 70.1%**. 🔴발견=`AuditLogRepositoryImpl`·`MemberCouponClaimService`·정산/대사/쿠폰 컨트롤러 **0%** / 🟢`SettlementService` 91.9%. → 구멍 3건을 READY로 재충전.
