@@ -45,6 +45,7 @@ export default function AdminAuditPage() {
 
   const [result, setResult] = useState<AuditResult | "ALL">("ALL");
   const [targetType, setTargetType] = useState<string>("");
+  const [targetId, setTargetId] = useState<string>("");
   const [action, setAction] = useState<string>("");
   const [page, setPage] = useState(0);
   const [hasNext, setHasNext] = useState(false);
@@ -57,9 +58,10 @@ export default function AdminAuditPage() {
     const q = new URLSearchParams();
     if (result !== "ALL") q.set("result", result);
     if (targetType) q.set("targetType", targetType);
+    if (targetId.trim()) q.set("targetId", targetId.trim());
     if (action.trim()) q.set("action", action.trim());
     return q;
-  }, [result, targetType, action]);
+  }, [result, targetType, targetId, action]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -167,6 +169,15 @@ export default function AdminAuditPage() {
           placeholder="액션 코드 (예: PRODUCT_UPDATE)"
           className="w-64 rounded border border-gray-300 bg-white px-3 py-1 text-sm text-gray-700"
         />
+        <input
+          value={targetId}
+          onChange={(e) => {
+            setTargetId(e.target.value);
+            setPage(0);
+          }}
+          placeholder="대상 ID (예: 42)"
+          className="w-40 rounded border border-gray-300 bg-white px-3 py-1 text-sm text-gray-700"
+        />
       </div>
 
       {/* 목록 */}
@@ -226,7 +237,21 @@ export default function AdminAuditPage() {
         </table>
       </div>
 
-      {selected && <AuditDetail log={selected} onClose={() => setSelected(null)} />}
+      {selected && (
+        <AuditDetail
+          log={selected}
+          onClose={() => setSelected(null)}
+          onFilterTarget={(t, id) => {
+            // "이 대상의 전체 이력" — 대상 종류·ID로 좁히고 결과/액션 필터는 풀어 모든 이력을 본다.
+            setResult("ALL");
+            setTargetType(t);
+            setTargetId(id);
+            setAction("");
+            setPage(0);
+            setSelected(null);
+          }}
+        />
+      )}
 
       {/* 페이지네이션 */}
       <div className="mt-4 flex items-center justify-between text-sm text-gray-500">
@@ -257,7 +282,18 @@ export default function AdminAuditPage() {
  * 감사 로그 상세 — 표에서 잘리는 detail(요청 URL·실패 메시지) 전문을 본다.
  * 배경 클릭·닫기 버튼으로 닫는다(간단한 모달 — 라이브러리 없이).
  */
-function AuditDetail({ log, onClose }: { log: AuditLog; onClose: () => void }) {
+function AuditDetail({
+  log,
+  onClose,
+  onFilterTarget,
+}: {
+  log: AuditLog;
+  onClose: () => void;
+  onFilterTarget: (targetType: string, targetId: string) => void;
+}) {
+  // const 지역으로 뽑아야 아래 && 가드의 좁힘(narrowing)이 onClick 클로저까지 유지된다(string|null → string).
+  const tType = log.targetType;
+  const tId = log.targetId;
   return (
     <div
       onClick={onClose}
@@ -281,10 +317,20 @@ function AuditDetail({ log, onClose }: { log: AuditLog; onClose: () => void }) {
             value={log.actorEmail ?? (log.actorMemberId != null ? `회원 #${log.actorMemberId}` : "시스템")}
           />
           <Field label="액션" value={log.action} />
-          <Field
-            label="대상"
-            value={log.targetType ? `${log.targetType}${log.targetId ? ` #${log.targetId}` : ""}` : "—"}
-          />
+          <div className="flex items-center justify-between gap-4">
+            <dt className="text-xs text-gray-500">대상</dt>
+            <dd className="flex items-center gap-2 text-right text-gray-800">
+              {tType ? `${tType}${tId ? ` #${tId}` : ""}` : "—"}
+              {tType && tId && (
+                <button
+                  onClick={() => onFilterTarget(tType, tId)}
+                  className="rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-100"
+                >
+                  이 대상 이력
+                </button>
+              )}
+            </dd>
+          </div>
           <Field label="결과" value={log.result === "SUCCESS" ? "성공" : "실패"} />
           <div>
             <dt className="text-xs text-gray-500">상세</dt>
