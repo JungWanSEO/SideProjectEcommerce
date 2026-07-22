@@ -130,6 +130,45 @@ class OrderServiceTest {
         verify(productOptionRepository, never()).restore(eq(10L), anyInt());   // 이미 취소된 항목은 이중 복원 안 함
     }
 
+    private OrderItem itemOn(long optionId, int quantity) {
+        return OrderItem.builder()
+                .productId(1L).optionId(optionId).productName("t").size("M")
+                .orderPrice(10000L).quantity(quantity).build();
+    }
+
+    @Test
+    @DisplayName("항목 취소(미결제) - 그 항목 예약만 해제, 실재고 복원 없음 (결제 시 소진 안 됨)")
+    void cancelItem_pending_releasesItemReservation() {
+        OrderItem line1 = itemOn(10L, 2);
+        OrderItem line2 = itemOn(20L, 3);
+        Order order = orderWithId(1L, 100L, line1, line2);   // PENDING, 항목 2개
+        ReflectionTestUtils.setField(line1, "id", 500L);
+        ReflectionTestUtils.setField(line2, "id", 501L);
+        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+
+        orderService.cancelItem(1L, 500L, 100L, false);
+
+        verify(stockReservationService).releaseForOrderItem(500L);          // 그 항목 예약만 해제
+        verify(productOptionRepository, never()).restore(any(), anyInt());  // 미결제라 실재고 복원 없음
+    }
+
+    @Test
+    @DisplayName("항목 취소(결제완료) - 그 항목 실재고만 복원 (예약은 이미 소진)")
+    void cancelItem_paid_restoresItemStock() {
+        OrderItem line1 = itemOn(10L, 2);
+        OrderItem line2 = itemOn(20L, 3);
+        Order order = orderWithId(1L, 100L, line1, line2);
+        order.markPaid();
+        ReflectionTestUtils.setField(line1, "id", 500L);
+        ReflectionTestUtils.setField(line2, "id", 501L);
+        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+
+        orderService.cancelItem(1L, 500L, 100L, false);
+
+        verify(productOptionRepository).restore(10L, 2);                        // 그 항목 실재고 복원
+        verify(stockReservationService, never()).releaseForOrderItem(any());    // 결제 완료라 예약 해제 아님
+    }
+
     @Test
     @DisplayName("주문 조회 실패 - 없는 주문이면 예외")
     void getOrder_notFound() {

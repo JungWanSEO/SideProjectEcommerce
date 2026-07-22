@@ -176,7 +176,7 @@ public class ProductRepositoryImpl implements ProductRepositoryCustom {
                 .from(option)
                 .where(option.product.eq(product),
                         option.size.eq(optionSize),
-                        option.stock.gt(0))
+                        option.stock.subtract(option.reserved).gt(0))   // 가용재고 기준(예약분 제외 — soldOut과 정합)
                 .exists();
     }
 

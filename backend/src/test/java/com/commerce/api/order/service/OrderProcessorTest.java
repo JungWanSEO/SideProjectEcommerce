@@ -96,7 +96,7 @@ class OrderProcessorTest {
     }
 
     @Test
-    @DisplayName("주문 생성 - PENDING(재고 미차감), 가격·사이즈 스냅샷, 총액 계산")
+    @DisplayName("주문 생성 - PENDING + 항목마다 재고 예약, 가격·사이즈 스냅샷, 총액 계산")
     void place_success() {
         Product product = productWithOption(1L, 10L, "반팔티셔츠", 10000L, 10);
         given(productRepository.findByOptionId(10L)).willReturn(Optional.of(product));
@@ -111,8 +111,9 @@ class OrderProcessorTest {
         assertThat(response.items().get(0).productName()).isEqualTo("반팔티셔츠");
         assertThat(response.items().get(0).size()).isEqualTo("M");
         assertThat(response.items().get(0).subtotal()).isEqualTo(30000L);
-        assertThat(product.getOptions().get(0).getStock()).isEqualTo(10);   // 재고 미차감(결제 시 차감)
+        assertThat(product.getOptions().get(0).getStock()).isEqualTo(10);   // 물리 재고 미차감(예약만·차감은 결제 시)
         verify(orderRepository).save(any(Order.class));
+        verify(stockReservationService).reserve(any(), any(), eq(10L), eq(3), any());   // 항목 재고 예약
     }
 
     @Test

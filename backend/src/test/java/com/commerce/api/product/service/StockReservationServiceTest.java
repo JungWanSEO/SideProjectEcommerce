@@ -2,6 +2,8 @@ package com.commerce.api.product.service;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -36,13 +38,22 @@ class StockReservationServiceTest {
     private static final LocalDateTime EXP = LocalDateTime.now().plusMinutes(30);
 
     @Test
-    @DisplayName("예약 성공 - 가용재고 충분(reserve=1)이면 예약 행을 남긴다")
+    @DisplayName("예약 성공 - 가용재고 충분(reserve=1)이면 ACTIVE 예약 행을 입력값 그대로 남긴다")
     void reserve_success() {
         given(productOptionRepository.reserve(10L, 2)).willReturn(1);
 
         stockReservationService.reserve(1L, 500L, 10L, 2, EXP);
 
-        verify(stockReservationRepository).save(any(StockReservation.class));
+        org.mockito.ArgumentCaptor<StockReservation> captor =
+                org.mockito.ArgumentCaptor.forClass(StockReservation.class);
+        verify(stockReservationRepository).save(captor.capture());
+        StockReservation saved = captor.getValue();
+        Assertions.assertThat(saved.getStatus()).isEqualTo(StockReservationStatus.ACTIVE);
+        Assertions.assertThat(saved.getOrderId()).isEqualTo(1L);
+        Assertions.assertThat(saved.getOrderItemId()).isEqualTo(500L);
+        Assertions.assertThat(saved.getOptionId()).isEqualTo(10L);
+        Assertions.assertThat(saved.getQuantity()).isEqualTo(2);
+        Assertions.assertThat(saved.getExpiresAt()).isEqualTo(EXP);
     }
 
     @Test
@@ -63,6 +74,7 @@ class StockReservationServiceTest {
         StockReservation r2 = StockReservation.active(1L, 501L, 20L, 3, EXP);
         given(stockReservationRepository.findByOrderIdAndStatus(1L, StockReservationStatus.ACTIVE))
                 .willReturn(List.of(r1, r2));
+        given(productOptionRepository.consume(anyLong(), anyInt())).willReturn(1);   // 정상 소진
 
         stockReservationService.consumeForOrder(1L);
 
@@ -70,6 +82,20 @@ class StockReservationServiceTest {
         verify(productOptionRepository).consume(20L, 3);
         Assertions.assertThat(r1.getStatus()).isEqualTo(StockReservationStatus.CONSUMED);
         Assertions.assertThat(r2.getStatus()).isEqualTo(StockReservationStatus.CONSUMED);
+    }
+
+    @Test
+    @DisplayName("소진(결제) - consume이 0행(예약 만료/재고소진)이면 409로 결제 롤백, CONSUMED 마킹 안 함")
+    void consumeForOrder_throwsWhenZeroRow() {
+        StockReservation r = StockReservation.active(1L, 500L, 10L, 2, EXP);
+        given(stockReservationRepository.findByOrderIdAndStatus(1L, StockReservationStatus.ACTIVE))
+                .willReturn(List.of(r));
+        given(productOptionRepository.consume(10L, 2)).willReturn(0);   // 예약이 사라짐(만료 배치 선점 등)
+
+        assertThatThrownBy(() -> stockReservationService.consumeForOrder(1L))
+                .isInstanceOf(BusinessException.class)
+                .extracting("status").isEqualTo(HttpStatus.CONFLICT);
+        Assertions.assertThat(r.getStatus()).isEqualTo(StockReservationStatus.ACTIVE);   // 마킹 안 됨(롤백)
     }
 
     @Test

@@ -17,8 +17,8 @@ import com.commerce.api.product.repository.ProductOptionRepository;
 import com.commerce.api.product.service.StockReservationService;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.retry.annotation.Backoff;
@@ -46,7 +46,7 @@ public class OrderService {
      * 재고가 정말 부족하면 BusinessException(재시도 대상 아님)으로 실패한다.
      */
     @Retryable(
-            retryFor = OptimisticLockingFailureException.class,
+            retryFor = ConcurrencyFailureException.class,
             maxAttempts = 3,
             backoff = @Backoff(delay = 100))
     public OrderResponse create(Long memberId, OrderCreateRequest request) {
@@ -58,7 +58,7 @@ public class OrderService {
      * 낙관적 락 충돌 시 새 트랜잭션으로 재시도. 빈 장바구니면 400.
      */
     @Retryable(
-            retryFor = OptimisticLockingFailureException.class,
+            retryFor = ConcurrencyFailureException.class,
             maxAttempts = 3,
             backoff = @Backoff(delay = 100))
     public OrderResponse checkout(Long memberId, CheckoutRequest request) {
@@ -84,7 +84,7 @@ public class OrderService {
      * create와 동일하게 최대 3회까지 (새 트랜잭션으로) 재시도한다.
      */
     @Retryable(
-            retryFor = OptimisticLockingFailureException.class,
+            retryFor = ConcurrencyFailureException.class,
             maxAttempts = 3,
             backoff = @Backoff(delay = 100))
     public OrderResponse pay(Long orderId) {

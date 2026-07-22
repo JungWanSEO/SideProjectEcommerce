@@ -41,11 +41,20 @@ public class StockReservationService {
                 StockReservation.active(orderId, orderItemId, optionId, quantity, expiresAt));
     }
 
-    /** 소진(결제 확정 시). 이 주문의 ACTIVE 예약을 전부 실재고 차감으로 전환하고 CONSUMED로 마감. */
+    /**
+     * 소진(결제 확정 시). 이 주문의 ACTIVE 예약을 전부 실재고 차감으로 전환하고 CONSUMED로 마감.
+     *
+     * <p>consume이 0행이면(예: 만료 배치가 먼저 예약을 해제해 reserved가 사라졌거나, 관리자가 재고를 예약분
+     * 아래로 내림) 불변식 위반이므로 <b>409로 결제 트랜잭션을 롤백</b>한다 — "예약이 사라졌는데 결제만 확정"되는
+     * 조용한 오버셀을 막는다(그 주문은 이미 만료/취소됐거나 재고가 소진된 것).
+     */
     @Transactional
     public void consumeForOrder(Long orderId) {
         for (StockReservation r : activeOf(orderId)) {
-            productOptionRepository.consume(r.getOptionId(), r.getQuantity());
+            if (productOptionRepository.consume(r.getOptionId(), r.getQuantity()) == 0) {
+                throw new BusinessException(HttpStatus.CONFLICT,
+                        "예약이 만료/취소되어 결제할 수 없습니다. (옵션 id: " + r.getOptionId() + ")");
+            }
             r.markConsumed();   // 영속 엔티티 → dirty checking flush
         }
     }

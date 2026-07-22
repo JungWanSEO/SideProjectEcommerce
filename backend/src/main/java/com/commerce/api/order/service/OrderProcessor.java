@@ -23,6 +23,7 @@ import com.commerce.api.product.entity.Product;
 import com.commerce.api.product.repository.ProductRepository;
 import com.commerce.api.product.service.StockReservationService;
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -215,10 +216,12 @@ public class OrderProcessor {
         // 재고 예약(#2): 결제 전까지 이 주문 몫을 잡아 오버셀을 차단한다. 가용재고(stock−reserved)가 부족하면
         //   reserve가 409 → 주문 생성 트랜잭션 전체가 롤백(주문·쿠폰 사용까지 원복). 만료 배치가 TTL 후 해제.
         LocalDateTime expiresAt = LocalDateTime.now().plusMinutes(pendingTtlMinutes);
-        for (OrderItem item : saved.getOrderItems()) {
-            stockReservationService.reserve(
-                    saved.getId(), item.getId(), item.getOptionId(), item.getQuantity(), expiresAt);
-        }
+        // optionId 오름차순으로 정규 락 순서를 강제한다 — 두 주문이 같은 옵션들을 서로 반대 순서로 담아도
+        //   행 락을 항상 같은 순서로 잡아 InnoDB 데드락을 예방한다(데드락은 @Retryable이 재시도로도 흡수).
+        saved.getOrderItems().stream()
+                .sorted(Comparator.comparing(OrderItem::getOptionId))
+                .forEach(item -> stockReservationService.reserve(
+                        saved.getId(), item.getId(), item.getOptionId(), item.getQuantity(), expiresAt));
         return OrderResponse.from(saved);
     }
 
