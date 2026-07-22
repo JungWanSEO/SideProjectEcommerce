@@ -21,11 +21,14 @@ import com.commerce.api.order.entity.ShippingInfo;
 import com.commerce.api.order.repository.OrderRepository;
 import com.commerce.api.product.entity.Product;
 import com.commerce.api.product.repository.ProductRepository;
+import com.commerce.api.product.service.StockReservationService;
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -48,6 +51,11 @@ public class OrderProcessor {
     private final AddressService addressService;   // 배송지 스냅샷(주소록에서) — 도메인 경계는 서비스+DTO로
     private final BrandRepository brandRepository;  // 주문 시점 셀러 귀속 스냅샷용(brandId→sellerId 조회)
     private final MemberCouponService memberCouponService;   // 쿠폰 적용/미리보기(공개형·발급형 분기·단일 사용) — 경계는 DTO로
+    private final StockReservationService stockReservationService;   // 재고 예약(#2) — 주문 생성 시 오버셀 차단
+
+    /** 예약 만료 기준 = PENDING 결제 대기 TTL(OrderExpiryService와 같은 값). 만료 배치가 그때 예약을 해제한다. */
+    @Value("${app.order.pending-ttl-minutes:30}")
+    private int pendingTtlMinutes;
 
     /** 명시적 항목 목록으로 주문 생성 (POST /api/orders). 배송지·쿠폰은 없다(null). */
     @Transactional
@@ -202,29 +210,31 @@ public class OrderProcessor {
             order.applyCoupon(applied.code(), applied.discountAmount(), fundedBy, applied.sellerId());
         }
 
-        return OrderResponse.from(orderRepository.save(order));
+        Order saved = orderRepository.save(order);
+
+        // 재고 예약(#2): 결제 전까지 이 주문 몫을 잡아 오버셀을 차단한다. 가용재고(stock−reserved)가 부족하면
+        //   reserve가 409 → 주문 생성 트랜잭션 전체가 롤백(주문·쿠폰 사용까지 원복). 만료 배치가 TTL 후 해제.
+        LocalDateTime expiresAt = LocalDateTime.now().plusMinutes(pendingTtlMinutes);
+        for (OrderItem item : saved.getOrderItems()) {
+            stockReservationService.reserve(
+                    saved.getId(), item.getId(), item.getOptionId(), item.getQuantity(), expiresAt);
+        }
+        return OrderResponse.from(saved);
     }
 
     /**
-     * 결제 확정: 주문의 각 항목 재고를 차감(@Version 낙관적 락)하고 주문을 PAID로 만든다.
-     * 동시 차감 충돌은 커밋 시 OptimisticLockingFailureException → 상위(OrderService.pay)에서 재시도.
-     * 재고 부족이면 BusinessException(409)으로 롤백 → 주문은 PENDING으로 남는다(재결제 가능).
+     * 결제 확정: 주문 생성 시 잡아 둔 재고 예약을 <b>실재고 차감으로 전환(소진)</b>하고 주문을 PAID로 만든다.
+     *
+     * <p>재고는 이미 주문 생성 시점에 예약(reserved)돼 있으므로 결제는 결정적이다 — "재고 부족"으로 실패하지 않는다
+     * (오버셀 차단은 주문 생성 시 원자 예약으로 끝났다). 결제 전 취소된 항목은 그때 예약이 RELEASED됐으므로
+     * ACTIVE 예약만 남아, {@code consumeForOrder}가 활성 항목만 정확히 소진한다(따로 isActive 필터가 필요 없다).
      */
     @Transactional
     public OrderResponse pay(Long orderId) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "주문을 찾을 수 없습니다."));
 
-        for (OrderItem item : order.getOrderItems()) {
-            if (!item.isActive()) {
-                continue;   // 결제 전 취소된 항목은 재고를 차감하지 않는다(결제액도 payable에서 이미 제외됨)
-            }
-            // 루트 경유: 옵션 ID로 Product 애그리거트를 로드해 해당 옵션 재고를 차감
-            Product product = productRepository.findByOptionId(item.getOptionId())
-                    .orElseThrow(() -> new BusinessException(
-                            HttpStatus.NOT_FOUND, "옵션을 찾을 수 없습니다. (id: " + item.getOptionId() + ")"));
-            product.decreaseStock(item.getOptionId(), item.getQuantity());
-        }
+        stockReservationService.consumeForOrder(orderId);   // ACTIVE 예약 → 실재고 차감(stock↓·reserved↓)
         order.markPaid();   // PENDING → PAID
         return OrderResponse.from(order);
     }

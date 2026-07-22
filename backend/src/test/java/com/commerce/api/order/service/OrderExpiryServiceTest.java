@@ -33,6 +33,7 @@ class OrderExpiryServiceTest {
 
     @Mock private OrderRepository orderRepository;
     @Mock private com.commerce.api.coupon.service.MemberCouponService memberCouponService;
+    @Mock private com.commerce.api.product.service.StockReservationService stockReservationService;
 
     @InjectMocks private OrderExpiryService orderExpiryService;
 

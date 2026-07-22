@@ -13,7 +13,8 @@ import com.commerce.api.order.entity.Order;
 import com.commerce.api.order.entity.OrderItem;
 import com.commerce.api.order.entity.OrderStatus;
 import com.commerce.api.order.repository.OrderRepository;
-import com.commerce.api.product.repository.ProductRepository;
+import com.commerce.api.product.repository.ProductOptionRepository;
+import com.commerce.api.product.service.StockReservationService;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -37,7 +38,8 @@ public class OrderService {
 
     private final OrderProcessor orderProcessor;
     private final OrderRepository orderRepository;
-    private final ProductRepository productRepository;
+    private final ProductOptionRepository productOptionRepository;   // 재고 원자 복원(#2)
+    private final StockReservationService stockReservationService;   // 예약 해제(#2)
 
     /**
      * 주문 생성. 동시 재고 차감으로 낙관적 락 충돌이 나면 최대 3회까지 (새 트랜잭션으로) 재시도.
@@ -176,16 +178,17 @@ public class OrderService {
         order.cancel(requesterId, admin ? "관리자 취소" : "주문자 취소");   // 이미 취소된 주문이면 예외
 
         if (wasPaid) {
-            // 결제 완료된 주문만 재고가 차감돼 있으므로 복원한다.
-            //   단 이미 항목단위로 취소(cancelItem)된 항목은 그때 재고를 복원했으므로 <b>활성 항목만</b> 복원한다
-            //   — 안 그러면 부분취소 후 전체취소 시 그 항목 재고가 이중 복원된다(재고 인플레).
+            // 결제 완료 → 예약은 결제 시 이미 소진(실차감)됐으므로, <b>실재고</b>를 원자적으로 복원한다.
+            //   단 이미 항목단위로 취소(cancelItem)된 항목은 그때 복원했으므로 <b>활성 항목만</b> — 안 그러면 이중 복원.
             for (OrderItem item : order.getOrderItems()) {
-                if (!item.isActive()) {
-                    continue;
+                if (item.isActive()) {
+                    productOptionRepository.restore(item.getOptionId(), item.getQuantity());
                 }
-                productRepository.findByOptionId(item.getOptionId())
-                        .ifPresent(product -> product.increaseStock(item.getOptionId(), item.getQuantity()));
             }
+        } else {
+            // 미결제(PENDING) → 실재고는 차감된 적 없고 <b>예약(reserved)만 잡혀</b> 있으므로 예약을 해제한다.
+            //   (활성 예약만 ACTIVE로 남아 있어 이미 항목취소된 몫은 자동 제외된다.)
+            stockReservationService.releaseForOrder(id);
         }
         return OrderResponse.from(order);
     }
@@ -201,8 +204,11 @@ public class OrderService {
         boolean wasPaid = order.isPaid();
         OrderItem cancelled = order.cancelItem(orderItemId, requesterId);   // 항목 CANCELLED(+전부 취소면 주문도 CANCELLED)
         if (wasPaid) {
-            productRepository.findByOptionId(cancelled.getOptionId())
-                    .ifPresent(product -> product.increaseStock(cancelled.getOptionId(), cancelled.getQuantity()));
+            // 결제 완료 → 그 항목 실재고 복원(예약은 이미 소진됨).
+            productOptionRepository.restore(cancelled.getOptionId(), cancelled.getQuantity());
+        } else {
+            // 미결제(PENDING) → 그 항목 예약만 정확히 해제.
+            stockReservationService.releaseForOrderItem(cancelled.getId());
         }
         return OrderResponse.from(order);
     }

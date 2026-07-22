@@ -15,6 +15,7 @@ import jakarta.persistence.Version;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.DynamicUpdate;
 import org.springframework.http.HttpStatus;
 
 /**
@@ -25,6 +26,7 @@ import org.springframework.http.HttpStatus;
  */
 @Getter
 @Entity
+@DynamicUpdate   // 엔티티 UPDATE(관리자 재고 수정 등)가 바뀐 컬럼만 쓰게 해, 원자 UPDATE로 관리되는 reserved 카운터를 덮어쓰지 않게 한다
 @Table(name = "product_option")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class ProductOption extends BaseEntity {
@@ -41,9 +43,17 @@ public class ProductOption extends BaseEntity {
     private String size;       // 예: "S"/"M"/"L", "FREE", "260"
 
     @Column(nullable = false)
-    private int stock;
+    private int stock;      // 물리 재고(실제 보유 수량)
 
-    /** 낙관적 락 버전. UPDATE 시 WHERE version=? 로 동시 재고 차감 충돌을 감지한다. */
+    /**
+     * 예약됐지만 아직 결제 안 된 수량. <b>가용재고 = stock − reserved</b>.
+     * 실제 증감은 원자적 조건부 UPDATE(ProductOptionRepository.reserve/consume/release)가 하고,
+     * 엔티티는 표시(available)용으로만 읽는다 — 그래서 이 필드엔 setter/증감 메서드를 두지 않는다.
+     */
+    @Column(nullable = false)
+    private int reserved;
+
+    /** 낙관적 락 버전(관리자 옵션 수정 등 엔티티 경로의 동시성 감지). 주문 경로 재고는 원자 UPDATE가 직렬화. */
     @Version
     private Long version;
 
@@ -82,8 +92,13 @@ public class ProductOption extends BaseEntity {
         this.stock = stock;
     }
 
-    /** 품절 여부(사이즈별 품절 표시용). */
+    /** 가용재고 = 물리 재고 − 예약. 화면·주문 가능 판단의 기준. */
+    public int available() {
+        return this.stock - this.reserved;
+    }
+
+    /** 품절 여부(사이즈별 품절 표시용) — 예약분을 뺀 가용재고 기준. */
     public boolean isSoldOut() {
-        return this.stock <= 0;
+        return available() <= 0;
     }
 }
