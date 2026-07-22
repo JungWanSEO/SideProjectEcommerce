@@ -80,7 +80,8 @@ export interface ProductImage {
 export interface Product {
   id: number;
   name: string;
-  price: number;
+  price: number; // 판매가(결제 기준)
+  originalPrice: number | null; // 정가(취소선). null=비할인. originalPrice>price일 때만 할인.
   description: string | null;
   imageUrl: string | null; // 대표 이미지 URL — 없으면 화면에서 placeholder로 폴백
   status: ProductStatus;

@@ -132,7 +132,8 @@ class ProductControllerTest {
                         .param("minPrice", "10000")
                         .param("maxPrice", "50000")
                         .param("categoryId", "3")
-                        .param("brandId", "7"))
+                        .param("brandId", "7")
+                        .param("onSale", "true"))
                 .andExpect(status().isOk());
 
         // 컨트롤러가 받은 ProductSearchCondition을 캡처해 쿼리 파라미터가 제대로 바인딩됐는지 확인
@@ -145,6 +146,7 @@ class ProductControllerTest {
         assertThat(cond.maxPrice()).isEqualTo(50000L);
         assertThat(cond.categoryId()).isEqualTo(3L);
         assertThat(cond.brandId()).isEqualTo(7L);
+        assertThat(cond.onSale()).isTrue();   // SALE 필터 파라미터 바인딩
     }
 
     @Test
@@ -316,7 +318,7 @@ class ProductControllerTest {
     @DisplayName("POST /api/products/{id}/images - 이미지 추가 성공 시 201")
     void addImage_success() throws Exception {
         given(productService.addImage(eq(1L), any())).willReturn(
-                new ProductResponse(1L, "반팔티셔츠", 29000L, "면 100%", "/products/1.svg",
+                new ProductResponse(1L, "반팔티셔츠", 29000L, null, "면 100%", "/products/1.svg",
                         ProductStatus.ON_SALE, 1L, "상의", 1L, "Nike",
                         List.of(), 0, 0.0, 0, LocalDateTime.now(),
                         List.of(new ProductImageResponse(50L, "/products/2.svg", 0))));

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import PriceTag from "@/components/ui/PriceTag";
 import ProductThumb from "@/components/ui/ProductThumb";
 import WishlistButton from "@/components/ui/WishlistButton";
 import { productImageSrc } from "@/lib/productImage";
@@ -53,7 +54,9 @@ export default function ProductRail({
                   <p className="text-xs uppercase tracking-wider text-muted">{p.brandName}</p>
                 )}
                 <h3 className="mt-1 font-serif text-base text-ink">{p.name}</h3>
-                <p className="mt-1 font-medium text-ink">{p.price.toLocaleString()}원</p>
+                <p className="mt-1 font-medium text-ink">
+                  <PriceTag price={p.price} originalPrice={p.originalPrice} />
+                </p>
               </div>
             </Link>
           </li>

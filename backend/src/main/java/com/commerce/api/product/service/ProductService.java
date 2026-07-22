@@ -102,6 +102,7 @@ public class ProductService {
         Product product = Product.builder()
                 .name(request.name())
                 .price(request.price())
+                .originalPrice(request.originalPrice())
                 .description(request.description())
                 .imageUrl(request.imageUrl())
                 .status(ProductStatus.ON_SALE)
@@ -158,7 +159,7 @@ public class ProductService {
         Product product = findProduct(id);
         validateRefExists(categoryRepository, request.categoryId(), "카테고리");
         validateRefExists(brandRepository, request.brandId(), "브랜드");
-        product.updateBasics(request.name(), request.price(), request.description(),
+        product.updateBasics(request.name(), request.price(), request.originalPrice(), request.description(),
                 request.imageUrl(), request.categoryId(), request.brandId());
         return enrich(product);
     }

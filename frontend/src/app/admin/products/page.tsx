@@ -67,6 +67,7 @@ export default function AdminProductsPage() {
   // 새 상품 등록 폼 (등록 시 옵션 1개 필수)
   const [nName, setNName] = useState("");
   const [nPrice, setNPrice] = useState("");
+  const [nOriginalPrice, setNOriginalPrice] = useState(""); // 정가(선택). 비우면 비할인.
   const [nDesc, setNDesc] = useState("");
   const [nImage, setNImage] = useState("");
   const [nCategory, setNCategory] = useState("");
@@ -77,6 +78,7 @@ export default function AdminProductsPage() {
   // 선택 상품 기본정보 수정 폼 (선택 변경 시 채워짐)
   const [bName, setBName] = useState("");
   const [bPrice, setBPrice] = useState("");
+  const [bOriginalPrice, setBOriginalPrice] = useState(""); // 정가(선택). 비우면 비할인.
   const [bDesc, setBDesc] = useState("");
   const [bImage, setBImage] = useState("");
   const [bCategory, setBCategory] = useState("");
@@ -113,6 +115,7 @@ export default function AdminProductsPage() {
     if (!selected) return;
     setBName(selected.name);
     setBPrice(String(selected.price));
+    setBOriginalPrice(selected.originalPrice ? String(selected.originalPrice) : "");
     setBDesc(selected.description ?? "");
     setBImage(selected.imageUrl ?? "");
     setBCategory(selected.categoryId ? String(selected.categoryId) : "");
@@ -177,6 +180,7 @@ export default function AdminProductsPage() {
       await apiPost<Product>("/api/products", {
         name: nName.trim(),
         price: Number(nPrice),
+        originalPrice: nOriginalPrice ? Number(nOriginalPrice) : null,
         description: nDesc.trim() || null,
         imageUrl: nImage.trim() || null,
         categoryId: nCategory ? Number(nCategory) : null,
@@ -185,6 +189,7 @@ export default function AdminProductsPage() {
       });
       setNName("");
       setNPrice("");
+      setNOriginalPrice("");
       setNDesc("");
       setNImage("");
       setNCategory("");
@@ -211,6 +216,7 @@ export default function AdminProductsPage() {
         await apiPut<Product>(`/api/products/${productId}`, {
           name: bName.trim(),
           price: Number(bPrice),
+          originalPrice: bOriginalPrice ? Number(bOriginalPrice) : null,
           description: bDesc.trim() || null,
           imageUrl: bImage.trim() || null,
           categoryId: bCategory ? Number(bCategory) : null,
@@ -310,8 +316,12 @@ export default function AdminProductsPage() {
             <input value={nName} onChange={(e) => setNName(e.target.value)} className="rounded border border-gray-300 px-2 py-1" />
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-xs text-gray-500">가격(원)</span>
+            <span className="text-xs text-gray-500">판매가(원)</span>
             <input type="number" value={nPrice} onChange={(e) => setNPrice(e.target.value)} className="rounded border border-gray-300 px-2 py-1" />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-gray-500">정가(원, 선택 · 판매가↑=할인)</span>
+            <input type="number" value={nOriginalPrice} onChange={(e) => setNOriginalPrice(e.target.value)} placeholder="비우면 비할인" className="rounded border border-gray-300 px-2 py-1" />
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs text-gray-500">카테고리</span>
@@ -442,7 +452,8 @@ export default function AdminProductsPage() {
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   <input value={bName} onChange={(e) => setBName(e.target.value)} placeholder="상품명" className="rounded border border-gray-300 px-2 py-1" />
-                  <input type="number" value={bPrice} onChange={(e) => setBPrice(e.target.value)} placeholder="가격" className="rounded border border-gray-300 px-2 py-1" />
+                  <input type="number" value={bPrice} onChange={(e) => setBPrice(e.target.value)} placeholder="판매가" className="rounded border border-gray-300 px-2 py-1" />
+                  <input type="number" value={bOriginalPrice} onChange={(e) => setBOriginalPrice(e.target.value)} placeholder="정가(선택·비우면 비할인)" className="rounded border border-gray-300 px-2 py-1" />
                   <select value={bCategory} onChange={(e) => setBCategory(e.target.value)} className="rounded border border-gray-300 px-2 py-1">
                     <option value="">카테고리(없음)</option>
                     {categoryOptions(categories).map((o) => (

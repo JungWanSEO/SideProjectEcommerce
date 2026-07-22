@@ -66,11 +66,11 @@ public class ProductController {
     @Operation(summary = "상품 목록 조회 / 검색·필터·정렬",
             description = "공개 상품 목록을 페이지로 조회한다. 판매중·품절만 노출(판매중지 제외). "
                     + "선택적 검색/필터: keyword(상품명 부분일치), minPrice·maxPrice(가격대), "
-                    + "categoryId, brandId, optionSize(그 사이즈를 재고>0으로 가진 상품만). "
+                    + "categoryId, brandId, optionSize(그 사이즈를 재고>0으로 가진 상품만), onSale(true면 할인중만=SALE). "
                     + "정렬(sort): createdAt(최신), price(가격), ratingCount(리뷰수), ratingAverage(평점평균), "
-                    + "wishlistCount(인기순=찜수). "
+                    + "wishlistCount(인기순=찜수), discountRate(할인율, 비할인은 맨 뒤). "
                     + "기본 정렬은 최신순(createdAt desc), 기본 페이지 크기는 20. "
-                    + "예: ?optionSize=M&minPrice=10000&sort=ratingAverage,desc")
+                    + "예: ?onSale=true&sort=discountRate,desc")
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<ProductResponse>>> getProducts(
             // @ParameterObject: record의 필드(keyword/minPrice/maxPrice)를 각각의 쿼리 파라미터로 바인딩(+Swagger 문서화).

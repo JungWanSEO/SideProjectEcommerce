@@ -14,6 +14,7 @@ package com.commerce.api.product.dto;
  * @param optionSize 이 사이즈를 구매 가능한(재고&gt;0) 옵션으로 가진 상품만.
  *                   <b>파라미터명이 {@code size}가 아니라 {@code optionSize}인 이유</b>: {@code size}는
  *                   Pageable의 페이지 크기 파라미터와 충돌하기 때문.
+ * @param onSale     {@code true}면 <b>할인 중</b>(originalPrice &gt; price)인 상품만(SALE 탭·필터). null/false면 미적용.
  */
 public record ProductSearchCondition(
         String keyword,
@@ -21,6 +22,12 @@ public record ProductSearchCondition(
         Long maxPrice,
         Long categoryId,
         Long brandId,
-        String optionSize
+        String optionSize,
+        Boolean onSale
 ) {
+    /** onSale 없는 호출용(=null, SALE 필터 미적용). 기존 6-arg 호출부 호환. */
+    public ProductSearchCondition(String keyword, Long minPrice, Long maxPrice,
+            Long categoryId, Long brandId, String optionSize) {
+        this(keyword, minPrice, maxPrice, categoryId, brandId, optionSize, null);
+    }
 }

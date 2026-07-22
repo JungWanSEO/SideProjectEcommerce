@@ -328,4 +328,41 @@ class ProductRepositoryTest {
         assertThat(productRepository.countOptionsWithStockBetween(VISIBLE, 0, 0)).isEqualTo(2);   // 품절 2
         assertThat(productRepository.countOptionsWithStockBetween(VISIBLE, 1, 5)).isEqualTo(1);   // 임박 1(재고 3)
     }
+
+    // --- 할인가(originalPrice) — SALE 필터·할인율 정렬 (#5) ---
+
+    private Product productSale(String name, long price, Long originalPrice) {
+        return Product.builder()
+                .name(name).price(price).originalPrice(originalPrice).description("desc")
+                .status(ProductStatus.ON_SALE).build();
+    }
+
+    @Test
+    @DisplayName("search - onSale=true면 할인중(originalPrice>price)인 상품만, 정가는 그대로 복원된다")
+    void search_onSaleFilter() {
+        productRepository.save(productSale("할인상품", 8000L, 10000L));   // 20% off
+        productRepository.save(productSale("정가상품", 10000L, null));    // 비할인(정가 없음)
+        productRepository.save(productSale("동일가", 10000L, 10000L));    // 정가=판매가 → 할인 아님
+
+        Page<Product> page = productRepository.search(VISIBLE,
+                new ProductSearchCondition(null, null, null, null, null, null, true),
+                PageRequest.of(0, 20));
+
+        assertThat(page.getContent()).extracting(Product::getName).containsExactly("할인상품");
+        assertThat(page.getContent().get(0).getOriginalPrice()).isEqualTo(10000L);   // 정가 round-trip
+    }
+
+    @Test
+    @DisplayName("search - sort=discountRate,desc면 할인율 높은 순, 비할인은 맨 뒤")
+    void search_discountRateSort() {
+        productRepository.save(productSale("50off", 5000L, 10000L));   // 50%
+        productRepository.save(productSale("20off", 8000L, 10000L));   // 20%
+        productRepository.save(productSale("noSale", 10000L, null));   // 비할인 → 맨 뒤(-1)
+
+        Page<Product> page = productRepository.search(VISIBLE,
+                new ProductSearchCondition(null, null, null, null, null, null),
+                PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "discountRate")));
+
+        assertThat(page.getContent()).extracting(Product::getName).containsExactly("50off", "20off", "noSale");
+    }
 }

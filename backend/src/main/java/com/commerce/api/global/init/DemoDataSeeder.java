@@ -70,6 +70,12 @@ public class DemoDataSeeder {
             "P06-Tee", new String[]{"상의", "Maison Clay"},
             "P07-Pants", new String[]{"하의", "Daily Form"});
 
+    /** 데모 세일 상품(정가=판매가×markup) — %OFF·취소선·SALE 필터/할인율 정렬을 데모에서 보이게. */
+    private static final Map<String, Double> DEMO_SALES = Map.of(
+            "P02-Hoodie", 1.30,     // ≈23% off
+            "P05-Sneakers", 1.50,   // ≈33% off
+            "P07-Pants", 1.20);     // ≈17% off
+
     /** 데모 구매 회원 이메일. password=demopass1234. */
     private static final List<String> DEMO_EMAILS =
             List.of("demo1@commerce.com", "demo2@commerce.com", "demo3@commerce.com");
@@ -147,6 +153,10 @@ public class DemoDataSeeder {
                 Category cat = categories.get(tax[0]);
                 Brand brand = brands.get(tax[1]);
                 p.assignTaxonomy(cat == null ? null : cat.getId(), brand == null ? null : brand.getId());
+            }
+            Double markup = DEMO_SALES.get(p.getName());
+            if (markup != null) {
+                p.applyOriginalPrice(Math.round(p.getPrice() * markup));   // 정가=판매가×markup → 할인 노출
             }
         }
         return byName;

@@ -14,7 +14,8 @@ import java.util.List;
 public record ProductResponse(
         Long id,
         String name,
-        long price,
+        long price,             // 판매가(결제 기준)
+        Long originalPrice,     // 정가(취소선). null=비할인. originalPrice>price일 때만 할인, 할인율은 FE가 계산. 결제는 price 기준.
         String description,
         String imageUrl,        // 대표 이미지 URL (없으면 null → FE가 placeholder 폴백)
         ProductStatus status,
@@ -29,12 +30,12 @@ public record ProductResponse(
         LocalDateTime createdAt,
         List<ProductImageResponse> images      // 갤러리(대표 imageUrl 외 추가 이미지들, sortOrder 순)
 ) {
-    /** 갤러리 없는 호출용 편의 생성자(images=빈 목록). 기존 호출부 호환. */
+    /** 갤러리·정가 없는 호출용 편의 생성자(images=빈 목록, originalPrice=null). 기존 15-arg 호출부 호환. */
     public ProductResponse(Long id, String name, long price, String description, String imageUrl,
             ProductStatus status, Long categoryId, String categoryName, Long brandId, String brandName,
             List<ProductOptionResponse> options, int ratingCount, double ratingAverage, int wishlistCount,
             LocalDateTime createdAt) {
-        this(id, name, price, description, imageUrl, status, categoryId, categoryName, brandId, brandName,
+        this(id, name, price, null, description, imageUrl, status, categoryId, categoryName, brandId, brandName,
                 options, ratingCount, ratingAverage, wishlistCount, createdAt, List.of());
     }
 
@@ -49,6 +50,7 @@ public record ProductResponse(
                 product.getId(),
                 product.getName(),
                 product.getPrice(),
+                product.getOriginalPrice(),
                 product.getDescription(),
                 product.getImageUrl(),
                 product.getStatus(),
