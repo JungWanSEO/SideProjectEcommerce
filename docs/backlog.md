@@ -7,7 +7,6 @@
 ## READY (결정 완료 · 외부 무관 · 자율 진행 가능 · 위에서부터)
 > 기능 9건·커버리지 3건 소진 후 **2026-07-21 무결정 스캔**(4앵글, owner 판단 필요 항목 전부 배제·소스 재검증)에서 8건 재충전. **#1~#4는 동일 뿌리(order-item CANCELLED 상태 미존중)의 실제 머니 버그** — 인접 코드라 순차 실행 시 회귀테스트 상호 보강. **#1~#4 완료(07-22)** → DONE.
 
-- **#7 [parity] 정산 목록/요약에 provider(PG) 필터** (S·both·마이그0) — 대사는 provider 필터 있는데 정산은 없음(컬럼·응답·PG컬럼은 이미 존재). → `SettlementSearchCondition`에 provider 추가.
 - **#8 [parity] 감사로그 검색에 targetId 필터** (S·BE·마이그0) — action/targetType/result는 필터하는데 targetId 없음("ORDER 42 전체 이력" 불가). → `eqTargetType` 미러.
 
 ### (여유 시·무결정이나 저긴급) 위 8건 소진 후
@@ -34,6 +33,7 @@
 > 그 외 정책 대기: 회원 탈퇴(보존기간·PII 마스킹)·적립금/등급·상품 일괄작업 부분실패 정책·셀러 자가수정 범위·`next/image` 도입(이미지 호스팅처).
 
 ## DONE (완료 — 기록)
+- [x] (07-22) **#7 정산 목록/요약 PG(provider) 필터** — `feature/settlement-provider-filter`→dev `ba84d39` (550→**551 tests**·FE 0·마이그0). 대사엔 있는 provider 필터를 정산에도(패리티). `SettlementSearchCondition` canonical 5-arg + 대문자·blank→null 정규화(대사와 동일 규칙)·기존 4-arg 호출부는 편의 생성자로 무변경. FE '전체 PG' 드롭다운(목록·요약 둘 다). repo 테스트 1(소문자 정규화 매칭).
 - [x] (07-22) **#6 짧은 varchar @Size(길이초과 500→400)** — `feature/dto-size-validation`→dev `c750cd0` (548→**550 tests**·마이그0). 브랜드/카테고리 name(`@Size(50)`)·옵션 size(`@Size(30)`·upsert·create 두 DTO)에 상한 추가 → 컬럼길이 초과가 DB위반 500이 아니라 검증 400. 형제 필드(상품명·설명·이미지URL) 패턴에 정렬. 검증 2건.
 - [x] (07-22) **#5 돈 흐름 핫패스 인덱스(V40) + stale 주석** — `feature/money-path-indexes`→dev `6e7ec64` (548 유지·**V40**). `settlement_entry.payment_id`(V24서 UNIQUE 제거 후 인덱스 전무)·`payment.order_id`(처음부터 무인덱스)에 조회용 인덱스. `SettlementRepository.existsByPaymentId` 허위 Javadoc(payment_id UNIQUE) 정정. ⚠️**MySQL EXPLAIN 스모크=복귀 후**(H2 Flyway 미적용).
 - [x] (07-22) **머니 버그 #4 — 만료 배치 쿠폰 복원** — `feature/order-expiry-coupon-release`→dev `ae8fe56` (547→**548 tests**·마이그0). `OrderExpiryService`가 PENDING 만료 취소 시 발급형 쿠폰을 `release`(수동취소와 대칭) → 결제도 안 했는데 쿠폰만 소멸되던 비대칭 해소. no-op 필터(코드없음/공개형/미보유)는 release가 자체 처리. #1~#4로 항목취소 상태 일관성 뿌리 완결.
