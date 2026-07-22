@@ -12,6 +12,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.OneToMany;
+import jakarta.persistence.Version;
 import jakarta.persistence.Table;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -38,6 +39,14 @@ public class Order extends BaseEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    /**
+     * 낙관적 락 버전 — 주문 생명주기 전이(결제·취소·만료·배송)의 동시성 충돌을 감지한다.
+     * 특히 <b>TTL 만료 배치와 결제가 같은 PENDING 주문을 동시에 처리</b>할 때, 늦게 커밋하는 쪽이 충돌로 실패해
+     * "결제됐는데 만료 취소" 같은 상태 뒤집힘을 막는다(결제는 @Retryable로 재시도→이미 취소면 409).
+     */
+    @Version
+    private Long version;
 
     @Column(nullable = false)
     private Long memberId;   // 다른 애그리거트(회원) → ID 참조

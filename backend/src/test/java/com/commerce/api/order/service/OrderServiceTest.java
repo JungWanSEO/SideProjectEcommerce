@@ -3,6 +3,7 @@ package com.commerce.api.order.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
@@ -17,10 +18,6 @@ import com.commerce.api.order.entity.Order;
 import com.commerce.api.order.entity.OrderItem;
 import com.commerce.api.order.entity.OrderStatus;
 import com.commerce.api.order.repository.OrderRepository;
-import com.commerce.api.product.entity.Product;
-import com.commerce.api.product.entity.ProductOption;
-import com.commerce.api.product.entity.ProductStatus;
-import com.commerce.api.product.repository.ProductRepository;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
@@ -46,21 +43,12 @@ class OrderServiceTest {
     @Mock
     private OrderRepository orderRepository;
     @Mock
-    private ProductRepository productRepository;
+    private com.commerce.api.product.repository.ProductOptionRepository productOptionRepository;   // 재고 원자 복원(#2)
+    @Mock
+    private com.commerce.api.product.service.StockReservationService stockReservationService;      // 예약 해제(#2)
 
     @InjectMocks
     private OrderService orderService;
-
-    /** 옵션(id=10, "M", 주어진 stock) 1개를 가진 상품 — 취소 시 옵션 재고 복원 검증용. */
-    private Product productWithOption(Long productId, Long optionId, int stock) {
-        Product product = Product.builder()
-                .name("반팔티셔츠").price(10000L).description("desc").status(ProductStatus.ON_SALE).build();
-        ReflectionTestUtils.setField(product, "id", productId);
-        ProductOption option = ProductOption.create("M", stock);
-        ReflectionTestUtils.setField(option, "id", optionId);
-        product.addOption(option);
-        return product;
-    }
 
     /** 옵션 10번("M")을 산 주문 항목. */
     private OrderItem item(int quantity) {
@@ -79,19 +67,16 @@ class OrderServiceTest {
     }
 
     @Test
-    @DisplayName("주문 취소 성공 - 상태 CANCELLED + 옵션 재고 복원")
+    @DisplayName("주문 취소 성공(결제 완료) - 상태 CANCELLED + 실재고 원자 복원")
     void cancel_success() {
         Order order = orderWithId(1L, 100L, item(3));
-        order.markPaid();   // 결제 완료 주문이어야 취소 시 재고가 복원됨
+        order.markPaid();   // 결제 완료 주문이어야 취소 시 재고가 복원됨(예약은 결제 시 소진됨)
         given(orderRepository.findById(1L)).willReturn(Optional.of(order));
-
-        Product product = productWithOption(1L, 10L, 7);   // 결제로 7까지 차감된 옵션
-        given(productRepository.findByOptionId(10L)).willReturn(Optional.of(product));
 
         OrderResponse response = orderService.cancel(1L, 100L, false);   // 주문 주인(100번) 본인
 
         assertThat(response.status()).isEqualTo(OrderStatus.CANCELLED);
-        assertThat(product.getOptions().get(0).getStock()).isEqualTo(10);   // 7 + 3 복원
+        verify(productOptionRepository).restore(10L, 3);   // 결제로 차감됐던 실재고를 되돌림
     }
 
     @Test
@@ -107,15 +92,16 @@ class OrderServiceTest {
     }
 
     @Test
-    @DisplayName("주문 취소 - 미결제(PENDING) 주문은 재고 복원 없이 취소된다")
-    void cancel_pendingOrder_noStockRestore() {
+    @DisplayName("주문 취소 - 미결제(PENDING) 주문은 실재고 복원 없이 예약만 해제한다")
+    void cancel_pendingOrder_releasesReservation() {
         Order order = orderWithId(1L, 100L, item(3));   // PENDING (결제 전)
         given(orderRepository.findById(1L)).willReturn(Optional.of(order));
 
         OrderResponse response = orderService.cancel(1L, 100L, false);
 
         assertThat(response.status()).isEqualTo(OrderStatus.CANCELLED);
-        verify(productRepository, never()).findByOptionId(any());   // 재고 복원 시도 없음
+        verify(stockReservationService).releaseForOrder(1L);            // 잡아 둔 예약을 해제
+        verify(productOptionRepository, never()).restore(any(), anyInt());   // 실재고는 차감된 적 없어 복원 안 함
     }
 
     @Test
@@ -136,15 +122,51 @@ class OrderServiceTest {
         order.cancelItem(500L, 100L);   // optionId 10 라인 비활성(주문은 PAID 유지)
 
         given(orderRepository.findById(1L)).willReturn(Optional.of(order));
-        Product active = productWithOption(2L, 20L, 8);   // 결제로 8까지 차감된 활성 옵션
-        given(productRepository.findByOptionId(20L)).willReturn(Optional.of(active));
 
         OrderResponse response = orderService.cancel(1L, 100L, false);
 
         assertThat(response.status()).isEqualTo(OrderStatus.CANCELLED);
-        assertThat(active.getOptions().get(0).getStock()).isEqualTo(10);   // 활성 항목만 8 + 2
-        // 이미 취소된 항목의 옵션은 다시 복원하지 않는다(재고 인플레 방지)
-        verify(productRepository, never()).findByOptionId(10L);
+        verify(productOptionRepository).restore(20L, 2);            // 활성 항목만 복원
+        verify(productOptionRepository, never()).restore(eq(10L), anyInt());   // 이미 취소된 항목은 이중 복원 안 함
+    }
+
+    private OrderItem itemOn(long optionId, int quantity) {
+        return OrderItem.builder()
+                .productId(1L).optionId(optionId).productName("t").size("M")
+                .orderPrice(10000L).quantity(quantity).build();
+    }
+
+    @Test
+    @DisplayName("항목 취소(미결제) - 그 항목 예약만 해제, 실재고 복원 없음 (결제 시 소진 안 됨)")
+    void cancelItem_pending_releasesItemReservation() {
+        OrderItem line1 = itemOn(10L, 2);
+        OrderItem line2 = itemOn(20L, 3);
+        Order order = orderWithId(1L, 100L, line1, line2);   // PENDING, 항목 2개
+        ReflectionTestUtils.setField(line1, "id", 500L);
+        ReflectionTestUtils.setField(line2, "id", 501L);
+        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+
+        orderService.cancelItem(1L, 500L, 100L, false);
+
+        verify(stockReservationService).releaseForOrderItem(500L);          // 그 항목 예약만 해제
+        verify(productOptionRepository, never()).restore(any(), anyInt());  // 미결제라 실재고 복원 없음
+    }
+
+    @Test
+    @DisplayName("항목 취소(결제완료) - 그 항목 실재고만 복원 (예약은 이미 소진)")
+    void cancelItem_paid_restoresItemStock() {
+        OrderItem line1 = itemOn(10L, 2);
+        OrderItem line2 = itemOn(20L, 3);
+        Order order = orderWithId(1L, 100L, line1, line2);
+        order.markPaid();
+        ReflectionTestUtils.setField(line1, "id", 500L);
+        ReflectionTestUtils.setField(line2, "id", 501L);
+        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+
+        orderService.cancelItem(1L, 500L, 100L, false);
+
+        verify(productOptionRepository).restore(10L, 2);                        // 그 항목 실재고 복원
+        verify(stockReservationService, never()).releaseForOrderItem(any());    // 결제 완료라 예약 해제 아님
     }
 
     @Test
@@ -357,7 +379,8 @@ class OrderServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("배송이 시작된");
         assertThat(order.getStatus()).isEqualTo(OrderStatus.SHIPPING);
-        verify(productRepository, never()).findByOptionId(any());
+        verify(productOptionRepository, never()).restore(any(), anyInt());   // 재고 복원/예약 해제 시도 없음
+        verify(stockReservationService, never()).releaseForOrder(any());
     }
 
     // ----- 어드민 주문 검색 -----

@@ -4,10 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import com.commerce.api.order.entity.Order;
-import com.commerce.api.order.entity.OrderItem;
 import com.commerce.api.order.entity.OrderStatus;
 import com.commerce.api.order.repository.OrderRepository;
 import java.time.LocalDateTime;
@@ -20,11 +21,12 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 /**
- * OrderExpiryService 단위 테스트 — 결제 대기(PENDING) 만료 배치.
- * TTL 경계는 리포지토리에 넘기는 <b>기준 시각</b>으로 검증한다(시계를 목킹하지 않고 캡처로 확인).
+ * OrderExpiryService 단위 테스트 — 만료 후보를 훑어 주문별로 worker에 위임(오케스트레이션).
+ * 주문별 취소 로직은 {@link OrderExpiryWorker}가 담당하므로 여기선 위임·스킵·기준시각만 본다.
  */
 @ExtendWith(MockitoExtension.class)
 class OrderExpiryServiceTest {
@@ -32,64 +34,59 @@ class OrderExpiryServiceTest {
     private static final int TTL_MINUTES = 30;
 
     @Mock private OrderRepository orderRepository;
-    @Mock private com.commerce.api.coupon.service.MemberCouponService memberCouponService;
+    @Mock private OrderExpiryWorker worker;
 
     @InjectMocks private OrderExpiryService orderExpiryService;
 
     @BeforeEach
     void setTtl() {
-        // @Value는 단위 테스트에서 주입되지 않으므로 직접 심는다(운영 기본값과 동일).
         ReflectionTestUtils.setField(orderExpiryService, "pendingTtlMinutes", TTL_MINUTES);
     }
 
-    private Order pendingOrder() {
+    private Order pendingOrder(Long id) {
         Order order = Order.create(100L);
-        order.addItem(OrderItem.builder()
-                .productId(1L).optionId(10L).productName("반팔티셔츠").size("M")
-                .orderPrice(10000L).quantity(1).build());
+        ReflectionTestUtils.setField(order, "id", id);
         return order;
     }
 
     @Test
-    @DisplayName("만료 배치 - TTL이 지난 PENDING 주문을 취소하고 건수를 반환한다")
-    void expirePendingOrders_cancelsExpired() {
-        Order a = pendingOrder();
-        Order b = pendingOrder();
+    @DisplayName("만료 배치 - 만료 PENDING마다 worker.expireOne을 호출하고 취소 건수를 반환한다")
+    void expirePendingOrders_delegatesPerOrder() {
         given(orderRepository.findByStatusAndCreatedAtBefore(eq(OrderStatus.PENDING), any(LocalDateTime.class)))
-                .willReturn(List.of(a, b));
+                .willReturn(List.of(pendingOrder(1L), pendingOrder(2L)));
 
         int cancelled = orderExpiryService.expirePendingOrders();
 
         assertThat(cancelled).isEqualTo(2);
-        assertThat(a.getStatus()).isEqualTo(OrderStatus.CANCELLED);
-        assertThat(b.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        verify(worker).expireOne(1L);
+        verify(worker).expireOne(2L);
     }
 
     @Test
-    @DisplayName("만료 배치 - 쿠폰 적용된 주문이 만료되면 발급형 쿠폰을 복원한다(수동취소와 대칭)")
-    void expirePendingOrders_releasesCoupon() {
-        Order withCoupon = pendingOrder();
-        withCoupon.applyCoupon("WELCOME5000", 5000L, "PLATFORM", null);   // 체크아웃 때 잠긴 쿠폰
+    @DisplayName("만료 배치 - 한 주문이 결제와 경합(낙관락 충돌)하면 그 주문만 스킵하고 나머지는 계속 만료한다")
+    void expirePendingOrders_skipsRacingOrder() {
         given(orderRepository.findByStatusAndCreatedAtBefore(eq(OrderStatus.PENDING), any(LocalDateTime.class)))
-                .willReturn(List.of(withCoupon));
+                .willReturn(List.of(pendingOrder(1L), pendingOrder(2L)));
+        willThrow(new ObjectOptimisticLockingFailureException(Order.class, 1L)).given(worker).expireOne(1L);
 
-        orderExpiryService.expirePendingOrders();
+        int cancelled = orderExpiryService.expirePendingOrders();
 
-        assertThat(withCoupon.getStatus()).isEqualTo(OrderStatus.CANCELLED);
-        verify(memberCouponService).release(100L, "WELCOME5000");   // 회원의 쿠폰을 미사용으로 되돌림
+        assertThat(cancelled).isEqualTo(1);   // 1은 경합으로 스킵, 2만 취소
+        verify(worker).expireOne(2L);
     }
 
     @Test
-    @DisplayName("만료 배치 - 대상이 없으면 0건(불필요한 쓰기 없음)")
+    @DisplayName("만료 배치 - 대상이 없으면 0건, worker 미호출")
     void expirePendingOrders_noTargets() {
-        given(orderRepository.findByStatusAndCreatedAtBefore(eq(OrderStatus.PENDING), any(LocalDateTime.class)))
+        given(orderRepository.findByStatusAndCreatedAtBefore(any(OrderStatus.class), any(LocalDateTime.class)))
                 .willReturn(List.of());
 
         assertThat(orderExpiryService.expirePendingOrders()).isZero();
+        verify(worker, never()).expireOne(any());
     }
 
     @Test
-    @DisplayName("만료 배치 - 기준 시각은 '지금 - TTL분'이고, PENDING만 대상으로 삼는다")
+    @DisplayName("만료 배치 - 기준 시각은 '지금 - TTL분'이고 PENDING만 대상으로 삼는다")
     void expirePendingOrders_usesTtlDeadlineAndOnlyPending() {
         given(orderRepository.findByStatusAndCreatedAtBefore(any(OrderStatus.class), any(LocalDateTime.class)))
                 .willReturn(List.of());
@@ -99,7 +96,6 @@ class OrderExpiryServiceTest {
 
         ArgumentCaptor<LocalDateTime> deadline = ArgumentCaptor.forClass(LocalDateTime.class);
         verify(orderRepository).findByStatusAndCreatedAtBefore(eq(OrderStatus.PENDING), deadline.capture());
-        // 결제된 주문을 건드리지 않는 근거 = 조회 자체가 PENDING으로 스코프됨(위 eq 검증)
         assertThat(deadline.getValue())
                 .isAfterOrEqualTo(before)
                 .isBeforeOrEqualTo(LocalDateTime.now().minusMinutes(TTL_MINUTES).plusSeconds(5));

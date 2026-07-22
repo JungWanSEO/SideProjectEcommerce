@@ -65,8 +65,9 @@ export interface BrandUpdateInput {
 export interface ProductOption {
   id: number;
   size: string;
-  stock: number;
-  soldOut: boolean;
+  stock: number; // 물리 재고(어드민용)
+  available: number; // 가용재고 = stock − 예약(지금 살 수 있는 수량)
+  soldOut: boolean; // 가용재고 0
 }
 
 /** 상품 이미지(갤러리) — 대표 imageUrl 외 추가 이미지. sortOrder 순. */

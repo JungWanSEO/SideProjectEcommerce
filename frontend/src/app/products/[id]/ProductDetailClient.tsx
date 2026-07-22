@@ -303,7 +303,7 @@ export default function ProductDetailClient() {
                 >
                   <span className={o.soldOut ? "line-through" : ""}>{o.size}</span>
                   <span className={`ml-2 text-xs ${selected ? "text-cream/70" : "text-muted"}`}>
-                    {o.soldOut ? "품절" : `재고 ${o.stock}`}
+                    {o.soldOut ? "품절" : `재고 ${o.available}`}
                   </span>
                 </button>
               );

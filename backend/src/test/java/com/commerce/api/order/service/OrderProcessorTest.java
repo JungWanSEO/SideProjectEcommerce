@@ -63,9 +63,16 @@ class OrderProcessorTest {
     private BrandRepository brandRepository;
     @Mock
     private MemberCouponService memberCouponService;
+    @Mock
+    private com.commerce.api.product.service.StockReservationService stockReservationService;
 
     @InjectMocks
     private OrderProcessor orderProcessor;
+
+    @org.junit.jupiter.api.BeforeEach
+    void setTtl() {
+        ReflectionTestUtils.setField(orderProcessor, "pendingTtlMinutes", 30);   // @Value는 단위 테스트에서 미주입
+    }
 
     /** id가 채워진 옵션("M") 1개를 가진 상품 생성. */
     private Product productWithOption(Long productId, Long optionId, String name, long price, int stock) {
@@ -89,7 +96,7 @@ class OrderProcessorTest {
     }
 
     @Test
-    @DisplayName("주문 생성 - PENDING(재고 미차감), 가격·사이즈 스냅샷, 총액 계산")
+    @DisplayName("주문 생성 - PENDING + 항목마다 재고 예약, 가격·사이즈 스냅샷, 총액 계산")
     void place_success() {
         Product product = productWithOption(1L, 10L, "반팔티셔츠", 10000L, 10);
         given(productRepository.findByOptionId(10L)).willReturn(Optional.of(product));
@@ -104,8 +111,9 @@ class OrderProcessorTest {
         assertThat(response.items().get(0).productName()).isEqualTo("반팔티셔츠");
         assertThat(response.items().get(0).size()).isEqualTo("M");
         assertThat(response.items().get(0).subtotal()).isEqualTo(30000L);
-        assertThat(product.getOptions().get(0).getStock()).isEqualTo(10);   // 재고 미차감(결제 시 차감)
+        assertThat(product.getOptions().get(0).getStock()).isEqualTo(10);   // 물리 재고 미차감(예약만·차감은 결제 시)
         verify(orderRepository).save(any(Order.class));
+        verify(stockReservationService).reserve(any(), any(), eq(10L), eq(3), any());   // 항목 재고 예약
     }
 
     @Test
@@ -322,31 +330,16 @@ class OrderProcessorTest {
     }
 
     @Test
-    @DisplayName("결제 확정 - 옵션 재고 차감 + 주문 PAID")
+    @DisplayName("결제 확정 - 예약을 실재고 차감으로 소진 + 주문 PAID")
     void pay_success() {
         Order order = pendingOrder(1L, 10L, 3);
         given(orderRepository.findById(1L)).willReturn(Optional.of(order));
-        Product product = productWithOption(1L, 10L, "반팔티셔츠", 10000L, 10);
-        given(productRepository.findByOptionId(10L)).willReturn(Optional.of(product));
 
         OrderResponse response = orderProcessor.pay(1L);
 
         assertThat(response.status()).isEqualTo(OrderStatus.PAID);
-        assertThat(product.getOptions().get(0).getStock()).isEqualTo(7);   // 10 - 3
-    }
-
-    @Test
-    @DisplayName("결제 확정 실패 - 재고 부족이면 예외, 주문은 PENDING 유지")
-    void pay_insufficientStock() {
-        Order order = pendingOrder(1L, 10L, 5);
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
-        Product product = productWithOption(1L, 10L, "반팔티셔츠", 10000L, 2);
-        given(productRepository.findByOptionId(10L)).willReturn(Optional.of(product));
-
-        assertThatThrownBy(() -> orderProcessor.pay(1L))
-                .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("재고가 부족합니다");
-        assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
+        // 재고는 주문 생성 시 이미 예약됨 → 결제는 그 예약을 소진(실차감)한다. 재고 부족으로 실패하지 않는다.
+        verify(stockReservationService).consumeForOrder(1L);
     }
 
     @Test
@@ -357,35 +350,5 @@ class OrderProcessorTest {
         assertThatThrownBy(() -> orderProcessor.pay(999L))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("주문을 찾을 수 없습니다");
-    }
-
-    @Test
-    @DisplayName("결제 확정(회귀) - 결제 전 취소된(비활성) 항목은 재고를 차감하지 않는다")
-    void pay_skipsCancelledItem() {
-        // 항목 2개짜리 PENDING 주문에서 한 항목(optionId 10)을 결제 전에 취소한다.
-        Order order = Order.create(100L);
-        OrderItem cancelledLine = OrderItem.builder()
-                .productId(1L).optionId(10L).productName("반팔티셔츠").size("M")
-                .orderPrice(10000L).quantity(3).build();
-        OrderItem activeLine = OrderItem.builder()
-                .productId(2L).optionId(20L).productName("맨투맨").size("L")
-                .orderPrice(20000L).quantity(2).build();
-        order.addItem(cancelledLine);
-        order.addItem(activeLine);
-        ReflectionTestUtils.setField(order, "id", 1L);
-        ReflectionTestUtils.setField(cancelledLine, "id", 500L);
-        ReflectionTestUtils.setField(activeLine, "id", 501L);
-        order.cancelItem(500L, 100L);   // optionId 10 라인 취소 → 비활성(주문은 PENDING 유지)
-
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
-        Product active = productWithOption(2L, 20L, "맨투맨", 20000L, 10);
-        given(productRepository.findByOptionId(20L)).willReturn(Optional.of(active));
-
-        OrderResponse response = orderProcessor.pay(1L);
-
-        assertThat(response.status()).isEqualTo(OrderStatus.PAID);
-        assertThat(active.getOptions().get(0).getStock()).isEqualTo(8);   // 활성 항목만 10 - 2
-        // 취소된 항목의 옵션은 조회조차 하지 않는다(재고 미차감)
-        verify(productRepository, never()).findByOptionId(10L);
     }
 }
