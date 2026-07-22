@@ -218,6 +218,17 @@ class ProductControllerTest {
     }
 
     @Test
+    @DisplayName("POST /api/products/{id}/options - 사이즈가 컬럼 길이(30자)를 넘으면 400 (DB 500 아님)")
+    void addOption_tooLongSize_returns400() throws Exception {
+        String tooLong = "S".repeat(31);   // product_option.size varchar(30) 초과
+        mockMvc.perform(post("/api/products/1/options")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"size\":\"" + tooLong + "\",\"stock\":10}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
     @DisplayName("PUT /api/products/{id}/options/{optionId} - 옵션 수정 성공 시 200")
     void updateOption_success() throws Exception {
         given(productService.updateOption(eq(1L), eq(10L), any())).willReturn(productWithOptions(

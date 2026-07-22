@@ -52,6 +52,7 @@ public record ProductCreateRequest(
 
             @Schema(description = "사이즈", example = "M")
             @NotBlank(message = "사이즈는 필수입니다.")
+            @Size(max = 30, message = "사이즈는 30자 이하여야 합니다.")   // product_option.size varchar(30)
             String size,
 
             @Schema(description = "재고 수량(0 이상)", example = "100")
