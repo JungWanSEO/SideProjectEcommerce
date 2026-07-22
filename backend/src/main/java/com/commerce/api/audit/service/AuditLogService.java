@@ -111,7 +111,8 @@ public class AuditLogService {
             return condition;
         }
         return new AuditLogSearchCondition(condition.actorMemberId(), condition.action(),
-                condition.targetType(), condition.result(), condition.from(), LocalDateTime.now());
+                condition.targetType(), condition.targetId(), condition.result(),
+                condition.from(), LocalDateTime.now());
     }
 
     /** 행위자 이메일을 배치 조회로 채운다(N+1 회피). */
