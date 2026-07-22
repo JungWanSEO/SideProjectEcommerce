@@ -7,6 +7,7 @@ import com.commerce.api.order.dto.CouponPreviewResponse;
 import com.commerce.api.order.dto.OrderCreateRequest;
 import com.commerce.api.order.dto.OrderDiscountInfo;
 import com.commerce.api.order.dto.OrderResponse;
+import com.commerce.api.order.dto.OrderSearchCondition;
 import com.commerce.api.order.dto.OrderSummaryResponse;
 import com.commerce.api.order.entity.Order;
 import com.commerce.api.order.entity.OrderItem;
@@ -128,15 +129,28 @@ public class OrderService {
     }
 
     /**
-     * 전체 주문 목록(ADMIN) — 배송 관리용. status가 주어지면 그 상태만, 없으면 전부.
+     * 주문 검색(ADMIN) — 수령인·주문번호·회원·상태·기간·금액으로 동적 검색(QueryDSL).
      * 회원 스코핑 없이 모든 주문을 본다(어드민 운영 화면 전용 — 인가는 SecurityConfig·컨트롤러가 보장).
      */
     @Transactional(readOnly = true)
-    public PageResponse<OrderSummaryResponse> getAllOrders(OrderStatus status, Pageable pageable) {
-        var page = (status == null)
-                ? orderRepository.findAll(pageable)
-                : orderRepository.findByStatus(status, pageable);
-        return PageResponse.from(page.map(OrderSummaryResponse::from));
+    public PageResponse<OrderSummaryResponse> searchOrders(OrderSearchCondition condition, Pageable pageable) {
+        return PageResponse.from(
+                orderRepository.search(condition, pageable).map(OrderSummaryResponse::from));
+    }
+
+    /**
+     * 셀러 콘솔 "내 주문" — 이 셀러의 상품이 든 주문만. 어드민 검색과 같은 쿼리에 sellerId를 강제로 채운다.
+     * (요청이 sellerId를 보내더라도 로그인 셀러의 것으로 덮어써 남의 셀러 주문을 볼 수 없게 한다.)
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<OrderSummaryResponse> searchSellerOrders(
+            Long sellerId, OrderSearchCondition condition, Pageable pageable) {
+        OrderSearchCondition scoped = new OrderSearchCondition(
+                condition.keyword(), condition.memberId(), condition.status(),
+                condition.from(), condition.to(), condition.minAmount(), condition.maxAmount(),
+                sellerId);   // 셀러 스코프 고정(요청값 무시)
+        return PageResponse.from(
+                orderRepository.search(scoped, pageable).map(OrderSummaryResponse::from));
     }
 
     /**

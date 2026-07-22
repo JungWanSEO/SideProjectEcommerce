@@ -9,9 +9,9 @@ import com.commerce.api.order.dto.CouponPreviewRequest;
 import com.commerce.api.order.dto.CouponPreviewResponse;
 import com.commerce.api.order.dto.OrderCreateRequest;
 import com.commerce.api.order.dto.OrderResponse;
+import com.commerce.api.order.dto.OrderSearchCondition;
 import com.commerce.api.order.dto.OrderStatusUpdateRequest;
 import com.commerce.api.order.dto.OrderSummaryResponse;
-import com.commerce.api.order.entity.OrderStatus;
 import com.commerce.api.order.service.OrderService;
 import com.commerce.api.payment.service.PaymentService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -99,16 +99,21 @@ public class OrderController {
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
-    @Operation(summary = "전체 주문 목록 조회 (ADMIN)",
-            description = "운영자가 모든 회원의 주문을 페이지로 조회한다(배송 관리용). status로 상태 필터(PAID·SHIPPING 등) — "
-                    + "비우면 전체. 기본 정렬은 최신순(createdAt desc), 기본 페이지 크기 20.")
+    @Operation(summary = "주문 검색 (ADMIN)",
+            description = "운영자가 모든 회원의 주문을 조건으로 검색한다(CS·배송 관리). 선택 필터: keyword(수령인명 또는 "
+                    + "주문번호)·memberId·status·from/to(생성일, yyyy-MM-dd)·minAmount/maxAmount(총액). "
+                    + "비우면 전체. 기본 정렬 최신순, 기본 페이지 크기 20.")
     @GetMapping("/admin")
-    public ResponseEntity<ApiResponse<PageResponse<OrderSummaryResponse>>> getAllOrders(
-            @RequestParam(required = false) OrderStatus status,
+    public ResponseEntity<ApiResponse<PageResponse<OrderSummaryResponse>>> searchOrders(
+            @ParameterObject OrderSearchCondition condition,
             @ParameterObject
             @PageableDefault(size = 20, sort = "createdAt", direction = Direction.DESC)
             Pageable pageable) {
-        PageResponse<OrderSummaryResponse> response = orderService.getAllOrders(status, pageable);
+        // sellerId는 셀러 콘솔 전용 파라미터 → 어드민 검색에선 무시(아무나 셀러 스코프를 흉내내지 못하게).
+        OrderSearchCondition adminCondition = new OrderSearchCondition(
+                condition.keyword(), condition.memberId(), condition.status(),
+                condition.from(), condition.to(), condition.minAmount(), condition.maxAmount(), null);
+        PageResponse<OrderSummaryResponse> response = orderService.searchOrders(adminCondition, pageable);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
