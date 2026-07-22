@@ -4,12 +4,15 @@ import com.commerce.api.coupon.dto.CouponApplyResult;
 import com.commerce.api.coupon.dto.CouponCreateRequest;
 import com.commerce.api.coupon.dto.CouponResponse;
 import com.commerce.api.coupon.entity.Coupon;
+import com.commerce.api.coupon.entity.MemberCouponStatus;
 import com.commerce.api.coupon.repository.CouponRepository;
+import com.commerce.api.coupon.repository.MemberCouponRepository;
 import com.commerce.api.global.exception.BusinessException;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
@@ -30,6 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class CouponService {
 
     private final CouponRepository couponRepository;
+    private final MemberCouponRepository memberCouponRepository;   // 쿠폰별 "사용 수" 집계용
 
     /** 쿠폰 발급(ADMIN). 코드는 대문자 정규화해 저장하고 유일성을 보장한다. */
     @Transactional
@@ -46,11 +50,27 @@ public class CouponService {
         return CouponResponse.from(couponRepository.save(coupon));
     }
 
-    /** 전체 쿠폰 목록(ADMIN, 최신순). */
+    /** 전체 쿠폰 목록(ADMIN, 최신순) — 발급/사용 현황 포함. 사용 수는 배치 집계로 N+1을 피한다. */
     public List<CouponResponse> getCoupons() {
+        Map<Long, Long> usedByCoupon = memberCouponRepository
+                .countByStatusGroupByCoupon(MemberCouponStatus.USED).stream()
+                .collect(Collectors.toMap(r -> (Long) r[0], r -> (Long) r[1]));
         return couponRepository.findAll(Sort.by(Sort.Direction.DESC, "createdAt")).stream()
-                .map(CouponResponse::from)
+                .map(c -> CouponResponse.from(c, usedByCoupon.getOrDefault(c.getId(), 0L)))
                 .toList();
+    }
+
+    /**
+     * 쿠폰 중단(ADMIN) — 기간이 남아 있어도 즉시 사용 불가로 만든다.
+     * (할인율 오타 등으로 돈이 새는 쿠폰을 만료까지 기다리지 않고 끄는 유일한 수단.)
+     * 없는 쿠폰이면 404. 이미 중단된 쿠폰이면 그대로(멱등).
+     */
+    @Transactional
+    public CouponResponse disable(Long id) {
+        Coupon coupon = couponRepository.findById(id)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "쿠폰을 찾을 수 없습니다."));
+        coupon.disable();   // 영속 엔티티 → dirty checking flush
+        return CouponResponse.from(coupon);
     }
 
     /** 코드로 쿠폰을 찾는다(없으면 빈 Optional). 코드는 대문자 정규화해 매칭. */

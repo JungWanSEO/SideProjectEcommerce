@@ -10,6 +10,9 @@ import static org.mockito.Mockito.verify;
 import com.commerce.api.coupon.dto.CouponApplyResult;
 import com.commerce.api.coupon.dto.CouponCreateRequest;
 import com.commerce.api.coupon.dto.CouponResponse;
+import com.commerce.api.coupon.entity.CouponStatus;
+import com.commerce.api.coupon.entity.MemberCouponStatus;
+import org.springframework.test.util.ReflectionTestUtils;
 import com.commerce.api.coupon.entity.Coupon;
 import com.commerce.api.coupon.entity.CouponFundedBy;
 import com.commerce.api.coupon.entity.CouponIssueType;
@@ -36,6 +39,9 @@ class CouponServiceTest {
 
     @Mock
     private CouponRepository couponRepository;
+
+    @Mock
+    private com.commerce.api.coupon.repository.MemberCouponRepository memberCouponRepository;
 
     @InjectMocks
     private CouponService couponService;
@@ -127,12 +133,40 @@ class CouponServiceTest {
     }
 
     @Test
-    @DisplayName("목록 - 최신순으로 조회")
+    @DisplayName("목록 - 최신순 조회 + 쿠폰별 사용 수를 배치 집계로 채운다")
     void getCoupons() {
-        given(couponRepository.findAll(any(Sort.class)))
-                .willReturn(List.of(coupon("A", DiscountType.FIXED_AMOUNT, 1000, null, 0,
-                        CouponFundedBy.PLATFORM, null)));
+        Coupon a = coupon("A", DiscountType.FIXED_AMOUNT, 1000, null, 0, CouponFundedBy.PLATFORM, null);
+        ReflectionTestUtils.setField(a, "id", 10L);
+        given(couponRepository.findAll(any(Sort.class))).willReturn(List.of(a));
+        given(memberCouponRepository.countByStatusGroupByCoupon(MemberCouponStatus.USED))
+                .willReturn(List.<Object[]>of(new Object[]{10L, 3L}));   // 쿠폰10 사용 3건
 
-        assertThat(couponService.getCoupons()).hasSize(1);
+        var coupons = couponService.getCoupons();
+
+        assertThat(coupons).hasSize(1);
+        assertThat(coupons.get(0).usedCount()).isEqualTo(3L);
+    }
+
+    @Test
+    @DisplayName("중단 - 상태를 DISABLED로 바꾼다(기간 남아도 즉시 사용 불가)")
+    void disable_setsDisabled() {
+        Coupon c = coupon("OOPS", DiscountType.PERCENTAGE, 90, null, 0, CouponFundedBy.PLATFORM, null);
+        ReflectionTestUtils.setField(c, "id", 7L);
+        given(couponRepository.findById(7L)).willReturn(java.util.Optional.of(c));
+
+        CouponResponse response = couponService.disable(7L);
+
+        assertThat(response.status()).isEqualTo(CouponStatus.DISABLED);
+        assertThat(c.getStatus()).isEqualTo(CouponStatus.DISABLED);
+    }
+
+    @Test
+    @DisplayName("중단 실패 - 없는 쿠폰이면 404")
+    void disable_notFound() {
+        given(couponRepository.findById(999L)).willReturn(java.util.Optional.empty());
+
+        assertThatThrownBy(() -> couponService.disable(999L))
+                .isInstanceOf(BusinessException.class)
+                .extracting("status").isEqualTo(org.springframework.http.HttpStatus.NOT_FOUND);
     }
 }
