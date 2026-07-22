@@ -20,7 +20,7 @@
 > 2026-07-20 기능 스캔에서 나온 것들. **자율 진행 금지**(범위·정책·UX 결정) — 사용자가 고르면 READY로 내려온다.
 
 1. **멀티셀러 주문의 상태 단위** ⭐가장 아키텍처적 — 셀러 출고 기능들의 선행 결정. 한 주문에 여러 셀러 상품이 섞이는데 `advanceShipping`은 **Order 전체** status를 움직인다. → (a) 현행 유지·셀러는 조회만(ADMIN이 출고) / (b) 단일셀러 주문에만 셀러 전이 권한 / (c) 상태를 **item·shipment 단위로 내림**(정답에 가깝지만 정산·환불·대사까지 파급).
-2. **재고 예약 — 오버셀 구간 제거 여부** — PENDING이 재고를 **전혀 안 잡아** 결제 지연만큼 레이스 구간이 열려 있다. → (a) 현행(결제 시 차감) / (b) 주문 생성 시 차감+취소 복원 / (c) `stock_reservation` TTL 예약(DONE ③ 만료 스케줄러 `OrderExpiryService` 재사용). **동시성 서사로는 (c)가 최고, 공수도 최고.**
+2. ✅ **재고 예약 — 오버셀 구간 제거** — **완료(07-22~23, c안: `stock_reservation` TTL + reserved 카운터, V43/V44)** → DONE.
 3. **반품/교환** — DELIVERED가 막다른 길. 반품창 기간·반품 배송비 부담자·교환=취소후재주문 vs 진짜 스왑·자동승인 vs 셀러승인, 4개가 정해져야 상태머신이 그려진다.
 4. **배송비** (`shippingFee` 레포 전체 0회) — `payable = totalPrice - discount`라 PG 금액에 배송비가 **구조적으로 없다**. 나중에 넣으면 결제·환불·정산·대사를 동시에 건드린다. → (a) 도입 안 함(명시) / (b) 정액+무료임계 / (c) 셀러별. + 부분취소 시 환불 여부.
 5. ✅ **상품 할인가(정가 vs 판매가)** — **완료(07-22, a안)** → DONE. (후속 선택지=b안 기간형 `product_promotion` 테이블.)
@@ -32,6 +32,7 @@
 > 그 외 정책 대기: 회원 탈퇴(보존기간·PII 마스킹)·적립금/등급·상품 일괄작업 부분실패 정책·셀러 자가수정 범위·`next/image` 도입(이미지 호스팅처).
 
 ## DONE (완료 — 기록)
+- [x] (07-22~23) **#2 재고 예약(TTL) — 오버셀 구간 제거** — `feature/stock-reservation`→dev `d700daa` (570→**583 tests**·**V43/V44**·FE 0). c안(정석: `stock_reservation` 테이블 + `product_option.reserved` 카운터). 주문 생성 시 **원자적 조건부 UPDATE**(reserved+=q WHERE stock-reserved>=q, 선착순 쿠폰과 동형)로 예약→오버셀 0(동시성 IT 30→10 실증). 결제=소진(결정적)·만료/취소=해제·PAID취소=실재고복원. **4렌즈 적대적 리뷰 → 동시성 엣지 6종 수정**: 원자 UPDATE version+1(관리자 lost-update)·consume 0행 409+stock가드·**Order @Version(V44)**+만료 배치 per-order 워커(pay↔만료 경합)·optionId 락순서+데드락 재시도·PLP 필터 available 기준·@DataJpaTest 슬라이스. ⚠️V43/V44 MySQL 스모크=복귀 후.
 - [x] (07-22) **#5 상품 할인가 (정가 originalPrice·%OFF·SALE·할인율 정렬)** — `feature/product-discount-price`→dev `3f45a49` (565→**570 tests**·**V42**·FE 0). 결정필요 #5의 a안(정가 필드 하나). **불변식=결제·정산·환불·대사는 price 기준 그대로, originalPrice는 표시/정렬 전용**(적대적 리뷰 돈경로 격리 렌즈로 확인). BE=필드·V42·정가≥판매가 guard(3경로)·onSale 필터·discountRate 정렬·데모시드 3종. FE=재사용 PriceTag(%OFF+취소선)·할인율순 정렬·세일 필터(URL·SSR)·어드민 폼. **4렌즈 적대적 리뷰**(돈경로·백엔드 클린, low 2건 수정). ⚠️V42 EXPLAIN=MySQL 복귀 후. 후속=b안 기간형 promotion.
 - [x] (07-22) **기록/코드 정리 (8축 병렬 감사)** — dev `17732a8`. dev-log 7월분 `2026-07.md` 분리+인덱스 재구성·backlog 정합·메모리 276→46줄 압축. 코드/레포/테스트/마이그레이션은 감사 결과 **전부 클린**(손댈 것 0).
 - [x] (07-22·여유시) **대사 윈도우 DB 쿼리 + V41 인덱스** — `feature/reconcile-window-query`→dev `fd30dee` (564→**565 tests**). 윈도우 대사 `findAll`+Java필터 → `findBySettledDateWindow`(nullable-bound @Query·`inWindow` 동일 규칙)로 DB에서 좁힘. V41=`settlement_entry.settled_date` 인덱스. (16일차 `feature/reconciliation-daily-window` 기능 도입의 **후속 최적화**.) ⚠️EXPLAIN=MySQL 복귀 후.
