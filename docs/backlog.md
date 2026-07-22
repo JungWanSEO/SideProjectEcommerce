@@ -5,17 +5,14 @@
 > 외부 프로그램 연동(RabbitMQ·외부 API·새 외부 도구)은 자율 금지 → "함께(학습)"에서 사용자와 직접.
 
 ## READY (결정 완료 · 외부 무관 · 자율 진행 가능 · 위에서부터)
-> **2026-07-21 무결정 스캔 8건 전부 소진(07-22)** → 아래 DONE. **자율 진행 가능한 READY = 0** — 다음 배치는 **새 무결정 스캔** 필요(아래 "여유 시" 저긴급 3건은 남아 있음).
+> **2026-07-21 무결정 스캔 8건 전부 소진(07-22)** + **재스캔 완료(클린, `39bcd3b`)** → 결정 없이 고칠 실버그 0. **자율 진행 가능한 READY = 0** — 남은 자율 후보는 아래 "여유 시" N+1 1건(오너 런타임 필요)뿐. 새 작업은 "결정 필요"에서 오너가 골라야 내려온다.
 
 ### (여유 시·무결정이나 저긴급) — 남은 저긴급 자율 후보
-- ⚠️**[오너 몫 권장] 체크아웃·결제·pay N+1 → `findByOptionIdIn` 배치** — 돈 쓰기 경로(재고차감·낙관적락·@Retryable)라 동시성 정합(동일상품 다옵션 매핑·락 거동)에 닿고 **MySQL 런타임 검증 필요**. 이득은 marginal(주문 항목 N 작음). 복귀 후 런타임과 함께.
-- ✅ (07-22) 대사 `reconcile` findAll+Java필터 → `findBySettledDateWindow`(+V41 인덱스) — `feature/reconcile-window-query`→dev `fd30dee`.
-- ✅ (07-22) #8 감사 targetId **FE 필터 입력 + 드릴다운** — `feature/audit-targetid-fe`→dev `0ff9243`.
-- ✅ (07-22) **순수 테스트 3종**(JwtAuthenticationFilter·getProductsForAdmin 회귀·소셜 find-or-create, +12) — `feature/coverage-security-social`→dev `71d5ecf`.
+- ⚠️**[오너 몫 권장] 체크아웃·결제·pay N+1 → `findByOptionIdIn` 배치** — 돈 쓰기 경로(재고차감·낙관적락·@Retryable)라 동시성 정합(동일상품 다옵션 매핑·락 거동)에 닿고 **MySQL 런타임 검증 필요**. 이득은 marginal(주문 항목 N 작음). 복귀 후 런타임과 함께. *(07-22 나머지 저긴급 3건[대사 윈도우·감사 targetId FE·순수 테스트]은 완료 → DONE.)*
 
 ## 함께 (외부 연동 · 학습 — 자율 금지)
 - 🚧 **배포 ($0 라이브 데모) — 경로 A(Oracle VM) 확정** — 준비물 완료: env화·`Dockerfile`·`docs/deploy.md`(`feature/deploy-prep`) + **prod 산출물·배선 보강**(`feature/deploy-prep-hardening`→dev `06e7ff8`): `backend/docker-compose.prod.yml`(앱+MySQL)·`.env.prod.example`·datasource `${SPRING_DATASOURCE_USERNAME:${MYSQL_USER}}` 체인·`APP_OAUTH2_REDIRECT` 행·`.gitignore` `.env.prod` 차단. 로컬 검증=`bootJar`·`next build` PASS. **결정=경로 A**(Oracle Always Free VM: Vercel FE + VM에 Spring Boot+MySQL; 콜드스타트 없음·진짜 MySQL·쿠키 first-party). ⚠️경로 B는 Koyeb 무료 폐쇄(Mistral 인수)로 약화. **다음=사용자 계정 단계**: Oracle A1 VM 생성→레포 clone→`.env.prod`→`docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build`→Caddy HTTPS→Vercel FE→쿠키전략(Vercel rewrites `/api/*` 프록시=first-party 추천)→로그인 확인. MySQL 실런타임 검증=VM 첫 기동. **VM 준비물 `deploy/`**(vm-setup.sh·Caddyfile·README) + 프록시 뒤 OAuth2 헤더(`server.forward-headers-strategy`) 추가(`feature/deploy-vm-runbook`→dev `2832ed5`). (가이드=docs/deploy.md §3, deploy/README.md)
-- ✅ 아웃박스 P2b 실제 RabbitMQ (메시지 브로커) — `feature/outbox-rabbitmq`→dev (377 tests·**런타임 PASS**). 병행 opt-in(`outbox.publisher=in-process|rabbit`)·EventPublisher 포트 어댑터·@RabbitListener 소비·docker-compose rabbitmq(15672). 후속: Testcontainers 실브로커 통합·DLQ.
+- ✅ 아웃박스 P2b 실제 RabbitMQ (메시지 브로커) — `feature/outbox-rabbitmq`→dev (**런타임 PASS**·완료·참조용). 병행 opt-in(`outbox.publisher=in-process|rabbit`)·EventPublisher 포트 어댑터·@RabbitListener 소비·docker-compose rabbitmq(15672). 후속: Testcontainers 실브로커 통합·DLQ.
 - 우편번호 검색 API (Daum/Kakao 외부 API)
 - ✅ CI (GitHub Actions, `.github/workflows/ci.yml`) — 도입 완료. **다음=스케줄 무인 운영(이 위에)**. 후속: Testcontainers 실DB 통합·브랜치 보호 규칙.
 
@@ -23,18 +20,21 @@
 > 2026-07-20 기능 스캔에서 나온 것들. **자율 진행 금지**(범위·정책·UX 결정) — 사용자가 고르면 READY로 내려온다.
 
 1. **멀티셀러 주문의 상태 단위** ⭐가장 아키텍처적 — 셀러 출고 기능들의 선행 결정. 한 주문에 여러 셀러 상품이 섞이는데 `advanceShipping`은 **Order 전체** status를 움직인다. → (a) 현행 유지·셀러는 조회만(ADMIN이 출고) / (b) 단일셀러 주문에만 셀러 전이 권한 / (c) 상태를 **item·shipment 단위로 내림**(정답에 가깝지만 정산·환불·대사까지 파급).
-2. **재고 예약 — 오버셀 구간 제거 여부** — PENDING이 재고를 **전혀 안 잡아** 결제 지연만큼 레이스 구간이 열려 있다. → (a) 현행(결제 시 차감) / (b) 주문 생성 시 차감+취소 복원 / (c) `stock_reservation` TTL 예약(READY ③ 스케줄러 재사용). **동시성 서사로는 (c)가 최고, 공수도 최고.**
+2. **재고 예약 — 오버셀 구간 제거 여부** — PENDING이 재고를 **전혀 안 잡아** 결제 지연만큼 레이스 구간이 열려 있다. → (a) 현행(결제 시 차감) / (b) 주문 생성 시 차감+취소 복원 / (c) `stock_reservation` TTL 예약(DONE ③ 만료 스케줄러 `OrderExpiryService` 재사용). **동시성 서사로는 (c)가 최고, 공수도 최고.**
 3. **반품/교환** — DELIVERED가 막다른 길. 반품창 기간·반품 배송비 부담자·교환=취소후재주문 vs 진짜 스왑·자동승인 vs 셀러승인, 4개가 정해져야 상태머신이 그려진다.
 4. **배송비** (`shippingFee` 레포 전체 0회) — `payable = totalPrice - discount`라 PG 금액에 배송비가 **구조적으로 없다**. 나중에 넣으면 결제·환불·정산·대사를 동시에 건드린다. → (a) 도입 안 함(명시) / (b) 정액+무료임계 / (c) 셀러별. + 부분취소 시 환불 여부.
 5. **상품 할인가(정가 vs 판매가)** — `Product.price` 단일 필드라 "30% OFF"·SALE 탭·할인율 정렬이 **모델상 불가능**. → (a) `originalPrice` 필드 하나(S) / (b) 기간형 `product_promotion` 테이블(M~L).
 6. **알림 인박스(벨) + 재입고 알림** — 아웃박스→RabbitMQ→핸들러는 **완성돼 있는데** `NotificationLog`에 `memberId`도 `readAt`도 없어 **아무도 못 읽는다**(컨트롤러 부재). → 알림 대상 이벤트·수신자 스코프·읽음처리 방식.
 7. **게스트 장바구니** — 담기 클릭 = 즉시 `/login`(전환 킬러). → (a) 현행 / (b) localStorage(S·FE) / (c) 서버 토큰 카트+로그인 시 병합(L·BE).
-8. **취소·환불 사유 taxonomy** — `Order.cancel()`이 **인자 0개**라 돈이 나가는데 "왜"가 안 남는다. 사유 enum + **정산 귀책·배송비 부담에 영향 주는지**. 정하면 READY ④에 컬럼 하나로 붙는다.
+8. **취소·환불 사유 taxonomy** — `Order.cancel(changedBy, memo)`로 **자유텍스트 메모**는 이미 이력에 남지만(V39), **구조화된 사유 enum**은 없다(집계·정책 연동 불가). 사유 enum + **정산 귀책·배송비 부담에 영향 주는지**. 배송비(#4)와 얽혀 단독 착수 애매. *(기존 '인자 0개' 서술은 obsolete — memo 오버로드 존재.)*
 9. **대시보드 매출 KPI = 환불 반영 여부** (07-22 무결정 스캔에서 발견한 *실제 divergence*) — `OrderRepository:52·63`의 "완료 매출"이 `sum(totalPrice − discountAmount)`(주문 전체)라, 부분취소된 항목까지 매출로 센다 → 결제 실수령·정산 net과 어긋난다(예: 2만원 2항목 중 1항목 취소 시 결제·정산은 1만원인데 KPI는 2만원). **결정 필요**: KPI를 (a) gross-of-refunds 현행 유지(주문 기준 "판매고") / (b) net-of-refunds(`getPayableAmount` 정합) 중 무엇으로? (b)면 항목별 안분할인·반올림 잔여 때문에 순수 SQL로 안 떨어져 집계 방식(엔티티 순회 배치 or 파생컬럼)도 함께 정해야 한다.
 
 > 그 외 정책 대기: 회원 탈퇴(보존기간·PII 마스킹)·적립금/등급·상품 일괄작업 부분실패 정책·셀러 자가수정 범위·`next/image` 도입(이미지 호스팅처).
 
 ## DONE (완료 — 기록)
+- [x] (07-22·여유시) **대사 윈도우 DB 쿼리 + V41 인덱스** — `feature/reconcile-window-query`→dev `fd30dee` (564→**565 tests**). 윈도우 대사 `findAll`+Java필터 → `findBySettledDateWindow`(nullable-bound @Query·`inWindow` 동일 규칙)로 DB에서 좁힘. V41=`settlement_entry.settled_date` 인덱스. (16일차 `feature/reconciliation-daily-window` 기능 도입의 **후속 최적화**.) ⚠️EXPLAIN=MySQL 복귀 후.
+- [x] (07-22·여유시) **감사 targetId FE 필터 + "이 대상 이력" 드릴다운** — `feature/audit-targetid-fe`→dev `0ff9243` (순수 FE). #8 백엔드 필터의 화면 노출.
+- [x] (07-22·여유시) **순수 테스트 3종(+12)** — `feature/coverage-security-social`→dev `71d5ecf` (552→**564**·프로덕션 0). JwtAuthenticationFilter 6·getProductsForAdmin 회귀 2(판매중지 데이터잠금)·소셜 find-or-create 4.
 - [x] (07-22) **#8 감사 로그 targetId 필터** — `feature/audit-targetid-filter`→dev `8ec341e` (551→**552 tests**·마이그0). `AuditLogSearchCondition`에 targetId(canonical 7-arg)+6-arg 편의 생성자·`eqTargetId`(eqTargetType 미러)·`@ParameterObject`라 목록·CSV 두 엔드포인트 자동 바인딩·CSV `snapshotBoundary`가 targetId 보존. "ORDER 42 전체 이력" 가능. FE 입력은 후속(여유 시). **← 무결정 스캔 8건 완주(542→552, +10).**
 - [x] (07-22) **#7 정산 목록/요약 PG(provider) 필터** — `feature/settlement-provider-filter`→dev `ba84d39` (550→**551 tests**·FE 0·마이그0). 대사엔 있는 provider 필터를 정산에도(패리티). `SettlementSearchCondition` canonical 5-arg + 대문자·blank→null 정규화(대사와 동일 규칙)·기존 4-arg 호출부는 편의 생성자로 무변경. FE '전체 PG' 드롭다운(목록·요약 둘 다). repo 테스트 1(소문자 정규화 매칭).
 - [x] (07-22) **#6 짧은 varchar @Size(길이초과 500→400)** — `feature/dto-size-validation`→dev `c750cd0` (548→**550 tests**·마이그0). 브랜드/카테고리 name(`@Size(50)`)·옵션 size(`@Size(30)`·upsert·create 두 DTO)에 상한 추가 → 컬럼길이 초과가 DB위반 500이 아니라 검증 400. 형제 필드(상품명·설명·이미지URL) 패턴에 정렬. 검증 2건.
