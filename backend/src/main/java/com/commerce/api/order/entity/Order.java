@@ -159,9 +159,19 @@ public class Order extends BaseEntity {
         this.couponSellerId = sellerId;
     }
 
-    /** 실제 결제 대상 금액 = 총액(gross) - 쿠폰 할인액. PG 승인·Payment.amount의 기준. */
+    /**
+     * 실제 결제 대상 금액 = <b>활성 항목</b>의 실효가(소계 − 안분 할인) 합. PG 승인·Payment.amount의 기준.
+     *
+     * <p>취소된 항목은 뺀다 — PENDING 중 항목을 취소하고 결제하면 그 항목까지 청구되던 버그를 막고,
+     * 정산이 쓰는 "활성 항목 실효가" 불변식({@link #discountShares})과 한 출처로 맞춘다(대사 금액 불일치 방지).
+     * 취소가 없는 정상 주문에선 {@code totalPrice − discountAmount}와 동일하다(모든 항목이 활성이므로).
+     */
     public long getPayableAmount() {
-        return this.totalPrice - this.discountAmount;
+        Map<OrderItem, Long> shares = discountShares();
+        return orderItems.stream()
+                .filter(OrderItem::isActive)
+                .mapToLong(item -> item.getSubtotal() - shares.getOrDefault(item, 0L))
+                .sum();
     }
 
     /**

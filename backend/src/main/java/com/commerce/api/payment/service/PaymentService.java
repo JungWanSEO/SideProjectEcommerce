@@ -115,15 +115,21 @@ public class PaymentService {
         //    (주문이 CANCELLED로 바뀌면 재취소가 409로 막히므로 중복 환불도 함께 방지된다.)
         paymentRepository.findByOrderIdAndStatus(orderId, PaymentStatus.PAID)
                 .ifPresent(payment -> {
+                    // 이미 항목단위로 부분환불한 금액을 뺀 <b>잔여</b>만 환불한다 — 안 그러면 원 결제액 전액을 환불해
+                    //   이미 돌려준 항목까지 재환불(과다환불)된다. 잔여가 0이면(모두 부분환불로 소진) 환불 없이 종료.
+                    long remaining = payment.getAmount() - payment.getRefundedAmount();
+                    if (remaining <= 0) {
+                        return;   // 이미 전액 환불됨(마지막 활성 항목이 없어 여기까지 온 경우)
+                    }
                     // 환불은 반드시 승인한 그 PG로 — 결제에 저장된 provider로 라우팅한다.
                     PaymentRefund refund = paymentGatewayRouter.resolve(payment.getProvider())
                             .refund(new PaymentRefundCommand(
-                                    orderId, payment.getAmount(), payment.getPgTransactionId()));
+                                    orderId, remaining, payment.getPgTransactionId()));
                     if (!refund.refunded()) {
                         throw new BusinessException(HttpStatus.BAD_GATEWAY,
                                 "환불에 실패했습니다. (" + refund.failureReason() + ")");
                     }
-                    payment.cancel();   // PAID → CANCELLED (상태머신 가드)
+                    payment.partialRefund(remaining);   // 잔여 누적 → refundedAmount==amount 도달 시 CANCELLED
                     paymentRepository.save(payment);
                 });
 
@@ -149,17 +155,21 @@ public class PaymentService {
         // 고객이 실제 낸 금액(payable)보다 많이 돌려줘 과다환불이 되고 정산/대사도 깨진다. 할인 없으면 share=0이라 소계 그대로.
         long refundAmount = cancelledItem.subtotal() - cancelledItem.discountShare();
 
-        paymentRepository.findByOrderIdAndStatus(orderId, PaymentStatus.PAID)
-                .ifPresent(payment -> {
-                    PaymentRefund refund = paymentGatewayRouter.resolve(payment.getProvider())
-                            .refund(new PaymentRefundCommand(orderId, refundAmount, payment.getPgTransactionId()));
-                    if (!refund.refunded()) {
-                        throw new BusinessException(HttpStatus.BAD_GATEWAY,
-                                "환불에 실패했습니다. (" + refund.failureReason() + ")");
-                    }
-                    payment.partialRefund(refundAmount);   // 누적, 전액 도달 시 CANCELLED
-                    paymentRepository.save(payment);
-                });
+        // 실효가 0인 라인(100% 할인 등)은 돌려줄 돈이 없다 → PG 환불·누적을 건너뛴다.
+        //   안 그러면 partialRefund(0)이 400을 던져 정당한 항목 취소 자체가 롤백된다(재고·쿠폰 복원까지 무산).
+        if (refundAmount > 0) {
+            paymentRepository.findByOrderIdAndStatus(orderId, PaymentStatus.PAID)
+                    .ifPresent(payment -> {
+                        PaymentRefund refund = paymentGatewayRouter.resolve(payment.getProvider())
+                                .refund(new PaymentRefundCommand(orderId, refundAmount, payment.getPgTransactionId()));
+                        if (!refund.refunded()) {
+                            throw new BusinessException(HttpStatus.BAD_GATEWAY,
+                                    "환불에 실패했습니다. (" + refund.failureReason() + ")");
+                        }
+                        payment.partialRefund(refundAmount);   // 누적, 전액 도달 시 CANCELLED
+                        paymentRepository.save(payment);
+                    });
+        }
         // 마지막 항목 취소로 주문 전체가 취소되면 발급형 쿠폰도 복원.
         if (order.status() == OrderStatus.CANCELLED) {
             memberCouponService.release(order.memberId(), order.couponCode());
