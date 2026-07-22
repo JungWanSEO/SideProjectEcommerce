@@ -7,7 +7,6 @@
 ## READY (결정 완료 · 외부 무관 · 자율 진행 가능 · 위에서부터)
 > 기능 9건·커버리지 3건 소진 후 **2026-07-21 무결정 스캔**(4앵글, owner 판단 필요 항목 전부 배제·소스 재검증)에서 8건 재충전. **#1~#4는 동일 뿌리(order-item CANCELLED 상태 미존중)의 실제 머니 버그** — 인접 코드라 순차 실행 시 회귀테스트 상호 보강. **#1~#4 완료(07-22)** → DONE.
 
-- **#5 [PERF] 핫패스 인덱스 2종 + stale 주석** (S·BE·**V40**) — `settlement_entry.payment_id`(V24 DROP 후 미복원)·`payment.order_id` 무인덱스로 정산/취소마다 풀스캔. + `SettlementRepository:16` 허위 Javadoc(payment_id UNIQUE, V24서 제거) 정정. ⚠️H2는 Flyway 미적용→빌드까지, EXPLAIN은 복귀 후.
 - **#6 [robustness] 짧은 varchar @Size 누락 → 500 대신 400** (S·BE·마이그0) — 브랜드/카테고리 name·옵션 size가 `@NotBlank`만 → 길이초과가 DB위반 500. 형제 DTO는 다 `@Size` 병행. → `@Size(max=컬럼길이)`.
 - **#7 [parity] 정산 목록/요약에 provider(PG) 필터** (S·both·마이그0) — 대사는 provider 필터 있는데 정산은 없음(컬럼·응답·PG컬럼은 이미 존재). → `SettlementSearchCondition`에 provider 추가.
 - **#8 [parity] 감사로그 검색에 targetId 필터** (S·BE·마이그0) — action/targetType/result는 필터하는데 targetId 없음("ORDER 42 전체 이력" 불가). → `eqTargetType` 미러.
@@ -36,6 +35,7 @@
 > 그 외 정책 대기: 회원 탈퇴(보존기간·PII 마스킹)·적립금/등급·상품 일괄작업 부분실패 정책·셀러 자가수정 범위·`next/image` 도입(이미지 호스팅처).
 
 ## DONE (완료 — 기록)
+- [x] (07-22) **#5 돈 흐름 핫패스 인덱스(V40) + stale 주석** — `feature/money-path-indexes`→dev `6e7ec64` (548 유지·**V40**). `settlement_entry.payment_id`(V24서 UNIQUE 제거 후 인덱스 전무)·`payment.order_id`(처음부터 무인덱스)에 조회용 인덱스. `SettlementRepository.existsByPaymentId` 허위 Javadoc(payment_id UNIQUE) 정정. ⚠️**MySQL EXPLAIN 스모크=복귀 후**(H2 Flyway 미적용).
 - [x] (07-22) **머니 버그 #4 — 만료 배치 쿠폰 복원** — `feature/order-expiry-coupon-release`→dev `ae8fe56` (547→**548 tests**·마이그0). `OrderExpiryService`가 PENDING 만료 취소 시 발급형 쿠폰을 `release`(수동취소와 대칭) → 결제도 안 했는데 쿠폰만 소멸되던 비대칭 해소. no-op 필터(코드없음/공개형/미보유)는 release가 자체 처리. #1~#4로 항목취소 상태 일관성 뿌리 완결.
 - [x] (07-22) **머니 버그 #1~#3 — 항목 CANCELLED 상태 일관성** — `feature/order-cancel-money-fixes`→dev `cd87cfe` (542→**547 tests**·마이그0). 부분취소 후 남는 항목 CANCELLED를 일부 경로가 무시하던 3건: **과다환불**(`cancelOrder`가 잔여=amount−refundedAmount만 환불·`getPayableAmount`=활성 실효가 합) · **400 롤백**(실효가 0 라인은 PG환불·partialRefund(0) 스킵) · **재고 불일치**(`pay()`차감·`cancel()`복원 모두 `isActive()` 가드 → 이중복원·불필요차감 방지). 회귀 5건(Payment 3·OrderService 1·OrderProcessor 1). #4는 같은 뿌리 잔여.
 - [x] (07-20~21) **기능 스캔 READY 9건 전부** (508→**518 tests**·FE 0·⚠️V38·V39 MySQL 스모크=복귀 후):
