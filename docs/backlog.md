@@ -5,11 +5,8 @@
 > 외부 프로그램 연동(RabbitMQ·외부 API·새 외부 도구)은 자율 금지 → "함께(학습)"에서 사용자와 직접.
 
 ## READY (결정 완료 · 외부 무관 · 자율 진행 가능 · 위에서부터)
-> 기능 9건·커버리지 3건 소진 후 **2026-07-21 무결정 스캔**(4앵글, owner 판단 필요 항목 전부 배제·소스 재검증)에서 8건 재충전. **#1~#4는 동일 뿌리(order-item CANCELLED 상태 미존중)의 실제 머니 버그** — 인접 코드라 순차 실행 시 회귀테스트 상호 보강.
+> 기능 9건·커버리지 3건 소진 후 **2026-07-21 무결정 스캔**(4앵글, owner 판단 필요 항목 전부 배제·소스 재검증)에서 8건 재충전. **#1~#4는 동일 뿌리(order-item CANCELLED 상태 미존중)의 실제 머니 버그** — 인접 코드라 순차 실행 시 회귀테스트 상호 보강. **#1~#3 완료(07-22)** → DONE.
 
-- **#1 [BUG·money] 부분 항목취소 후 전체취소 = 과다환불 + 재고 이중복원** (M·BE·마이그0) — `cancelOrder`가 `payment.getAmount()`(전액) 환불(이미 환불한 항목 재환불) + `OrderService.cancel` 재고루프가 CANCELLED 항목도 복원. → 잔여환불(`amount-refundedAmount`)·재고루프 `isActive()` 가드.
-- **#2 [BUG·money] 실효가 0 라인 취소 시 400으로 전체 롤백** (S·BE·마이그0) — 100% 할인 라인은 `refundAmount=0`→`partialRefund(0)` 400 거절→정당한 취소가 실패. → `refundAmount==0`이면 PG/누적 스킵.
-- **#3 [BUG·money] PENDING 중 취소한 항목이 결제 시 청구·재고차감** (M·BE·마이그0) — `OrderProcessor.pay`가 `isActive()` 필터 없이 전 항목 차감 + `getPayableAmount`가 취소 무반영 → 정산(활성기준)과 대사 불일치. → pay 루프 `isActive()` 가드 + payable=활성 실효가 합.
 - **#4 [BUG·money] 만료 배치가 PENDING 취소 시 발급형 쿠폰 미반환(영구소멸)** (S·BE·마이그0) — 수동취소는 `release`하는데 `OrderExpiryService`는 미호출(비대칭). → 만료 루프에 `memberCouponService.release`.
 - **#5 [PERF] 핫패스 인덱스 2종 + stale 주석** (S·BE·**V40**) — `settlement_entry.payment_id`(V24 DROP 후 미복원)·`payment.order_id` 무인덱스로 정산/취소마다 풀스캔. + `SettlementRepository:16` 허위 Javadoc(payment_id UNIQUE, V24서 제거) 정정. ⚠️H2는 Flyway 미적용→빌드까지, EXPLAIN은 복귀 후.
 - **#6 [robustness] 짧은 varchar @Size 누락 → 500 대신 400** (S·BE·마이그0) — 브랜드/카테고리 name·옵션 size가 `@NotBlank`만 → 길이초과가 DB위반 500. 형제 DTO는 다 `@Size` 병행. → `@Size(max=컬럼길이)`.
@@ -40,6 +37,7 @@
 > 그 외 정책 대기: 회원 탈퇴(보존기간·PII 마스킹)·적립금/등급·상품 일괄작업 부분실패 정책·셀러 자가수정 범위·`next/image` 도입(이미지 호스팅처).
 
 ## DONE (완료 — 기록)
+- [x] (07-22) **머니 버그 #1~#3 — 항목 CANCELLED 상태 일관성** — `feature/order-cancel-money-fixes`→dev `cd87cfe` (542→**547 tests**·마이그0). 부분취소 후 남는 항목 CANCELLED를 일부 경로가 무시하던 3건: **과다환불**(`cancelOrder`가 잔여=amount−refundedAmount만 환불·`getPayableAmount`=활성 실효가 합) · **400 롤백**(실효가 0 라인은 PG환불·partialRefund(0) 스킵) · **재고 불일치**(`pay()`차감·`cancel()`복원 모두 `isActive()` 가드 → 이중복원·불필요차감 방지). 회귀 5건(Payment 3·OrderService 1·OrderProcessor 1). #4는 같은 뿌리 잔여.
 - [x] (07-20~21) **기능 스캔 READY 9건 전부** (508→**518 tests**·FE 0·⚠️V38·V39 MySQL 스모크=복귀 후):
   - ① 상품 검색 브랜드명·설명 확장(서브쿼리) `d93b6ab` · ② 체크아웃 멱등키(V38·IDOR 가드·경쟁조건) `4d89ad8` · ③ PENDING 만료 배치(TTL 설정값·테스트 토글) `72f496d` · ④ 주문 상태 이력+송장(V39·엔티티 소유 타임라인) `2543ed9` · ⑤ 어드민 주문 검색(OrderRepositoryCustom·셀러 스코프 토대) `39e28c4` · ⑥ 셀러 내 주문(searchSellerOrders 재사용·스코프 강제) `dcacb8b` · ⑦ 쿠폰 중단+발급/사용 현황(usedCount 배치집계) `51afc52` · ⑧ FE 기반 3종(Toast·returnTo 가드·error/not-found·soft-404) `92eb6ae` · ⑨ PLP 필터 URL화(자기모순 해소·공유·뒤로가기) `ddf8fc8`.
 - [x] (07-14) **커버리지 0% 구멍 3종 메우기** — `feature/coverage-holes`→dev `00d4fa5` (496 tests·+19·프로덕션 코드 변경 0). `AuditLogRepositoryImpl` 0→**98.7%**(감사 검색 QueryDSL이 한 번도 실행된 적 없었음) · `SettlementController` 0→**100%** · `ReconciliationController` 0→**93.3%**(서비스는 91.9%인데 돈 움직이는 HTTP 경계가 0%였음) · `MemberCouponClaimService` 0→**100%**(락 키가 쿠폰별인지 — 전역 키면 처리량 붕괴). 전체 82.6%→**84.5%**.
