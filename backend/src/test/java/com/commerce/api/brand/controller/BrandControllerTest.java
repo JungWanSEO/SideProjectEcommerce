@@ -71,6 +71,17 @@ class BrandControllerTest {
     }
 
     @Test
+    @DisplayName("POST /api/brands - 이름이 컬럼 길이(50자)를 넘으면 400 (DB 500 아님)")
+    void create_tooLongName_returns400() throws Exception {
+        String tooLong = "N".repeat(51);   // brand.name varchar(50) 초과
+        mockMvc.perform(post("/api/brands")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"" + tooLong + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
     @DisplayName("PUT /api/brands/{id}/seller - 셀러 귀속 200")
     void assignSeller_success() throws Exception {
         given(brandService.assignSeller(eq(1L), eq(7L)))
