@@ -96,10 +96,23 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
   const pageNums: number[] = [];
   for (let n = windowStart; n <= windowEnd; n++) pageNums.push(n);
 
+  // URL의 필터를 클라이언트 초기 상태로 넘긴다 — 서버 SSR과 클라가 같은 필터를 보게 해
+  // "크롤러엔 필터된 목록·JS엔 무필터 목록"이던 자기모순을 없앤다(공유·뒤로가기 복원도 함께).
+  const pick = (k: string) => (typeof sp[k] === "string" ? (sp[k] as string) : undefined);
+  const initialQuery = {
+    keyword: pick("keyword"),
+    categoryId: pick("categoryId"),
+    brandId: pick("brandId"),
+    minPrice: pick("minPrice"),
+    maxPrice: pick("maxPrice"),
+    optionSize: pick("optionSize"),
+    sort: pick("sort"),
+  };
+
   return (
     <>
-      {/* 사용자(JS): 인터랙티브 PLP. 하이드레이션 후 이 화면을 쓴다. */}
-      <ProductsClient />
+      {/* 사용자(JS): 인터랙티브 PLP. 하이드레이션 후 이 화면을 쓴다. URL 필터를 초기 상태로 받는다. */}
+      <ProductsClient initialQuery={initialQuery} />
 
       {/* 크롤/무JS 폴백: 서버 HTML의 실제 <a href> 상품 링크 + ?page=n 페이지네이션(봇 발견/색인용). JS 사용자엔 미노출. */}
       <noscript>

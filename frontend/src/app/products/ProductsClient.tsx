@@ -30,7 +30,7 @@ const SORTS = [
   { value: "wishlistCount,desc", label: "인기순(찜)" },
 ];
 
-interface Query {
+export interface Query {
   keyword: string;
   categoryId: string; // "" = 전체
   brandId: string;
@@ -39,6 +39,7 @@ interface Query {
   optionSize: string;
   sort: string;
 }
+const DEFAULT_SORT = "createdAt,desc";
 const EMPTY: Query = {
   keyword: "",
   categoryId: "",
@@ -46,8 +47,21 @@ const EMPTY: Query = {
   minPrice: "",
   maxPrice: "",
   optionSize: "",
-  sort: "createdAt,desc",
+  sort: DEFAULT_SORT,
 };
+
+/** Query → URLSearchParams 문자열(기본값은 생략해 URL을 깨끗하게). page는 무한스크롤이라 URL에 담지 않는다. */
+function queryToSearch(q: Query): string {
+  const qs = new URLSearchParams();
+  if (q.keyword) qs.set("keyword", q.keyword);
+  if (q.categoryId) qs.set("categoryId", q.categoryId);
+  if (q.brandId) qs.set("brandId", q.brandId);
+  if (q.minPrice) qs.set("minPrice", q.minPrice);
+  if (q.maxPrice) qs.set("maxPrice", q.maxPrice);
+  if (q.optionSize) qs.set("optionSize", q.optionSize);
+  if (q.sort && q.sort !== DEFAULT_SORT) qs.set("sort", q.sort);
+  return qs.toString();
+}
 
 const pillField =
   "rounded-full border border-line bg-paper px-4 py-2.5 text-sm text-ink placeholder:text-muted transition focus:border-clay focus:outline-none focus:ring-2 focus:ring-clay/30";
@@ -90,7 +104,7 @@ function priceLabel(min: string, max: string): string {
 //   목표지향 이커머스 그리드엔 순수 무한스크롤보다 Load-more가 낫다(Baymard 대규모 사용성테스트·NN/g). 권장 범위 ~50~100.
 const AUTO_APPEND_LIMIT = 60;
 
-export default function ProductsClient() {
+export default function ProductsClient({ initialQuery }: { initialQuery?: Partial<Query> }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true); // 첫 로드(쿼리 변경)
   const [loadingMore, setLoadingMore] = useState(false); // 다음 청크
@@ -103,11 +117,21 @@ export default function ProductsClient() {
   const [brands, setBrands] = useState<Brand[]>([]);
   const [sizes, setSizes] = useState<string[]>([]); // 사이즈 칩 — 최초 결과에서 한 번 채운다
 
-  const [query, setQuery] = useState<Query>(EMPTY);
-  // 입력 중 값(키워드·가격은 검색/Enter로 commit)
-  const [keywordInput, setKeywordInput] = useState("");
-  const [minInput, setMinInput] = useState("");
-  const [maxInput, setMaxInput] = useState("");
+  // 초기 쿼리 = 서버가 URL(searchParams)에서 파싱해 넘겨준 값. 서버 SSR HTML과 클라 상태가 같은 필터를 봐야
+  // "크롤러에겐 필터된 목록·JS 사용자에겐 무필터 목록"이던 자기모순이 사라진다(하이드레이션 불일치 없이).
+  // undefined 필드가 EMPTY 기본값(특히 sort)을 덮어쓰지 않도록 정의된 값만 병합한다.
+  const initial: Query = { ...EMPTY };
+  if (initialQuery) {
+    (Object.keys(initialQuery) as (keyof Query)[]).forEach((k) => {
+      const v = initialQuery[k];
+      if (v != null) initial[k] = v;
+    });
+  }
+  const [query, setQuery] = useState<Query>(initial);
+  // 입력 중 값(키워드·가격은 검색/Enter로 commit) — 초기값도 URL에서.
+  const [keywordInput, setKeywordInput] = useState(initial.keyword);
+  const [minInput, setMinInput] = useState(initial.minPrice);
+  const [maxInput, setMaxInput] = useState(initial.maxPrice);
 
   // 페이지네이션 전략: 기본 뷰(필터 없음 + 최신순)는 커서 피드(/feed, no-offset),
   //   필터/정렬이 걸리면 offset 검색(/api/products?page=N). 둘 다 무한 스크롤로 append.
@@ -157,6 +181,15 @@ export default function ProductsClient() {
     },
     [isFeed, query],
   );
+
+  // 쿼리 변경 → 주소창을 현재 필터로 동기화(공유·뒤로가기 복원). replaceState라 히스토리를 오염시키지 않고
+  //   Next 라우팅(재요청)도 안 태운다 — 필터를 바꿀 때마다 새 히스토리 항목이 쌓이면 뒤로가기가 필터 한 칸씩
+  //   되짚는 함정이 되므로 replace로 덮어쓴다.
+  useEffect(() => {
+    const qs = queryToSearch(query);
+    const url = qs ? `/products?${qs}` : "/products";
+    window.history.replaceState(window.history.state, "", url);
+  }, [query]);
 
   // 쿼리 변경 → 커서/페이지 리셋하고 처음부터 다시 로드
   useEffect(() => {
