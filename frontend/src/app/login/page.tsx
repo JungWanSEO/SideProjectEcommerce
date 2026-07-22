@@ -25,9 +25,13 @@ export default function LoginPage() {
       // 로그인 성공 → setUser로 전역 헤더가 즉시 로그인 상태로 바뀌고, 곧 라우팅한다.
       // 그 "헤더 flip + 클라 네비 공백"을 전체화면 오버레이로 덮어 로딩을 명확히 보여준다(아래 redirecting 분기).
       setRedirecting(true);
-      // 역할별 랜딩: 관리자=대시보드, 셀러=셀러 콘솔, 일반 사용자=상품 목록
+      // returnTo(가드가 실어 보낸 원래 경로)가 있으면 그리로. 내부 절대경로만 허용(오픈 리다이렉트 방지).
+      // useSearchParams 대신 핸들러에서 window.location을 읽는다 — 렌더 시 Suspense 바일아웃을 피하려고.
+      const returnTo = new URLSearchParams(window.location.search).get("returnTo");
+      const safeReturn = returnTo && returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : null;
+      // returnTo가 없으면 역할별 랜딩: 관리자=대시보드, 셀러=셀러 콘솔, 일반 사용자=상품 목록
       router.push(
-        u.role === "ADMIN" ? "/admin" : u.role === "SELLER" ? "/seller" : "/products",
+        safeReturn ?? (u.role === "ADMIN" ? "/admin" : u.role === "SELLER" ? "/seller" : "/products"),
       );
     } catch (err) {
       setError((err as Error).message);

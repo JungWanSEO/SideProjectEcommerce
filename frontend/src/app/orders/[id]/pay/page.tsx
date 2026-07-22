@@ -7,6 +7,7 @@ import { apiGet, apiPost } from "@/lib/api";
 import { Order, Payment } from "@/lib/types";
 import { PROVIDERS } from "@/lib/provider";
 import { useAuth } from "@/lib/auth";
+import { loginHref } from "@/lib/useRequireAuth";
 import Skeleton from "@/components/ui/Skeleton";
 
 // 모의 결제수단 (백엔드는 method 문자열만 받음 — 기본 MOCK_CARD)
@@ -43,7 +44,7 @@ export default function PaymentPage() {
   }, []);
 
   useEffect(() => {
-    if (!authLoading && !user) router.replace("/login");
+    if (!authLoading && !user) router.replace(loginHref(window.location.pathname + window.location.search));
   }, [authLoading, user, router]);
 
   useEffect(() => {

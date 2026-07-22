@@ -6,6 +6,8 @@ import Link from "next/link";
 import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/api";
 import { Cart, PageResponse, Product, Review, ReviewSort, ReviewSummary } from "@/lib/types";
 import { useAuth } from "@/lib/auth";
+import { useToast } from "@/lib/toast";
+import { loginHref } from "@/lib/useRequireAuth";
 import Stars, { StarInput } from "@/components/ui/Stars";
 import { buttonClass } from "@/components/ui/Button";
 import WishlistButton from "@/components/ui/WishlistButton";
@@ -25,6 +27,7 @@ export default function ProductDetailClient() {
   const id = params.id as string; // 동적 세그먼트 [id]
   const router = useRouter();
   const { user } = useAuth();
+  const toast = useToast();
 
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
@@ -96,7 +99,7 @@ export default function ProductDetailClient() {
 
   const addToCart = async () => {
     if (!user) {
-      router.push("/login"); // 비로그인 → 로그인으로
+      router.push(loginHref(`/products/${id}`)); // 비로그인 → 로그인 후 이 상품으로 복귀
       return;
     }
     if (selectedOptionId === null) {
@@ -107,9 +110,9 @@ export default function ProductDetailClient() {
     setCartMsg(null);
     try {
       await apiPost<Cart>("/api/carts/items", { optionId: selectedOptionId, quantity: 1 });
-      setCartMsg("장바구니에 담았습니다.");
+      toast.success("장바구니에 담았습니다.");
     } catch (e) {
-      setCartMsg((e as Error).message);
+      toast.error((e as Error).message);
     } finally {
       setAdding(false);
     }
@@ -118,7 +121,7 @@ export default function ProductDetailClient() {
   const submitReview = async (e: FormEvent) => {
     e.preventDefault();
     if (!user) {
-      router.push("/login");
+      router.push(loginHref(`/products/${id}`));
       return;
     }
     if (!content.trim()) {

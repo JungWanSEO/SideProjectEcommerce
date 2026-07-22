@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api";
 import { Address } from "@/lib/types";
 import { useAuth } from "@/lib/auth";
+import { loginHref } from "@/lib/useRequireAuth";
 import Badge from "@/components/ui/Badge";
 import { buttonClass } from "@/components/ui/Button";
 import Skeleton from "@/components/ui/Skeleton";
@@ -41,7 +42,7 @@ export default function AddressBookPage() {
 
   // 비로그인 → 로그인으로
   useEffect(() => {
-    if (!authLoading && !user) router.replace("/login");
+    if (!authLoading && !user) router.replace(loginHref(window.location.pathname + window.location.search));
   }, [authLoading, user, router]);
 
   useEffect(() => {

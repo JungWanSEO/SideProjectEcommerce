@@ -6,6 +6,7 @@ import Link from "next/link";
 import { apiGet, apiDelete, apiPut } from "@/lib/api";
 import { Cart, CartItem } from "@/lib/types";
 import { useAuth } from "@/lib/auth";
+import { loginHref } from "@/lib/useRequireAuth";
 import Badge from "@/components/ui/Badge";
 import Skeleton from "@/components/ui/Skeleton";
 
@@ -24,7 +25,7 @@ export default function CartPage() {
 
   // 비로그인 → 로그인으로
   useEffect(() => {
-    if (!authLoading && !user) router.replace("/login");
+    if (!authLoading && !user) router.replace(loginHref(window.location.pathname + window.location.search));
   }, [authLoading, user, router]);
 
   useEffect(() => {

@@ -4,6 +4,7 @@ import { useEffect, useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { apiGet, apiPut } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { loginHref } from "@/lib/useRequireAuth";
 import Skeleton from "@/components/ui/Skeleton";
 
 /** 내 정보 응답(백엔드 MyProfileResponse) — provider·hasPassword로 로컬/소셜 UI 분기. */
@@ -44,7 +45,7 @@ export default function ProfilePage() {
   useEffect(() => {
     if (loading) return;
     if (!user) {
-      router.replace("/login");
+      router.replace(loginHref(window.location.pathname + window.location.search));
       return;
     }
     apiGet<MyProfile>("/api/members/me")
