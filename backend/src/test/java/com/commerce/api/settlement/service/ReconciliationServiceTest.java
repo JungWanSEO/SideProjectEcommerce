@@ -311,10 +311,10 @@ class ReconciliationServiceTest {
     @DisplayName("일자별 윈도우 - 윈도우 안 거래만 대조(밖은 제외), OPEN 삭제도 거래키로 스코프")
     void reconcile_window_onlyInWindow() {
         LocalDate day = LocalDate.of(2026, 6, 10);
-        // tx1: 윈도우 안·양측 일치 → MATCHED. tx2: 윈도우 밖(5일 전)이라 양측에서 제외돼야 한다.
-        given(settlementRepository.findAll()).willReturn(List.of(
-                ourOn("tx1", 10000, day),
-                ourOn("tx2", 20000, day.minusDays(5))));
+        // 우리 정산은 이제 DB(findBySettledDateWindow)가 윈도우로 좁혀 준다 → 윈도우 안(tx1)만 반환.
+        // PG 리포트는 여전히 Java에서 inWindow로 거르므로, 윈도우 밖(tx2, 5일 전)을 섞어도 제외돼야 한다.
+        given(settlementRepository.findBySettledDateWindow(day, day))
+                .willReturn(List.of(ourOn("tx1", 10000, day)));
         given(paymentGatewayRouter.fetchAllSettlements()).willReturn(List.of(
                 pgOn("tx1", 10000, PgSettlementStatus.PAID, day),
                 pgOn("tx2", 20000, PgSettlementStatus.PAID, day.minusDays(5))));
@@ -331,7 +331,8 @@ class ReconciliationServiceTest {
     @DisplayName("일자별 윈도우 - 윈도우 안에서 우리에만 있는 거래는 MISSING_IN_PG로 잡힌다")
     void reconcile_window_detectsMismatchInWindow() {
         LocalDate day = LocalDate.of(2026, 6, 10);
-        given(settlementRepository.findAll()).willReturn(List.of(ourOn("tx1", 10000, day)));
+        given(settlementRepository.findBySettledDateWindow(day, day))
+                .willReturn(List.of(ourOn("tx1", 10000, day)));
         given(paymentGatewayRouter.fetchAllSettlements()).willReturn(List.of());   // PG엔 없음
 
         ReconciliationResult r = reconciliationService.reconcile(day, day);
@@ -345,7 +346,8 @@ class ReconciliationServiceTest {
     @DisplayName("일자별 윈도우 - 윈도우에 거래가 없으면 OPEN 삭제를 호출하지 않는다(빈 IN 방지)")
     void reconcile_window_empty() {
         LocalDate day = LocalDate.of(2026, 6, 10);
-        given(settlementRepository.findAll()).willReturn(List.of(ourOn("tx1", 10000, day.minusDays(5))));
+        // DB 윈도우 쿼리가 범위 밖(5일 전)을 이미 걸러 빈 결과를 준다.
+        given(settlementRepository.findBySettledDateWindow(day, day)).willReturn(List.of());
         given(paymentGatewayRouter.fetchAllSettlements()).willReturn(List.of());
 
         ReconciliationResult r = reconciliationService.reconcile(day, day);

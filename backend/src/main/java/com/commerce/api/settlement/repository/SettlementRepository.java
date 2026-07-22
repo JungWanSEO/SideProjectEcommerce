@@ -29,6 +29,16 @@ public interface SettlementRepository extends JpaRepository<SettlementEntry, Lon
     List<SettlementEntry> findByPaymentId(Long paymentId);
 
     /**
+     * 정산일 윈도우 안의 항목(대사용). from/to는 각각 null이면 그 방향 무제한
+     * (ReconciliationService.inWindow와 동일 규칙: [from, to] 포함, settledDate null은 대사 대상 아님이라 제외).
+     * 기존엔 findAll 후 Java에서 걸렀다 → 윈도우 대사가 전체를 읽던 것을 DB로 내려 좁힌다.
+     */
+    @Query("select s from SettlementEntry s where s.settledDate is not null "
+            + "and (:from is null or s.settledDate >= :from) "
+            + "and (:to is null or s.settledDate <= :to)")
+    List<SettlementEntry> findBySettledDateWindow(@Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    /**
      * 주어진 상태 정산 항목의 실수령(netAmount) 합 — 대시보드 "정산 대기 금액" KPI(SCHEDULED).
      * {@code coalesce(...,0)} 으로 항목이 없을 때 0 반환(primitive 언박싱 안전).
      */

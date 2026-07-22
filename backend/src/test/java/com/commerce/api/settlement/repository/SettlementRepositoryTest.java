@@ -105,6 +105,16 @@ class SettlementRepositoryTest {
     }
 
     @Test
+    @DisplayName("findBySettledDateWindow - 정산일 [from,to] 범위(각 bound는 null이면 무제한)로 좁힌다")
+    void findBySettledDateWindow_filtersByRange() {
+        // 시드: D1(now+2)=e1·e3 / D2(now+5)=e2
+        assertThat(repository.findBySettledDateWindow(D2, null)).hasSize(1);   // settledDate >= D2 → e2
+        assertThat(repository.findBySettledDateWindow(null, D1)).hasSize(2);   // settledDate <= D1 → e1·e3
+        assertThat(repository.findBySettledDateWindow(D1, D2)).hasSize(3);     // 전체
+        assertThat(repository.findBySettledDateWindow(D1.minusDays(1), D1.minusDays(1))).isEmpty();   // 범위 밖
+    }
+
+    @Test
     @DisplayName("summarizeBySeller - 셀러별 매출/수수료/실수령 집계(sellerName은 null=서비스 enrich)")
     void summarizeBySeller() {
         List<SellerSettlementSummary> summary =
