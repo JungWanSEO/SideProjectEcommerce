@@ -440,6 +440,8 @@ export interface Coupon {
   createdAt: string;
   totalQuantity: number | null; // 선착순 한도(장). null=무제한
   remainingQuantity: number | null; // 남은 발급 수(무제한이면 null, 소진 시 0)
+  issuedCount: number; // 발급된 수(선착순 claim·지갑 발급 누계). 공개형 무제한은 0
+  usedCount: number; // 사용된 수(발급형에서 유의미)
 }
 
 /** 쿠폰 생성 요청 (CouponCreateRequest) */

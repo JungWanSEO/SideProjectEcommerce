@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiGet, apiPost } from "@/lib/api";
+import { apiGet, apiPatch, apiPost } from "@/lib/api";
 import {
   Coupon,
   CouponCreateInput,
@@ -122,6 +122,28 @@ export default function AdminCouponsPage() {
       setError((e as Error).message);
     } finally {
       setIssuingId(null);
+    }
+  };
+
+  // 쿠폰 중단(기간이 남아도 즉시 사용 불가). 오타 난 쿠폰이 돈을 새게 하는 걸 만료 전에 막는다.
+  const disable = async (coupon: Coupon) => {
+    if (
+      !confirm(
+        `'${coupon.code}' 쿠폰을 지금 중단할까요?\n기간이 남아 있어도 즉시 사용할 수 없게 됩니다.`,
+      )
+    )
+      return;
+    setBusy(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await apiPatch<Coupon>(`/api/coupons/${coupon.id}/disable`, undefined);
+      setSuccess(`'${coupon.code}' 쿠폰을 중단했습니다.`);
+      load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -307,20 +329,21 @@ export default function AdminCouponsPage() {
               <th className="px-4 py-3">배포</th>
               <th className="px-4 py-3 text-right">최소주문</th>
               <th className="px-4 py-3">유효기간</th>
+              <th className="px-4 py-3 text-right">발급/사용</th>
               <th className="px-4 py-3">상태</th>
-              <th className="px-4 py-3 text-right">발급</th>
+              <th className="px-4 py-3 text-right">관리</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {loading ? (
               <tr>
-                <td colSpan={10} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={11} className="px-4 py-8 text-center text-gray-400">
                   불러오는 중…
                 </td>
               </tr>
             ) : coupons.length === 0 ? (
               <tr>
-                <td colSpan={10} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={11} className="px-4 py-8 text-center text-gray-400">
                   쿠폰이 없습니다. 위에서 생성하세요.
                 </td>
               </tr>
@@ -352,23 +375,39 @@ export default function AdminCouponsPage() {
                     <td className="px-4 py-3 text-xs text-gray-500">
                       {c.validFrom.slice(0, 10)} ~ {c.validUntil.slice(0, 10)}
                     </td>
+                    {/* 발급/사용 현황: 발급 n · 사용 m (한정이면 /한도) */}
+                    <td className="px-4 py-3 text-right text-xs text-gray-600">
+                      발급 {c.issuedCount.toLocaleString()}
+                      {c.totalQuantity != null && `/${c.totalQuantity.toLocaleString()}`}
+                      <span className="text-gray-400"> · 사용 {c.usedCount.toLocaleString()}</span>
+                    </td>
                     <td className="px-4 py-3">
                       <span className={`rounded px-2 py-0.5 text-xs ${COUPON_STATUS_BADGE[st]}`}>
                         {COUPON_STATUS_LABEL[st]}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right">
-                      {c.issueType === "ISSUED" ? (
-                        <button
-                          onClick={() => issue(c.id)}
-                          disabled={issuingId === c.id}
-                          className="rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-100 disabled:opacity-50"
-                        >
-                          {issuingId === c.id ? "발급 중…" : "전체 발급"}
-                        </button>
-                      ) : (
-                        <span className="text-xs text-gray-300">—</span>
-                      )}
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-2">
+                        {c.issueType === "ISSUED" && (
+                          <button
+                            onClick={() => issue(c.id)}
+                            disabled={issuingId === c.id}
+                            className="rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-100 disabled:opacity-50"
+                          >
+                            {issuingId === c.id ? "발급 중…" : "전체 발급"}
+                          </button>
+                        )}
+                        {/* 중단은 아직 살아있는(ACTIVE) 쿠폰만 — 이미 중단/만료면 의미 없음 */}
+                        {c.status === "ACTIVE" && (
+                          <button
+                            onClick={() => disable(c)}
+                            disabled={busy}
+                            className="rounded border border-red-300 px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
+                          >
+                            중단
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );

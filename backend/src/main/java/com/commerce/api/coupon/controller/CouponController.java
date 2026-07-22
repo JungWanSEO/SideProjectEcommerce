@@ -16,6 +16,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -56,9 +57,18 @@ public class CouponController {
         return ResponseEntity.ok(ApiResponse.success(issued + "명에게 발급했습니다.", issued));
     }
 
-    @Operation(summary = "쿠폰 목록", description = "발급된 쿠폰을 최신순으로 조회한다.")
+    @Operation(summary = "쿠폰 목록", description = "발급된 쿠폰을 최신순으로 조회한다. 발급/사용 수·한도 포함.")
     @GetMapping
     public ResponseEntity<ApiResponse<List<CouponResponse>>> getCoupons() {
         return ResponseEntity.ok(ApiResponse.success(couponService.getCoupons()));
+    }
+
+    @Operation(summary = "쿠폰 중단(ADMIN)",
+            description = "기간이 남아도 즉시 사용 불가로 만든다(할인율 오타 등으로 새는 쿠폰을 만료 전에 차단). "
+                    + "없는 쿠폰이면 404. 이미 중단된 쿠폰이면 그대로.")
+    @Auditable(action = "COUPON_DISABLE", targetType = "COUPON", targetId = "#id")
+    @PatchMapping("/{id}/disable")
+    public ResponseEntity<ApiResponse<CouponResponse>> disable(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.success("쿠폰을 중단했습니다.", couponService.disable(id)));
     }
 }

@@ -26,9 +26,16 @@ public record CouponResponse(
         CouponStatus status,
         LocalDateTime createdAt,
         Integer totalQuantity,      // 선착순 한도(장). null = 무제한
-        Integer remainingQuantity   // 남은 발급 수(totalQuantity - issuedCount). 무제한이면 null
+        Integer remainingQuantity,  // 남은 발급 수(totalQuantity - issuedCount). 무제한이면 null
+        int issuedCount,            // 발급된 수(선착순 claim·지갑 발급 누계). PUBLIC 무제한 쿠폰은 0
+        long usedCount              // 사용된 수(member_coupon status=USED). 발급형(ISSUED) 쿠폰에서 유의미
 ) {
+    /** 사용 수 없이(생성 직후 등) — usedCount=0. */
     public static CouponResponse from(Coupon c) {
+        return from(c, 0L);
+    }
+
+    public static CouponResponse from(Coupon c, long usedCount) {
         return new CouponResponse(
                 c.getId(),
                 c.getCode(),
@@ -45,7 +52,9 @@ public record CouponResponse(
                 c.getStatus(),
                 c.getCreatedAt(),
                 c.getTotalQuantity(),
-                remainingOf(c)
+                remainingOf(c),
+                c.getIssuedCount(),
+                usedCount
         );
     }
 

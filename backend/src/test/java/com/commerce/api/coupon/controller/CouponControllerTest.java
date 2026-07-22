@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -43,10 +44,15 @@ class CouponControllerTest {
     private MemberCouponService memberCouponService;
 
     private CouponResponse sample() {
+        return sample(CouponStatus.ACTIVE);
+    }
+
+    private CouponResponse sample(CouponStatus status) {
         return new CouponResponse(1L, "WELCOME5000", "신규 5천원", DiscountType.FIXED_AMOUNT, 5000L, null,
                 30000L, CouponFundedBy.PLATFORM, CouponIssueType.PUBLIC, null,
                 LocalDateTime.of(2026, 6, 1, 0, 0), LocalDateTime.of(2026, 12, 31, 23, 59),
-                CouponStatus.ACTIVE, LocalDateTime.now(), null, null);   // 공개형=무제한 → 잔여수량 null
+                status, LocalDateTime.now(), null, null,   // 공개형=무제한 → 한도/잔여 null
+                0, 0L);   // issuedCount, usedCount
     }
 
     @Test
@@ -96,13 +102,25 @@ class CouponControllerTest {
     }
 
     @Test
-    @DisplayName("GET /api/coupons - 목록 200")
+    @DisplayName("GET /api/coupons - 목록 200 (발급/사용 수 노출)")
     void getCoupons_success() throws Exception {
         given(couponService.getCoupons()).willReturn(List.of(sample()));
 
         mockMvc.perform(get("/api/coupons"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].code").value("WELCOME5000"))
-                .andExpect(jsonPath("$.data[0].discountType").value("FIXED_AMOUNT"));
+                .andExpect(jsonPath("$.data[0].discountType").value("FIXED_AMOUNT"))
+                .andExpect(jsonPath("$.data[0].issuedCount").value(0))
+                .andExpect(jsonPath("$.data[0].usedCount").value(0));
+    }
+
+    @Test
+    @DisplayName("PATCH /api/coupons/{id}/disable - 중단 200, 상태 DISABLED")
+    void disable_success() throws Exception {
+        given(couponService.disable(1L)).willReturn(sample(CouponStatus.DISABLED));
+
+        mockMvc.perform(patch("/api/coupons/1/disable"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("DISABLED"));
     }
 }
