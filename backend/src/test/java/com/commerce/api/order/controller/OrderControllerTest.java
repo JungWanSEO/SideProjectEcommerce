@@ -15,6 +15,7 @@ import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.order.dto.OrderResponse;
 import com.commerce.api.order.dto.OrderResponse.OrderItemResponse;
+import com.commerce.api.order.dto.OrderSearchCondition;
 import com.commerce.api.order.dto.OrderSummaryResponse;
 import com.commerce.api.order.entity.OrderItemStatus;
 import com.commerce.api.order.entity.OrderStatus;
@@ -170,19 +171,30 @@ class OrderControllerTest {
     }
 
     @Test
-    @DisplayName("GET /api/orders/admin - 전체 주문 목록 200(status 필터·memberId 노출)")
-    void getAllOrders_success() throws Exception {
+    @DisplayName("GET /api/orders/admin - 주문 검색 200 + keyword·status·기간이 조건으로 바인딩된다(sellerId는 무시)")
+    void searchOrders_success() throws Exception {
         PageResponse<OrderSummaryResponse> page = new PageResponse<>(
                 List.of(new OrderSummaryResponse(
                         5L, 9L, OrderStatus.PAID, 20000L, LocalDateTime.now(), "후드티", 1)),
                 0, 20, 1L, 1, false);
-        given(orderService.getAllOrders(eq(OrderStatus.PAID), any(Pageable.class))).willReturn(page);
+        given(orderService.searchOrders(any(OrderSearchCondition.class), any(Pageable.class)))
+                .willReturn(page);
 
-        mockMvc.perform(get("/api/orders/admin").param("status", "PAID"))
+        mockMvc.perform(get("/api/orders/admin")
+                        .param("keyword", "홍길동")
+                        .param("status", "PAID")
+                        .param("from", "2026-07-01")
+                        .param("sellerId", "7"))   // 어드민 검색에선 무시돼야 함
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.content[0].memberId").value(9))
                 .andExpect(jsonPath("$.data.content[0].status").value("PAID"));
+
+        ArgumentCaptor<OrderSearchCondition> captor = ArgumentCaptor.forClass(OrderSearchCondition.class);
+        verify(orderService).searchOrders(captor.capture(), any(Pageable.class));
+        assertThat(captor.getValue().keyword()).isEqualTo("홍길동");
+        assertThat(captor.getValue().status()).isEqualTo(OrderStatus.PAID);
+        assertThat(captor.getValue().from()).isEqualTo(java.time.LocalDate.of(2026, 7, 1));
+        assertThat(captor.getValue().sellerId()).isNull();   // sellerId는 어드민 검색에서 강제 null
     }
 
     @Test

@@ -32,6 +32,7 @@ export default function AdminOrdersPage() {
   const [busy, setBusy] = useState(false);
 
   const [filter, setFilter] = useState<OrderStatus | "ALL">("ALL");
+  const [keyword, setKeyword] = useState(""); // 커밋된 검색어(수령인/주문번호)
   const [page, setPage] = useState(0);
   const [hasNext, setHasNext] = useState(false);
   const [totalElements, setTotalElements] = useState(0);
@@ -40,6 +41,7 @@ export default function AdminOrdersPage() {
     setLoading(true);
     const q = new URLSearchParams({ page: String(page), size: "20" });
     if (filter !== "ALL") q.set("status", filter);
+    if (keyword.trim()) q.set("keyword", keyword.trim());
     apiGet<PageResponse<OrderSummary>>(`/api/orders/admin?${q.toString()}`)
       .then((p) => {
         setOrders(p.content);
@@ -48,7 +50,7 @@ export default function AdminOrdersPage() {
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [page, filter]);
+  }, [page, filter, keyword]);
 
   useEffect(() => {
     load();
@@ -99,7 +101,7 @@ export default function AdminOrdersPage() {
       )}
 
       {/* 상태 필터 */}
-      <div className="mb-4 flex flex-wrap gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         {FILTERS.map((f) => (
           <button
             key={f.value}
@@ -113,6 +115,17 @@ export default function AdminOrdersPage() {
             {f.label}
           </button>
         ))}
+        <span className="mx-1 h-4 w-px bg-gray-200" />
+        {/* 수령인명 또는 주문번호로 검색 (Enter/버튼으로 커밋 → 첫 페이지부터) */}
+        <input
+          value={keyword}
+          onChange={(e) => setKeyword(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") setPage(0);
+          }}
+          placeholder="수령인 · 주문번호"
+          className="w-56 rounded border border-gray-300 bg-white px-3 py-1 text-sm text-gray-700"
+        />
       </div>
 
       {/* 목록 */}

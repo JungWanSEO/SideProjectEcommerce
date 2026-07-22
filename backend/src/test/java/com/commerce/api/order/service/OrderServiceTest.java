@@ -3,6 +3,7 @@ package com.commerce.api.order.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -10,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.order.dto.OrderResponse;
+import com.commerce.api.order.dto.OrderSearchCondition;
 import com.commerce.api.order.dto.OrderSummaryResponse;
 import com.commerce.api.order.entity.Order;
 import com.commerce.api.order.entity.OrderItem;
@@ -24,6 +26,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -328,34 +331,38 @@ class OrderServiceTest {
         verify(productRepository, never()).findByOptionId(any());
     }
 
-    // ----- 어드민 전체 주문 목록 -----
+    // ----- 어드민 주문 검색 -----
 
     @Test
-    @DisplayName("어드민 주문 목록 - status 없으면 findAll(전체)")
-    void getAllOrders_all() {
+    @DisplayName("어드민 주문 검색 - 조건을 QueryDSL search로 위임하고 요약으로 매핑한다")
+    void searchOrders_delegatesToQueryDsl() {
         Pageable pageable = PageRequest.of(0, 20);
-        given(orderRepository.findAll(pageable))
+        OrderSearchCondition condition =
+                new OrderSearchCondition("홍길동", null, OrderStatus.PAID, null, null, null, null, null);
+        given(orderRepository.search(any(OrderSearchCondition.class), eq(pageable)))
                 .willReturn(new PageImpl<>(List.of(orderInStatus(1L, OrderStatus.PAID)), pageable, 1));
 
-        PageResponse<OrderSummaryResponse> response = orderService.getAllOrders(null, pageable);
+        PageResponse<OrderSummaryResponse> response = orderService.searchOrders(condition, pageable);
 
         assertThat(response.content()).hasSize(1);
         assertThat(response.content().get(0).status()).isEqualTo(OrderStatus.PAID);
-        verify(orderRepository).findAll(pageable);
+        verify(orderRepository).search(condition, pageable);
     }
 
     @Test
-    @DisplayName("어드민 주문 목록 - status 있으면 그 상태만(findByStatus)")
-    void getAllOrders_byStatus() {
+    @DisplayName("셀러 주문 검색 - 요청 sellerId를 무시하고 로그인 셀러로 스코프를 덮어쓴다(남의 셀러 주문 차단)")
+    void searchSellerOrders_forcesSellerScope() {
         Pageable pageable = PageRequest.of(0, 20);
-        given(orderRepository.findByStatus(OrderStatus.SHIPPING, pageable))
-                .willReturn(new PageImpl<>(List.of(orderInStatus(1L, OrderStatus.SHIPPING)), pageable, 1));
+        // 요청은 다른 셀러(999)를 노렸지만 서비스는 로그인 셀러(7)로 덮어써야 한다.
+        OrderSearchCondition spoofed =
+                new OrderSearchCondition(null, null, null, null, null, null, null, 999L);
+        given(orderRepository.search(any(OrderSearchCondition.class), eq(pageable)))
+                .willReturn(new PageImpl<>(List.of(), pageable, 0));
 
-        PageResponse<OrderSummaryResponse> response =
-                orderService.getAllOrders(OrderStatus.SHIPPING, pageable);
+        orderService.searchSellerOrders(7L, spoofed, pageable);
 
-        assertThat(response.content()).hasSize(1);
-        assertThat(response.content().get(0).status()).isEqualTo(OrderStatus.SHIPPING);
-        verify(orderRepository).findByStatus(OrderStatus.SHIPPING, pageable);
+        ArgumentCaptor<OrderSearchCondition> captor = ArgumentCaptor.forClass(OrderSearchCondition.class);
+        verify(orderRepository).search(captor.capture(), eq(pageable));
+        assertThat(captor.getValue().sellerId()).isEqualTo(7L);   // 999가 아니라 로그인 셀러 7
     }
 }

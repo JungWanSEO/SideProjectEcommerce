@@ -106,4 +106,87 @@ class OrderRepositoryTest {
         assertThat(first.getTotalPages()).isEqualTo(2);
         assertThat(first.hasNext()).isTrue();
     }
+
+    // === 어드민 주문 검색 (QueryDSL search) ===
+
+    private static final PageRequest FIRST_PAGE = PageRequest.of(0, 20);
+
+    /** 수령인·셀러·금액을 지정한 주문 저장. */
+    private Order searchable(Long memberId, String recipient, Long sellerId, long price) {
+        Order order = Order.create(memberId);
+        order.ship(com.commerce.api.order.entity.ShippingInfo.of(
+                recipient, "010-0000-0000", "06236", "서울", "1층", null));
+        order.addItem(OrderItem.builder()
+                .productId(1L).optionId(10L).sellerId(sellerId).productName("상품").size("M")
+                .orderPrice(price).quantity(1).build());
+        return orderRepository.save(order);
+    }
+
+    private com.commerce.api.order.dto.OrderSearchCondition cond(
+            String keyword, Long memberId, java.time.LocalDate from, java.time.LocalDate to,
+            Long minAmount, Long maxAmount, Long sellerId) {
+        return new com.commerce.api.order.dto.OrderSearchCondition(
+                keyword, memberId, null, from, to, minAmount, maxAmount, sellerId);
+    }
+
+    @Test
+    @DisplayName("search - 수령인명 부분일치, 그리고 키워드가 숫자면 주문번호(id)도 함께 매칭")
+    void search_byRecipientOrOrderNumber() {
+        Order target = searchable(1L, "홍길동", null, 30000L);
+        searchable(2L, "김철수", null, 50000L);
+
+        Page<Order> byName = orderRepository.search(cond("길동", null, null, null, null, null, null), FIRST_PAGE);
+        Page<Order> byId = orderRepository.search(
+                cond(String.valueOf(target.getId()), null, null, null, null, null, null), FIRST_PAGE);
+
+        assertThat(byName.getContent()).extracting(o -> o.getShippingInfo().getRecipient())
+                .containsExactly("홍길동");
+        assertThat(byId.getContent()).extracting(Order::getId).contains(target.getId());
+    }
+
+    @Test
+    @DisplayName("search - 회원·금액대로 거른다")
+    void search_byMemberAndAmount() {
+        searchable(1L, "홍길동", null, 30000L);
+        searchable(1L, "홍길동", null, 90000L);   // 금액대 밖
+        searchable(2L, "김철수", null, 30000L);   // 다른 회원
+
+        assertThat(orderRepository.search(cond(null, 1L, null, null, null, null, null), FIRST_PAGE)
+                .getTotalElements()).isEqualTo(2);
+        assertThat(orderRepository.search(cond(null, null, null, null, 20000L, 50000L, null), FIRST_PAGE)
+                .getContent())
+                .allMatch(o -> o.getTotalPrice() >= 20000 && o.getTotalPrice() <= 50000);
+    }
+
+    @Test
+    @DisplayName("search - 기간 to는 그날 하루를 포함한다(to 당일 23:59 주문도 잡힘)")
+    void search_dateWindowInclusive() {
+        Order o = searchable(1L, "홍길동", null, 30000L);
+        em.getEntityManager().createNativeQuery("update orders set created_at = :t where id = :id")
+                .setParameter("t", java.time.LocalDate.of(2026, 7, 10).atTime(23, 59))
+                .setParameter("id", o.getId())
+                .executeUpdate();
+        em.clear();
+
+        Page<Order> inWindow = orderRepository.search(
+                cond(null, null, java.time.LocalDate.of(2026, 7, 10), java.time.LocalDate.of(2026, 7, 10),
+                        null, null, null), FIRST_PAGE);
+        Page<Order> afterWindow = orderRepository.search(
+                cond(null, null, java.time.LocalDate.of(2026, 7, 11), null, null, null, null), FIRST_PAGE);
+
+        assertThat(inWindow.getContent()).extracting(Order::getId).contains(o.getId());   // to 당일 포함
+        assertThat(afterWindow.getContent()).extracting(Order::getId).doesNotContain(o.getId());
+    }
+
+    @Test
+    @DisplayName("search - sellerId: 그 셀러 상품이 든 주문만(EXISTS·중복 없음)")
+    void search_bySeller() {
+        searchable(1L, "홍길동", 7L, 30000L);
+        searchable(2L, "김철수", 9L, 30000L);
+
+        Page<Order> page = orderRepository.search(cond(null, null, null, null, null, null, 7L), FIRST_PAGE);
+
+        assertThat(page.getTotalElements()).isEqualTo(1);
+        assertThat(page.getContent().get(0).getOrderItems().get(0).getSellerId()).isEqualTo(7L);
+    }
 }
