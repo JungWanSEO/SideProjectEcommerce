@@ -144,9 +144,10 @@ public class OrderService {
      * 잘못된 전이(건너뛰기·되돌리기·취소/대기 상태)면 409(Order.advanceShipping이 강제).
      */
     @Transactional
-    public OrderResponse advanceShipping(Long id, OrderStatus next) {
+    public OrderResponse advanceShipping(Long id, OrderStatus next, Long changedBy,
+            String courier, String trackingNumber) {
         Order order = findOrder(id);
-        order.advanceShipping(next);   // 영속 엔티티 → dirty checking flush
+        order.advanceShipping(next, changedBy, courier, trackingNumber);   // 이력·송장 기록 + dirty checking flush
         return OrderResponse.from(order);
     }
 
@@ -158,7 +159,7 @@ public class OrderService {
     public OrderResponse cancel(Long id, Long requesterId, boolean admin) {
         Order order = findOwnedOrder(id, requesterId, admin);
         boolean wasPaid = order.isPaid();   // 상태를 바꾸기 전에 결제 여부 확인
-        order.cancel();   // 이미 취소된 주문이면 예외
+        order.cancel(requesterId, admin ? "관리자 취소" : "주문자 취소");   // 이미 취소된 주문이면 예외
 
         if (wasPaid) {
             // 결제 완료된 주문만 재고가 차감돼 있으므로 복원한다.
@@ -179,7 +180,7 @@ public class OrderService {
     public OrderResponse cancelItem(Long orderId, Long orderItemId, Long requesterId, boolean admin) {
         Order order = findOwnedOrder(orderId, requesterId, admin);
         boolean wasPaid = order.isPaid();
-        OrderItem cancelled = order.cancelItem(orderItemId);   // 항목 CANCELLED(+전부 취소면 주문도 CANCELLED)
+        OrderItem cancelled = order.cancelItem(orderItemId, requesterId);   // 항목 CANCELLED(+전부 취소면 주문도 CANCELLED)
         if (wasPaid) {
             productRepository.findByOptionId(cancelled.getOptionId())
                     .ifPresent(product -> product.increaseStock(cancelled.getOptionId(), cancelled.getQuantity()));

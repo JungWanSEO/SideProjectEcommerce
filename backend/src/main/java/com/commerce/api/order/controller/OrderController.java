@@ -147,12 +147,15 @@ public class OrderController {
 
     @Operation(summary = "주문 배송 상태 전진 (ADMIN)",
             description = "주문 배송 상태를 다음 단계로 전진한다(PAID→SHIPPING→DELIVERED, forward-only). "
+                    + "SHIPPING으로 보낼 때 택배사·운송장을 함께 실으면 주문에 저장돼 구매자에게 노출된다(선택). "
                     + "운영자만 가능. 없는 주문이면 404, 잘못된 전이(건너뛰기·되돌리기·취소/대기 상태)면 409.")
     @Auditable(action = "ORDER_ADVANCE_SHIPPING", targetType = "ORDER", targetId = "#id")
     @PatchMapping("/{id}/status")
     public ResponseEntity<ApiResponse<OrderResponse>> advanceShipping(
             @PathVariable Long id, @Valid @RequestBody OrderStatusUpdateRequest request) {
-        OrderResponse response = orderService.advanceShipping(id, request.status());
+        OrderResponse response = orderService.advanceShipping(
+                id, request.status(), SecurityUtil.getCurrentMemberId(),
+                request.courier(), request.trackingNumber());
         return ResponseEntity.ok(ApiResponse.success("주문 상태가 변경되었습니다.", response));
     }
 }

@@ -60,13 +60,14 @@ class PaymentServiceTest {
 
     private OrderResponse order(Long id, Long memberId, OrderStatus status, long total) {
         // 쿠폰 없음: discountAmount=0, payableAmount=total. PaymentService는 payableAmount로 결제한다.
-        return new OrderResponse(id, memberId, status, total, 0L, total, null, List.of(), null, LocalDateTime.now());
+        return new OrderResponse(id, memberId, status, total, 0L, total, null, List.of(), null,
+                null, null, List.of(), LocalDateTime.now());
     }
 
     /** 쿠폰 할인이 적용된 주문(gross=total, 할인=discount → payable=total-discount). */
     private OrderResponse discountedOrder(Long id, Long memberId, OrderStatus status, long total, long discount) {
         return new OrderResponse(id, memberId, status, total, discount, total - discount, "WELCOME5000",
-                List.of(), null, LocalDateTime.now());
+                List.of(), null, null, null, List.of(), LocalDateTime.now());
     }
 
     private PaymentRequest request() {

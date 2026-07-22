@@ -213,6 +213,46 @@ export default function OrderDetailPage() {
         </section>
       )}
 
+      {/* 송장 (배송 시작 후 택배사·운송장이 입력됐을 때만) */}
+      {(order.courier || order.trackingNumber) && (
+        <section className="mt-6 rounded-2xl border border-line bg-paper p-5">
+          <h2 className="mb-2 font-serif text-lg text-ink">배송 정보</h2>
+          {order.courier && (
+            <p className="text-sm text-ink/80">
+              택배사 <span className="ml-2 font-medium text-ink">{order.courier}</span>
+            </p>
+          )}
+          {order.trackingNumber && (
+            <p className="mt-1 text-sm text-ink/80">
+              운송장 <span className="ml-2 font-medium text-ink">{order.trackingNumber}</span>
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* 주문 진행 타임라인 (상태 이력) */}
+      {order.statusHistory.length > 0 && (
+        <section className="mt-6 rounded-2xl border border-line bg-paper p-5">
+          <h2 className="mb-3 font-serif text-lg text-ink">주문 진행 상황</h2>
+          <ol className="flex flex-col gap-3">
+            {order.statusHistory.map((h, i) => (
+              <li key={i} className="flex items-start gap-3">
+                <span
+                  className={`mt-1 h-2 w-2 shrink-0 rounded-full ${
+                    i === order.statusHistory.length - 1 ? "bg-clay" : "bg-line"
+                  }`}
+                />
+                <div>
+                  <p className="text-sm font-medium text-ink">{ORDER_STATUS_LABEL[h.toStatus]}</p>
+                  {h.memo && <p className="text-xs text-muted">{h.memo}</p>}
+                  <p className="text-xs text-muted">{new Date(h.createdAt).toLocaleString("ko-KR")}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
       {error && <p className="mt-4 text-sm text-danger">{error}</p>}
 
       <div className="mt-7 flex gap-3">

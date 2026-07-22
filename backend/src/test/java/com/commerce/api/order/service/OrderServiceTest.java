@@ -218,7 +218,7 @@ class OrderServiceTest {
         Order order = orderInStatus(1L, OrderStatus.PAID);
         given(orderRepository.findById(1L)).willReturn(Optional.of(order));
 
-        OrderResponse response = orderService.advanceShipping(1L, OrderStatus.SHIPPING);
+        OrderResponse response = orderService.advanceShipping(1L, OrderStatus.SHIPPING, 1L, null, null);
 
         assertThat(response.status()).isEqualTo(OrderStatus.SHIPPING);
         assertThat(order.getStatus()).isEqualTo(OrderStatus.SHIPPING);
@@ -230,9 +230,45 @@ class OrderServiceTest {
         Order order = orderInStatus(1L, OrderStatus.SHIPPING);
         given(orderRepository.findById(1L)).willReturn(Optional.of(order));
 
-        OrderResponse response = orderService.advanceShipping(1L, OrderStatus.DELIVERED);
+        OrderResponse response = orderService.advanceShipping(1L, OrderStatus.DELIVERED, 1L, null, null);
 
         assertThat(response.status()).isEqualTo(OrderStatus.DELIVERED);
+    }
+
+    @Test
+    @DisplayName("배송 상태 전진 - SHIPPING 전이 시 택배사·운송장을 주문에 저장하고 타임라인에 남긴다")
+    void advanceShipping_recordsCourierAndHistory() {
+        Order order = orderInStatus(1L, OrderStatus.PAID);
+        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+
+        OrderResponse response = orderService.advanceShipping(
+                1L, OrderStatus.SHIPPING, 9L, "CJ대한통운", "1234567890");
+
+        assertThat(response.courier()).isEqualTo("CJ대한통운");
+        assertThat(response.trackingNumber()).isEqualTo("1234567890");
+        // 타임라인: 생성(PENDING) → PAID → SHIPPING(주체 9·송장 메모)
+        assertThat(response.statusHistory()).extracting(r -> r.toStatus())
+                .containsExactly(OrderStatus.PENDING, OrderStatus.PAID, OrderStatus.SHIPPING);
+        var shipEvent = response.statusHistory().get(2);
+        assertThat(shipEvent.fromStatus()).isEqualTo(OrderStatus.PAID);
+        assertThat(shipEvent.changedBy()).isEqualTo(9L);
+        assertThat(shipEvent.memo()).isEqualTo("CJ대한통운 1234567890");
+    }
+
+    @Test
+    @DisplayName("주문 취소 - 타임라인에 X→CANCELLED가 취소 주체와 함께 남는다")
+    void cancel_recordsHistory() {
+        Order order = orderInStatus(1L, OrderStatus.PAID);
+        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+
+        OrderResponse response = orderService.cancel(1L, 100L, false);   // 주인=100
+
+        assertThat(response.status()).isEqualTo(OrderStatus.CANCELLED);
+        var last = response.statusHistory().get(response.statusHistory().size() - 1);
+        assertThat(last.fromStatus()).isEqualTo(OrderStatus.PAID);
+        assertThat(last.toStatus()).isEqualTo(OrderStatus.CANCELLED);
+        assertThat(last.changedBy()).isEqualTo(100L);
+        assertThat(last.memo()).isEqualTo("주문자 취소");
     }
 
     @Test
@@ -241,7 +277,7 @@ class OrderServiceTest {
         Order order = orderInStatus(1L, OrderStatus.PAID);
         given(orderRepository.findById(1L)).willReturn(Optional.of(order));
 
-        assertThatThrownBy(() -> orderService.advanceShipping(1L, OrderStatus.DELIVERED))
+        assertThatThrownBy(() -> orderService.advanceShipping(1L, OrderStatus.DELIVERED, 1L, null, null))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("변경할 수 없습니다");
         assertThat(order.getStatus()).isEqualTo(OrderStatus.PAID);
@@ -253,7 +289,7 @@ class OrderServiceTest {
         Order order = orderInStatus(1L, OrderStatus.SHIPPING);
         given(orderRepository.findById(1L)).willReturn(Optional.of(order));
 
-        assertThatThrownBy(() -> orderService.advanceShipping(1L, OrderStatus.PAID))
+        assertThatThrownBy(() -> orderService.advanceShipping(1L, OrderStatus.PAID, 1L, null, null))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("변경할 수 없습니다");
     }
@@ -264,7 +300,7 @@ class OrderServiceTest {
         Order order = orderInStatus(1L, OrderStatus.PENDING);
         given(orderRepository.findById(1L)).willReturn(Optional.of(order));
 
-        assertThatThrownBy(() -> orderService.advanceShipping(1L, OrderStatus.SHIPPING))
+        assertThatThrownBy(() -> orderService.advanceShipping(1L, OrderStatus.SHIPPING, 1L, null, null))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("변경할 수 없습니다");
     }
@@ -274,7 +310,7 @@ class OrderServiceTest {
     void advanceShipping_notFound() {
         given(orderRepository.findById(99L)).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> orderService.advanceShipping(99L, OrderStatus.SHIPPING))
+        assertThatThrownBy(() -> orderService.advanceShipping(99L, OrderStatus.SHIPPING, 1L, null, null))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("찾을 수 없습니다");
     }
