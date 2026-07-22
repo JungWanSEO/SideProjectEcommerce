@@ -68,11 +68,12 @@ public class SettlementRepositoryImpl implements SettlementRepositoryCustom {
                 .fetch();
     }
 
-    /** 셀러·상태·기간 동적 where — 값이 없는 조건은 null로 두어 무시. */
+    /** 셀러·상태·PG·기간 동적 where — 값이 없는 조건은 null로 두어 무시. */
     private BooleanBuilder whereOf(SettlementSearchCondition c) {
         return new BooleanBuilder()
                 .and(c.sellerId() != null ? settlementEntry.sellerId.eq(c.sellerId()) : null)
                 .and(c.status() != null ? settlementEntry.status.eq(c.status()) : null)
+                .and(c.provider() != null ? settlementEntry.provider.eq(c.provider()) : null)
                 .and(c.from() != null ? settlementEntry.settledDate.goe(c.from()) : null)
                 .and(c.to() != null ? settlementEntry.settledDate.loe(c.to()) : null);
     }

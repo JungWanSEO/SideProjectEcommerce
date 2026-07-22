@@ -57,17 +57,19 @@ public class SettlementController {
     }
 
     @Operation(summary = "정산 항목 목록 조회",
-            description = "정산 항목을 페이지로 조회한다. 셀러/상태/기간(정산일) 필터(선택). 기본 정렬 최신순(id desc), 기본 크기 20.")
+            description = "정산 항목을 페이지로 조회한다. 셀러/상태/PG(provider)/기간(정산일) 필터(선택). "
+                    + "기본 정렬 최신순(id desc), 기본 크기 20.")
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<SettlementResponse>>> getSettlements(
             @RequestParam(required = false) Long sellerId,
             @RequestParam(required = false) SettlementStatus status,
+            @RequestParam(required = false) String provider,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @ParameterObject
             @PageableDefault(size = 20, sort = "id", direction = Direction.DESC)
             Pageable pageable) {
-        SettlementSearchCondition condition = new SettlementSearchCondition(sellerId, status, from, to);
+        SettlementSearchCondition condition = new SettlementSearchCondition(sellerId, status, provider, from, to);
         PageResponse<SettlementResponse> response = settlementService.getSettlements(condition, pageable);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
@@ -82,14 +84,15 @@ public class SettlementController {
     }
 
     @Operation(summary = "셀러 정산서(셀러별 집계)",
-            description = "조건(셀러/상태/기간) 범위에서 셀러별 매출·PG수수료·플랫폼수수료·실수령을 집계한다.")
+            description = "조건(셀러/상태/PG(provider)/기간) 범위에서 셀러별 매출·PG수수료·플랫폼수수료·실수령을 집계한다.")
     @GetMapping("/summary")
     public ResponseEntity<ApiResponse<List<SellerSettlementSummary>>> sellerSummary(
             @RequestParam(required = false) Long sellerId,
             @RequestParam(required = false) SettlementStatus status,
+            @RequestParam(required = false) String provider,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
-        SettlementSearchCondition condition = new SettlementSearchCondition(sellerId, status, from, to);
+        SettlementSearchCondition condition = new SettlementSearchCondition(sellerId, status, provider, from, to);
         return ResponseEntity.ok(ApiResponse.success(settlementService.getSellerSummary(condition)));
     }
 

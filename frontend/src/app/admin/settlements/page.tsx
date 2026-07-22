@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPost } from "@/lib/api";
 import { PageResponse, SellerSettlementSummary, Settlement, SettlementRunResult } from "@/lib/types";
 import { SETTLEMENT_STATUS_BADGE, SETTLEMENT_STATUS_LABEL } from "@/lib/settlementStatus";
-import { PROVIDER_BADGE, formatRate, providerLabel } from "@/lib/provider";
+import { PROVIDERS, PROVIDER_BADGE, formatRate, providerLabel } from "@/lib/provider";
 import StatCard from "@/components/admin/StatCard";
 
 /**
@@ -25,22 +25,25 @@ export default function AdminSettlementsPage() {
 
   // 필터
   const [sellerFilter, setSellerFilter] = useState<number | null>(null);
+  const [providerFilter, setProviderFilter] = useState<string>(""); // "" = 전체 PG
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
 
   const load = useCallback(() => {
     setLoading(true);
-    const dateQs = new URLSearchParams();
-    if (from) dateQs.set("from", from);
-    if (to) dateQs.set("to", to);
+    // 기간·PG는 목록과 요약(집계) 둘 다에 건다(요약도 그 PG로 좁혀 봄). 셀러는 목록에만(요약은 셀러별 group-by).
+    const baseQs = new URLSearchParams();
+    if (from) baseQs.set("from", from);
+    if (to) baseQs.set("to", to);
+    if (providerFilter) baseQs.set("provider", providerFilter); // 백엔드가 대문자 정규화
 
-    const listQs = new URLSearchParams(dateQs);
+    const listQs = new URLSearchParams(baseQs);
     if (sellerFilter != null) listQs.set("sellerId", String(sellerFilter));
     listQs.set("size", "100");
 
     Promise.all([
       apiGet<PageResponse<Settlement>>(`/api/settlements?${listQs.toString()}`),
-      apiGet<SellerSettlementSummary[]>(`/api/settlements/summary?${dateQs.toString()}`),
+      apiGet<SellerSettlementSummary[]>(`/api/settlements/summary?${baseQs.toString()}`),
     ])
       .then(([page, sum]) => {
         setItems(page.content);
@@ -48,7 +51,7 @@ export default function AdminSettlementsPage() {
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [from, to, sellerFilter]);
+  }, [from, to, sellerFilter, providerFilter]);
 
   useEffect(() => {
     load();
@@ -249,6 +252,18 @@ export default function AdminSettlementsPage() {
             </option>
           ))}
         </select>
+        <select
+          value={providerFilter}
+          onChange={(e) => setProviderFilter(e.target.value)}
+          className="rounded border border-gray-300 px-2 py-1"
+        >
+          <option value="">전체 PG</option>
+          {PROVIDERS.map((p) => (
+            <option key={p.value} value={p.value}>
+              {p.label}
+            </option>
+          ))}
+        </select>
         <label className="text-gray-500">정산일</label>
         <input
           type="date"
@@ -263,10 +278,11 @@ export default function AdminSettlementsPage() {
           onChange={(e) => setTo(e.target.value)}
           className="rounded border border-gray-300 px-2 py-1"
         />
-        {(sellerFilter != null || from || to) && (
+        {(sellerFilter != null || providerFilter || from || to) && (
           <button
             onClick={() => {
               setSellerFilter(null);
+              setProviderFilter("");
               setFrom("");
               setTo("");
             }}

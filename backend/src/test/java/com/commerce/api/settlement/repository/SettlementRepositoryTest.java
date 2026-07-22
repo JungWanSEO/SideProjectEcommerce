@@ -81,6 +81,21 @@ class SettlementRepositoryTest {
     }
 
     @Test
+    @DisplayName("search - PG(provider) 필터: 소문자 입력도 정규화(대문자)돼 매칭된다")
+    void search_byProvider() {
+        // 시드 3건은 전부 TOSS. KAKAOPAY 1건 추가.
+        repository.save(SettlementEntry.scheduled(
+                4L, 4L, "tx-4-2", "KAKAOPAY", 2L, 8000L, 200L, 0.025, 400L, 0.10, D1));
+
+        Page<SettlementEntry> page = repository.search(
+                new SettlementSearchCondition(null, null, "kakaopay", null, null),   // 소문자 → 정규화 매칭
+                PageRequest.of(0, 20));
+
+        assertThat(page.getTotalElements()).isEqualTo(1);
+        assertThat(page.getContent().get(0).getProvider()).isEqualTo("KAKAOPAY");
+    }
+
+    @Test
     @DisplayName("search - 필터 없으면 전체")
     void search_noFilter() {
         Page<SettlementEntry> page = repository.search(
