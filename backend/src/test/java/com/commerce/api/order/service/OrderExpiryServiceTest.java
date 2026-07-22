@@ -32,6 +32,7 @@ class OrderExpiryServiceTest {
     private static final int TTL_MINUTES = 30;
 
     @Mock private OrderRepository orderRepository;
+    @Mock private com.commerce.api.coupon.service.MemberCouponService memberCouponService;
 
     @InjectMocks private OrderExpiryService orderExpiryService;
 
@@ -62,6 +63,20 @@ class OrderExpiryServiceTest {
         assertThat(cancelled).isEqualTo(2);
         assertThat(a.getStatus()).isEqualTo(OrderStatus.CANCELLED);
         assertThat(b.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+    }
+
+    @Test
+    @DisplayName("만료 배치 - 쿠폰 적용된 주문이 만료되면 발급형 쿠폰을 복원한다(수동취소와 대칭)")
+    void expirePendingOrders_releasesCoupon() {
+        Order withCoupon = pendingOrder();
+        withCoupon.applyCoupon("WELCOME5000", 5000L, "PLATFORM", null);   // 체크아웃 때 잠긴 쿠폰
+        given(orderRepository.findByStatusAndCreatedAtBefore(eq(OrderStatus.PENDING), any(LocalDateTime.class)))
+                .willReturn(List.of(withCoupon));
+
+        orderExpiryService.expirePendingOrders();
+
+        assertThat(withCoupon.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        verify(memberCouponService).release(100L, "WELCOME5000");   // 회원의 쿠폰을 미사용으로 되돌림
     }
 
     @Test

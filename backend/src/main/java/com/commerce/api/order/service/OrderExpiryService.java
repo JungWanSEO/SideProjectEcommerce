@@ -1,5 +1,6 @@
 package com.commerce.api.order.service;
 
+import com.commerce.api.coupon.service.MemberCouponService;
 import com.commerce.api.order.entity.Order;
 import com.commerce.api.order.entity.OrderStatus;
 import com.commerce.api.order.repository.OrderRepository;
@@ -36,6 +37,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class OrderExpiryService {
 
     private final OrderRepository orderRepository;
+    private final MemberCouponService memberCouponService;   // 만료 취소 시 발급형 쿠폰 복원(수동취소와 대칭)
 
     /**
      * 결제 대기 유효시간(분). 이 시간이 지나도 PENDING이면 취소한다.
@@ -59,7 +61,12 @@ public class OrderExpiryService {
             return 0;
         }
 
-        expired.forEach(order -> order.cancel(null, "결제 대기 만료"));   // 시스템 취소 → changedBy=null
+        expired.forEach(order -> {
+            order.cancel(null, "결제 대기 만료");   // 시스템 취소 → changedBy=null
+            // 체크아웃 때 USED로 잠긴 발급형 쿠폰을 되돌린다 — 수동취소(PaymentService.cancelOrder)와 대칭.
+            //   안 하면 "결제도 안 했는데 쿠폰만 영구 소멸"된다. 코드 없음/공개형/미보유면 release가 no-op.
+            memberCouponService.release(order.getMemberId(), order.getCouponCode());
+        });
         log.info("[order-expiry] 결제 대기 만료 주문 {}건 취소 (기준: {}분 경과)", expired.size(), pendingTtlMinutes);
         return expired.size();
     }
