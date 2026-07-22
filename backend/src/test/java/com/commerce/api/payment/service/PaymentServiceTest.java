@@ -22,6 +22,7 @@ import com.commerce.api.payment.gateway.PaymentApproval;
 import com.commerce.api.payment.gateway.PaymentGateway;
 import com.commerce.api.payment.gateway.PaymentGatewayRouter;
 import com.commerce.api.payment.gateway.PaymentRefund;
+import com.commerce.api.order.entity.OrderItemStatus;
 import com.commerce.api.payment.gateway.PaymentRoutingResult;
 import com.commerce.api.payment.repository.PaymentRepository;
 import java.time.LocalDateTime;
@@ -242,6 +243,83 @@ class PaymentServiceTest {
         assertThatThrownBy(() -> paymentService.cancelOrder(100L, 1L, false))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("환불에 실패");
+        verify(paymentRepository, never()).save(any());
+    }
+
+    // === 항목 부분취소(+부분환불) — cancelOrderItem ===
+
+    /** 항목 1개(id=100, 소계=subtotal, 안분할인=discountShare)를 담은 주문 응답. */
+    private OrderResponse orderWithItem(OrderStatus status, long subtotal, long discountShare) {
+        var item = new OrderResponse.OrderItemResponse(
+                100L, 1L, 10L, 7L, 3L, "반팔티셔츠", "M", 10000L, 3, subtotal, discountShare,
+                OrderItemStatus.CANCELLED);
+        return new OrderResponse(1L, 100L, status, subtotal, discountShare, subtotal - discountShare,
+                discountShare > 0 ? "WELCOME5000" : null, List.of(item), null,
+                null, null, List.of(), LocalDateTime.now());
+    }
+
+    @Test
+    @DisplayName("항목 취소 - PAID 주문이면 항목 실효가(소계-안분할인)만큼 부분환불하고 결제에 누적한다")
+    void cancelOrderItem_refundsEffectivePrice() {
+        // 소계 30000, 안분 할인 5000 → 실효가 25000만 환불(gross 30000 환불하면 과다환불)
+        given(orderService.cancelItem(1L, 100L, 100L, false))
+                .willReturn(orderWithItem(OrderStatus.PAID, 30000L, 5000L));
+        Payment paid = Payment.ready(1L, 25000L, "MOCK_CARD", "TOSS", "key-1");
+        paid.markPaid("MOCK-tx-1");
+        given(paymentRepository.findByOrderIdAndStatus(1L, PaymentStatus.PAID)).willReturn(Optional.of(paid));
+        given(paymentGatewayRouter.resolve("TOSS")).willReturn(paymentGateway);
+        given(paymentGateway.refund(any())).willReturn(PaymentRefund.refunded("MOCK-refund-1"));
+
+        paymentService.cancelOrderItem(100L, 1L, 100L, false);
+
+        ArgumentCaptor<PaymentGateway.PaymentRefundCommand> cmd =
+                ArgumentCaptor.forClass(PaymentGateway.PaymentRefundCommand.class);
+        verify(paymentGateway).refund(cmd.capture());
+        assertThat(cmd.getValue().amount()).isEqualTo(25000L);   // 실효가만 환불
+        assertThat(paid.getRefundedAmount()).isEqualTo(25000L);  // 결제에 부분환불 누적
+        verify(paymentRepository).save(paid);
+    }
+
+    @Test
+    @DisplayName("항목 취소 - 부분환불이 PG에서 실패하면 502, 결제 저장 안 함(롤백 대상)")
+    void cancelOrderItem_refundFails() {
+        given(orderService.cancelItem(1L, 100L, 100L, false))
+                .willReturn(orderWithItem(OrderStatus.PAID, 30000L, 0L));
+        Payment paid = Payment.ready(1L, 30000L, "MOCK_CARD", "TOSS", "key-1");
+        paid.markPaid("MOCK-tx-1");
+        given(paymentRepository.findByOrderIdAndStatus(1L, PaymentStatus.PAID)).willReturn(Optional.of(paid));
+        given(paymentGatewayRouter.resolve("TOSS")).willReturn(paymentGateway);
+        given(paymentGateway.refund(any())).willReturn(PaymentRefund.failed("PG 점검중"));
+
+        assertThatThrownBy(() -> paymentService.cancelOrderItem(100L, 1L, 100L, false))
+                .isInstanceOf(BusinessException.class)
+                .extracting("status").isEqualTo(HttpStatus.BAD_GATEWAY);
+        verify(paymentRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("항목 취소 - 마지막 항목 취소로 주문 전체가 CANCELLED면 발급형 쿠폰을 복원한다")
+    void cancelOrderItem_wholeOrderCancelled_releasesCoupon() {
+        // 항목 취소 결과 주문 status=CANCELLED (마지막 활성 항목이었음)
+        given(orderService.cancelItem(1L, 100L, 100L, false))
+                .willReturn(orderWithItem(OrderStatus.CANCELLED, 30000L, 5000L));
+        given(paymentRepository.findByOrderIdAndStatus(1L, PaymentStatus.PAID)).willReturn(Optional.empty());
+
+        paymentService.cancelOrderItem(100L, 1L, 100L, false);
+
+        verify(memberCouponService).release(100L, "WELCOME5000");   // 취소된 주문의 쿠폰 복원
+    }
+
+    @Test
+    @DisplayName("항목 취소 - PENDING 주문(결제 없음)이면 환불 없이 항목만 취소")
+    void cancelOrderItem_pendingNoRefund() {
+        given(orderService.cancelItem(1L, 100L, 100L, false))
+                .willReturn(orderWithItem(OrderStatus.PENDING, 30000L, 0L));
+        given(paymentRepository.findByOrderIdAndStatus(1L, PaymentStatus.PAID)).willReturn(Optional.empty());
+
+        paymentService.cancelOrderItem(100L, 1L, 100L, false);
+
+        verify(paymentGateway, never()).refund(any());
         verify(paymentRepository, never()).save(any());
     }
 }

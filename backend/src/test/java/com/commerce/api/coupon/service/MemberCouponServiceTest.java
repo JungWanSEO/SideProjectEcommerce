@@ -22,6 +22,7 @@ import com.commerce.api.coupon.entity.MemberCouponStatus;
 import com.commerce.api.coupon.repository.CouponRepository;
 import com.commerce.api.coupon.repository.MemberCouponRepository;
 import com.commerce.api.global.exception.BusinessException;
+import org.springframework.http.HttpStatus;
 import com.commerce.api.member.entity.Member;
 import com.commerce.api.member.entity.Role;
 import com.commerce.api.member.repository.MemberRepository;
@@ -245,5 +246,92 @@ class MemberCouponServiceTest {
         memberCouponService.release(100L, "CODE");
 
         assertThat(used.getStatus()).isEqualTo(MemberCouponStatus.UNUSED);
+    }
+
+    @Test
+    @DisplayName("복원 no-op - 공개형(PUBLIC) 쿠폰은 회원쿠폰이 없어 되돌릴 게 없다(조회조차 안 함)")
+    void release_public_noOp() {
+        given(couponService.findByCodeOptional("CODE")).willReturn(Optional.of(coupon(7L, CouponIssueType.PUBLIC)));
+
+        memberCouponService.release(100L, "CODE");
+
+        verify(memberCouponRepository, never()).findByMemberIdAndCouponId(any(), any());
+    }
+
+    @Test
+    @DisplayName("복원 no-op - 코드에 해당하는 쿠폰이 없으면 아무 일도 안 한다")
+    void release_unknownCode_noOp() {
+        given(couponService.findByCodeOptional("CODE")).willReturn(Optional.empty());
+
+        memberCouponService.release(100L, "CODE");
+
+        verify(memberCouponRepository, never()).findByMemberIdAndCouponId(any(), any());
+    }
+
+    // === 미리보기(preview) — 할인만 계산, 사용 처리 없음 ===
+
+    @Test
+    @DisplayName("미리보기 - 공개형은 지갑 검증 없이 할인만 계산(사용 처리 안 함)")
+    void preview_public_calculatesOnly() {
+        Coupon c = coupon(7L, CouponIssueType.PUBLIC);
+        given(couponService.findByCode("CODE")).willReturn(c);
+        given(couponService.calculateDiscount(c, 20000L, Map.of())).willReturn(result());
+
+        CouponApplyResult r = memberCouponService.preview(100L, "CODE", 20000L, Map.of());
+
+        assertThat(r.discountAmount()).isEqualTo(5000L);
+        verify(memberCouponRepository, never()).findByMemberIdAndCouponId(any(), any());   // 공개형은 지갑 조회 안 함
+    }
+
+    @Test
+    @DisplayName("미리보기 - 발급형은 보유(미사용) 검증하되 USED로 잠그지는 않는다")
+    void preview_issued_checksOwnedButDoesNotConsume() {
+        Coupon c = coupon(7L, CouponIssueType.ISSUED);
+        given(couponService.findByCode("CODE")).willReturn(c);
+        MemberCoupon owned = MemberCoupon.issue(100L, 7L);
+        given(memberCouponRepository.findByMemberIdAndCouponId(100L, 7L)).willReturn(Optional.of(owned));
+        given(couponService.calculateDiscount(c, 20000L, Map.of())).willReturn(result());
+
+        memberCouponService.preview(100L, "CODE", 20000L, Map.of());
+
+        assertThat(owned.getStatus()).isEqualTo(MemberCouponStatus.UNUSED);   // 미리보기는 소모 안 함
+    }
+
+    @Test
+    @DisplayName("미리보기 실패 - 발급형인데 발급받지 않았으면 400")
+    void preview_issued_notOwned() {
+        Coupon c = coupon(7L, CouponIssueType.ISSUED);
+        given(couponService.findByCode("CODE")).willReturn(c);
+        given(memberCouponRepository.findByMemberIdAndCouponId(100L, 7L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> memberCouponService.preview(100L, "CODE", 20000L, Map.of()))
+                .isInstanceOf(BusinessException.class)
+                .extracting("status").isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    // === 발급(issue) — 특정 이메일 경로 ===
+
+    @Test
+    @DisplayName("발급 - 특정 이메일 회원에게 발급(전체 발급 아님)")
+    void issue_toEmail() {
+        given(couponRepository.findById(7L)).willReturn(Optional.of(coupon(7L, CouponIssueType.ISSUED)));
+        given(memberRepository.findByEmail("m100@x.com")).willReturn(Optional.of(member(100L)));
+        given(memberCouponRepository.existsByMemberIdAndCouponId(100L, 7L)).willReturn(false);
+
+        int issued = memberCouponService.issue(7L, new CouponIssueRequest(false, "m100@x.com"));
+
+        assertThat(issued).isEqualTo(1);
+        verify(memberCouponRepository).save(any(MemberCoupon.class));
+    }
+
+    @Test
+    @DisplayName("발급 실패 - 전체 발급이 아닌데 이메일이 비면 400")
+    void issue_toEmail_blank() {
+        given(couponRepository.findById(7L)).willReturn(Optional.of(coupon(7L, CouponIssueType.ISSUED)));
+
+        assertThatThrownBy(() -> memberCouponService.issue(7L, new CouponIssueRequest(false, "  ")))
+                .isInstanceOf(BusinessException.class)
+                .extracting("status").isEqualTo(HttpStatus.BAD_REQUEST);
+        verify(memberCouponRepository, never()).save(any());
     }
 }
