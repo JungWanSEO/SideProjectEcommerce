@@ -5,12 +5,10 @@
 > 외부 프로그램 연동(RabbitMQ·외부 API·새 외부 도구)은 자율 금지 → "함께(학습)"에서 사용자와 직접.
 
 ## READY (결정 완료 · 외부 무관 · 자율 진행 가능 · 위에서부터)
-> 기능 9건·커버리지 3건 소진 후 **2026-07-21 무결정 스캔**(4앵글, owner 판단 필요 항목 전부 배제·소스 재검증)에서 8건 재충전. **#1~#4는 동일 뿌리(order-item CANCELLED 상태 미존중)의 실제 머니 버그** — 인접 코드라 순차 실행 시 회귀테스트 상호 보강. **#1~#4 완료(07-22)** → DONE.
+> **2026-07-21 무결정 스캔 8건 전부 소진(07-22)** → 아래 DONE. **자율 진행 가능한 READY = 0** — 다음 배치는 **새 무결정 스캔** 필요(아래 "여유 시" 저긴급 3건은 남아 있음).
 
-- **#8 [parity] 감사로그 검색에 targetId 필터** (S·BE·마이그0) — action/targetType/result는 필터하는데 targetId 없음("ORDER 42 전체 이력" 불가). → `eqTargetType` 미러.
-
-### (여유 시·무결정이나 저긴급) 위 8건 소진 후
-- 대사 `reconcile`이 findAll 후 Java 필터 → `findBySettledDateBetween`(+인덱스). / 체크아웃·결제 항목당 findByOptionId N+1 → `findByOptionIdIn` 배치. / 순수 테스트 추가(JwtAuthenticationFilter·getProductsForAdmin 회귀·소셜로그인 find-or-create).
+### (여유 시·무결정이나 저긴급) — 남은 저긴급 자율 후보
+- 대사 `reconcile`이 findAll 후 Java 필터 → `findBySettledDateBetween`(+인덱스). / 체크아웃·결제 항목당 findByOptionId N+1 → `findByOptionIdIn` 배치. / 순수 테스트 추가(JwtAuthenticationFilter·getProductsForAdmin 회귀·소셜로그인 find-or-create). / #8 감사 targetId **FE 필터 입력**(백엔드는 완료).
 
 ## 함께 (외부 연동 · 학습 — 자율 금지)
 - 🚧 **배포 ($0 라이브 데모) — 경로 A(Oracle VM) 확정** — 준비물 완료: env화·`Dockerfile`·`docs/deploy.md`(`feature/deploy-prep`) + **prod 산출물·배선 보강**(`feature/deploy-prep-hardening`→dev `06e7ff8`): `backend/docker-compose.prod.yml`(앱+MySQL)·`.env.prod.example`·datasource `${SPRING_DATASOURCE_USERNAME:${MYSQL_USER}}` 체인·`APP_OAUTH2_REDIRECT` 행·`.gitignore` `.env.prod` 차단. 로컬 검증=`bootJar`·`next build` PASS. **결정=경로 A**(Oracle Always Free VM: Vercel FE + VM에 Spring Boot+MySQL; 콜드스타트 없음·진짜 MySQL·쿠키 first-party). ⚠️경로 B는 Koyeb 무료 폐쇄(Mistral 인수)로 약화. **다음=사용자 계정 단계**: Oracle A1 VM 생성→레포 clone→`.env.prod`→`docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build`→Caddy HTTPS→Vercel FE→쿠키전략(Vercel rewrites `/api/*` 프록시=first-party 추천)→로그인 확인. MySQL 실런타임 검증=VM 첫 기동. **VM 준비물 `deploy/`**(vm-setup.sh·Caddyfile·README) + 프록시 뒤 OAuth2 헤더(`server.forward-headers-strategy`) 추가(`feature/deploy-vm-runbook`→dev `2832ed5`). (가이드=docs/deploy.md §3, deploy/README.md)
@@ -33,6 +31,7 @@
 > 그 외 정책 대기: 회원 탈퇴(보존기간·PII 마스킹)·적립금/등급·상품 일괄작업 부분실패 정책·셀러 자가수정 범위·`next/image` 도입(이미지 호스팅처).
 
 ## DONE (완료 — 기록)
+- [x] (07-22) **#8 감사 로그 targetId 필터** — `feature/audit-targetid-filter`→dev `8ec341e` (551→**552 tests**·마이그0). `AuditLogSearchCondition`에 targetId(canonical 7-arg)+6-arg 편의 생성자·`eqTargetId`(eqTargetType 미러)·`@ParameterObject`라 목록·CSV 두 엔드포인트 자동 바인딩·CSV `snapshotBoundary`가 targetId 보존. "ORDER 42 전체 이력" 가능. FE 입력은 후속(여유 시). **← 무결정 스캔 8건 완주(542→552, +10).**
 - [x] (07-22) **#7 정산 목록/요약 PG(provider) 필터** — `feature/settlement-provider-filter`→dev `ba84d39` (550→**551 tests**·FE 0·마이그0). 대사엔 있는 provider 필터를 정산에도(패리티). `SettlementSearchCondition` canonical 5-arg + 대문자·blank→null 정규화(대사와 동일 규칙)·기존 4-arg 호출부는 편의 생성자로 무변경. FE '전체 PG' 드롭다운(목록·요약 둘 다). repo 테스트 1(소문자 정규화 매칭).
 - [x] (07-22) **#6 짧은 varchar @Size(길이초과 500→400)** — `feature/dto-size-validation`→dev `c750cd0` (548→**550 tests**·마이그0). 브랜드/카테고리 name(`@Size(50)`)·옵션 size(`@Size(30)`·upsert·create 두 DTO)에 상한 추가 → 컬럼길이 초과가 DB위반 500이 아니라 검증 400. 형제 필드(상품명·설명·이미지URL) 패턴에 정렬. 검증 2건.
 - [x] (07-22) **#5 돈 흐름 핫패스 인덱스(V40) + stale 주석** — `feature/money-path-indexes`→dev `6e7ec64` (548 유지·**V40**). `settlement_entry.payment_id`(V24서 UNIQUE 제거 후 인덱스 전무)·`payment.order_id`(처음부터 무인덱스)에 조회용 인덱스. `SettlementRepository.existsByPaymentId` 허위 Javadoc(payment_id UNIQUE) 정정. ⚠️**MySQL EXPLAIN 스모크=복귀 후**(H2 Flyway 미적용).
