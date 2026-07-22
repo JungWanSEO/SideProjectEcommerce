@@ -5,11 +5,19 @@
 > 외부 프로그램 연동(RabbitMQ·외부 API·새 외부 도구)은 자율 금지 → "함께(학습)"에서 사용자와 직접.
 
 ## READY (결정 완료 · 외부 무관 · 자율 진행 가능 · 위에서부터)
-> **2026-07-20 기능 전수 스캔**(5앵글 60후보)에서 뽑은 기능 9건은 07-20~21 자율 배치로 **전부 소진**(①~⑨ → DONE). 남은 READY는 커버리지 보강뿐.
+> 기능 9건·커버리지 3건 소진 후 **2026-07-21 무결정 스캔**(4앵글, owner 판단 필요 항목 전부 배제·소스 재검증)에서 8건 재충전. **#1~#4는 동일 뿌리(order-item CANCELLED 상태 미존중)의 실제 머니 버그** — 인접 코드라 순차 실행 시 회귀테스트 상호 보강.
 
-- **분기 커버리지 — 결제 실패·경계** (M·BE) — 라인 84.5% vs **분기 71.9%**. `PaymentService` 64.1%(승인 실패·페일오버·환불 경계).
-- **분기 커버리지 — 쿠폰 적용 경계** (M·BE) — `MemberCouponService` 66.9%(만료·최소금액·중복사용 거절 분기).
-- **얇은 컨트롤러 HTTP 경계** (S·BE) — activity·recommendation·wishlist 0%(위임뿐이나 인가·바인딩 회귀 미검출).
+- **#1 [BUG·money] 부분 항목취소 후 전체취소 = 과다환불 + 재고 이중복원** (M·BE·마이그0) — `cancelOrder`가 `payment.getAmount()`(전액) 환불(이미 환불한 항목 재환불) + `OrderService.cancel` 재고루프가 CANCELLED 항목도 복원. → 잔여환불(`amount-refundedAmount`)·재고루프 `isActive()` 가드.
+- **#2 [BUG·money] 실효가 0 라인 취소 시 400으로 전체 롤백** (S·BE·마이그0) — 100% 할인 라인은 `refundAmount=0`→`partialRefund(0)` 400 거절→정당한 취소가 실패. → `refundAmount==0`이면 PG/누적 스킵.
+- **#3 [BUG·money] PENDING 중 취소한 항목이 결제 시 청구·재고차감** (M·BE·마이그0) — `OrderProcessor.pay`가 `isActive()` 필터 없이 전 항목 차감 + `getPayableAmount`가 취소 무반영 → 정산(활성기준)과 대사 불일치. → pay 루프 `isActive()` 가드 + payable=활성 실효가 합.
+- **#4 [BUG·money] 만료 배치가 PENDING 취소 시 발급형 쿠폰 미반환(영구소멸)** (S·BE·마이그0) — 수동취소는 `release`하는데 `OrderExpiryService`는 미호출(비대칭). → 만료 루프에 `memberCouponService.release`.
+- **#5 [PERF] 핫패스 인덱스 2종 + stale 주석** (S·BE·**V40**) — `settlement_entry.payment_id`(V24 DROP 후 미복원)·`payment.order_id` 무인덱스로 정산/취소마다 풀스캔. + `SettlementRepository:16` 허위 Javadoc(payment_id UNIQUE, V24서 제거) 정정. ⚠️H2는 Flyway 미적용→빌드까지, EXPLAIN은 복귀 후.
+- **#6 [robustness] 짧은 varchar @Size 누락 → 500 대신 400** (S·BE·마이그0) — 브랜드/카테고리 name·옵션 size가 `@NotBlank`만 → 길이초과가 DB위반 500. 형제 DTO는 다 `@Size` 병행. → `@Size(max=컬럼길이)`.
+- **#7 [parity] 정산 목록/요약에 provider(PG) 필터** (S·both·마이그0) — 대사는 provider 필터 있는데 정산은 없음(컬럼·응답·PG컬럼은 이미 존재). → `SettlementSearchCondition`에 provider 추가.
+- **#8 [parity] 감사로그 검색에 targetId 필터** (S·BE·마이그0) — action/targetType/result는 필터하는데 targetId 없음("ORDER 42 전체 이력" 불가). → `eqTargetType` 미러.
+
+### (여유 시·무결정이나 저긴급) 위 8건 소진 후
+- 대사 `reconcile`이 findAll 후 Java 필터 → `findBySettledDateBetween`(+인덱스). / 체크아웃·결제 항목당 findByOptionId N+1 → `findByOptionIdIn` 배치. / 순수 테스트 추가(JwtAuthenticationFilter·getProductsForAdmin 회귀·소셜로그인 find-or-create).
 
 ## 함께 (외부 연동 · 학습 — 자율 금지)
 - 🚧 **배포 ($0 라이브 데모) — 경로 A(Oracle VM) 확정** — 준비물 완료: env화·`Dockerfile`·`docs/deploy.md`(`feature/deploy-prep`) + **prod 산출물·배선 보강**(`feature/deploy-prep-hardening`→dev `06e7ff8`): `backend/docker-compose.prod.yml`(앱+MySQL)·`.env.prod.example`·datasource `${SPRING_DATASOURCE_USERNAME:${MYSQL_USER}}` 체인·`APP_OAUTH2_REDIRECT` 행·`.gitignore` `.env.prod` 차단. 로컬 검증=`bootJar`·`next build` PASS. **결정=경로 A**(Oracle Always Free VM: Vercel FE + VM에 Spring Boot+MySQL; 콜드스타트 없음·진짜 MySQL·쿠키 first-party). ⚠️경로 B는 Koyeb 무료 폐쇄(Mistral 인수)로 약화. **다음=사용자 계정 단계**: Oracle A1 VM 생성→레포 clone→`.env.prod`→`docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build`→Caddy HTTPS→Vercel FE→쿠키전략(Vercel rewrites `/api/*` 프록시=first-party 추천)→로그인 확인. MySQL 실런타임 검증=VM 첫 기동. **VM 준비물 `deploy/`**(vm-setup.sh·Caddyfile·README) + 프록시 뒤 OAuth2 헤더(`server.forward-headers-strategy`) 추가(`feature/deploy-vm-runbook`→dev `2832ed5`). (가이드=docs/deploy.md §3, deploy/README.md)
