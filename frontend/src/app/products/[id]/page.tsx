@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import ProductDetailClient from "./ProductDetailClient";
 
 /**
@@ -27,15 +28,29 @@ type Product = {
   ratingAverage: number;
 };
 
-async function fetchProduct(id: string): Promise<Product | null> {
+/**
+ * 상품 조회 결과 — 3가지를 <b>구분</b>한다:
+ *  · Product      정상
+ *  · "NOT_FOUND"  백엔드가 404(정말 없는 상품) → 페이지가 notFound()로 진짜 404 응답
+ *  · "UNREACHABLE" 백엔드 미가동·네트워크 오류 → 404로 오판하면 안 됨(클라 상세로 폴백)
+ */
+type ProductResult = Product | "NOT_FOUND" | "UNREACHABLE";
+
+async function fetchProduct(id: string): Promise<ProductResult> {
   try {
     const res = await fetch(`${API}/api/products/${id}`, { next: { revalidate: 300 } });
-    if (!res.ok) return null;
+    if (res.status === 404) return "NOT_FOUND"; // 정말 없는 상품
+    if (!res.ok) return "UNREACHABLE"; // 5xx 등 — 없는 게 아니라 못 읽은 것
     const body = await res.json();
-    return body?.data ?? null;
+    return body?.data ?? "NOT_FOUND";
   } catch {
-    return null; // 백엔드 미가동 등 — 클라이언트 상세만 동작(자체 404 처리)
+    return "UNREACHABLE"; // 백엔드 미가동 등 — 클라이언트 상세만 동작(404로 단정하지 않음)
   }
+}
+
+/** 결과가 실제 Product인지(문자열 마커가 아닌지). */
+function isProduct(r: ProductResult): r is Product {
+  return typeof r !== "string";
 }
 
 /** OG/JSON-LD 이미지엔 절대 URL이 필요. 상대경로는 SITE로 보정, 없으면 undefined. */
@@ -48,8 +63,9 @@ function absImage(imageUrl: string | null): string | undefined {
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
-  const p = await fetchProduct(id);
-  if (!p) return { title: "상품", alternates: { canonical: `${SITE}/products/${id}` } };
+  const result = await fetchProduct(id);
+  if (!isProduct(result)) return { title: "상품", alternates: { canonical: `${SITE}/products/${id}` } };
+  const p = result;
 
   const description = (
     p.description ?? `${p.brandName ?? ""} ${p.name} · ${p.price.toLocaleString()}원`
@@ -72,7 +88,11 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
 export default async function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const p = await fetchProduct(id);
+  const result = await fetchProduct(id);
+  // 정말 없는 상품이면 진짜 404(soft-404 방지). 백엔드 미가동(UNREACHABLE)이면 404로 단정하지 않고
+  // 클라이언트 상세(ProductDetailClient)가 자체 조회·처리하도록 그대로 렌더한다.
+  if (result === "NOT_FOUND") notFound();
+  const p = isProduct(result) ? result : null;
   const image = absImage(p?.imageUrl ?? null);
 
   const jsonLd = p

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { apiGet, apiPost } from "@/lib/api";
 import { ClaimableCoupon, MemberCoupon } from "@/lib/types";
 import { useAuth } from "@/lib/auth";
+import { loginHref } from "@/lib/useRequireAuth";
 import Badge from "@/components/ui/Badge";
 import Skeleton from "@/components/ui/Skeleton";
 import { formatDiscountOf } from "@/lib/coupon";
@@ -27,7 +28,7 @@ export default function CouponWalletPage() {
   const [claimingId, setClaimingId] = useState<number | null>(null); // 받기 중인 쿠폰(중복 클릭 방지)
 
   useEffect(() => {
-    if (!authLoading && !user) router.replace("/login");
+    if (!authLoading && !user) router.replace(loginHref(window.location.pathname + window.location.search));
   }, [authLoading, user, router]);
 
   // 보유 + 받을 수 있는 쿠폰을 함께 로드. (.NET이면 Task.WhenAll 두 API 동시 await.)

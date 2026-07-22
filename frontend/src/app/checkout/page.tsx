@@ -6,6 +6,7 @@ import Link from "next/link";
 import { apiGet, apiPost } from "@/lib/api";
 import { Cart, Address, Order, CouponPreview, MemberCoupon } from "@/lib/types";
 import { useAuth } from "@/lib/auth";
+import { loginHref } from "@/lib/useRequireAuth";
 import Badge from "@/components/ui/Badge";
 import Skeleton from "@/components/ui/Skeleton";
 import { formatDiscountOf } from "@/lib/coupon";
@@ -42,7 +43,7 @@ export default function CheckoutPage() {
   const idempotencyKey = useRef<string>(crypto.randomUUID());
 
   useEffect(() => {
-    if (!authLoading && !user) router.replace("/login");
+    if (!authLoading && !user) router.replace(loginHref(window.location.pathname + window.location.search));
   }, [authLoading, user, router]);
 
   useEffect(() => {

@@ -7,6 +7,7 @@ import { apiGet, apiPost } from "@/lib/api";
 import { Order } from "@/lib/types";
 import { ORDER_STATUS_LABEL, ORDER_STATUS_BADGE } from "@/lib/orderStatus";
 import { useAuth } from "@/lib/auth";
+import { loginHref } from "@/lib/useRequireAuth";
 import { buttonClass } from "@/components/ui/Button";
 import Skeleton from "@/components/ui/Skeleton";
 
@@ -23,7 +24,7 @@ export default function OrderDetailPage() {
   const [cancelling, setCancelling] = useState(false);
 
   useEffect(() => {
-    if (!authLoading && !user) router.replace("/login");
+    if (!authLoading && !user) router.replace(loginHref(window.location.pathname + window.location.search));
   }, [authLoading, user, router]);
 
   useEffect(() => {

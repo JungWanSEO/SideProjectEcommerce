@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { apiGet } from "@/lib/api";
 import { PageResponse, Wishlist } from "@/lib/types";
 import { useAuth } from "@/lib/auth";
+import { loginHref } from "@/lib/useRequireAuth";
 import { useWishlist } from "@/lib/wishlist";
 import ProductThumb from "@/components/ui/ProductThumb";
 import Skeleton from "@/components/ui/Skeleton";
@@ -28,7 +29,7 @@ export default function WishlistPage() {
   const [busyId, setBusyId] = useState<number | null>(null);
 
   useEffect(() => {
-    if (!authLoading && !user) router.replace("/login");
+    if (!authLoading && !user) router.replace(loginHref(window.location.pathname + window.location.search));
   }, [authLoading, user, router]);
 
   useEffect(() => {

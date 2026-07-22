@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
 import { WishlistProvider } from "@/lib/wishlist";
+import { ToastProvider } from "@/lib/toast";
 import Header from "@/components/Header";
 
 // 사이트 절대 URL — OG 이미지·canonical의 기준점. 배포 시 NEXT_PUBLIC_SITE_URL로 덮어쓴다.
@@ -23,12 +24,14 @@ export default function RootLayout({
   return (
     <html lang="ko">
       <body className="min-h-screen bg-cream text-ink antialiased">
-        <AuthProvider>
-          <WishlistProvider>
-            <Header />
-            {children}
-          </WishlistProvider>
-        </AuthProvider>
+        <ToastProvider>
+          <AuthProvider>
+            <WishlistProvider>
+              <Header />
+              {children}
+            </WishlistProvider>
+          </AuthProvider>
+        </ToastProvider>
       </body>
     </html>
   );

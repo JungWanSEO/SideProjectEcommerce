@@ -7,6 +7,7 @@ import { apiGet } from "@/lib/api";
 import { OrderSummary, PageResponse } from "@/lib/types";
 import { ORDER_STATUS_LABEL, ORDER_STATUS_BADGE } from "@/lib/orderStatus";
 import { useAuth } from "@/lib/auth";
+import { loginHref } from "@/lib/useRequireAuth";
 import Skeleton from "@/components/ui/Skeleton";
 
 /** 내 주문 목록 (/orders). 인증 필요. 목록은 요약(대표상품명+항목수). */
@@ -19,7 +20,7 @@ export default function OrdersPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!authLoading && !user) router.replace("/login");
+    if (!authLoading && !user) router.replace(loginHref(window.location.pathname + window.location.search));
   }, [authLoading, user, router]);
 
   useEffect(() => {

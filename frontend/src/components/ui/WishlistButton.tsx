@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { useWishlist } from "@/lib/wishlist";
+import { useToast } from "@/lib/toast";
+import { loginHref } from "@/lib/useRequireAuth";
 
 /**
  * 찜 하트 토글 버튼.
@@ -26,6 +28,7 @@ export default function WishlistButton({
   const { user } = useAuth();
   const { isWishlisted, toggle } = useWishlist();
   const router = useRouter();
+  const toast = useToast();
   const [busy, setBusy] = useState(false);
 
   const active = isWishlisted(productId);
@@ -34,14 +37,16 @@ export default function WishlistButton({
     e.preventDefault(); // 카드 <Link> 네비게이션 방지
     e.stopPropagation();
     if (!user) {
-      router.push("/login");
+      // 로그인 후 원래 페이지로 되돌아오도록 returnTo를 실어 보낸다.
+      router.push(loginHref(window.location.pathname + window.location.search));
       return;
     }
     setBusy(true);
     try {
       await toggle(productId);
-    } catch {
-      // 실패(네트워크 등)는 조용히 무시 — 다음 클릭에 재시도. 상태는 서버 성공 시에만 바뀐다.
+    } catch (err) {
+      // 예전엔 조용히 삼켰다 → 이제 실패가 보이도록 토스트로 알린다(상태는 서버 성공 시에만 바뀜).
+      toast.error((err as Error).message || "찜 처리에 실패했습니다.");
     } finally {
       setBusy(false);
     }
