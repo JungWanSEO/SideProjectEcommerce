@@ -22,6 +22,9 @@ public record OrderResponse(
         String couponCode,        // 적용된 쿠폰 코드 (없으면 null)
         List<OrderItemResponse> items,
         ShippingResponse shipping,   // 배송지 스냅샷 (없으면 null)
+        String courier,              // 택배사 (배송 시작 후, 없으면 null)
+        String trackingNumber,       // 운송장 번호 (없으면 null)
+        List<StatusHistoryResponse> statusHistory,   // 상태 타임라인 (발생 순)
         LocalDateTime createdAt
 ) {
     public static OrderResponse from(Order order) {
@@ -29,6 +32,9 @@ public record OrderResponse(
         Map<OrderItem, Long> shares = order.discountShares();
         List<OrderItemResponse> items = order.getOrderItems().stream()
                 .map(item -> OrderItemResponse.from(item, shares.getOrDefault(item, 0L)))
+                .toList();
+        List<StatusHistoryResponse> history = order.getStatusHistory().stream()
+                .map(StatusHistoryResponse::from)
                 .toList();
         return new OrderResponse(
                 order.getId(),
@@ -40,8 +46,25 @@ public record OrderResponse(
                 order.getCouponCode(),
                 items,
                 ShippingResponse.from(order.getShippingInfo()),
+                order.getCourier(),
+                order.getTrackingNumber(),
+                history,
                 order.getCreatedAt()
         );
+    }
+
+    /** 상태 이력 1건 — 주문 상세 타임라인용. */
+    public record StatusHistoryResponse(
+            OrderStatus fromStatus,   // 이전 상태 (생성 시 null)
+            OrderStatus toStatus,
+            Long changedBy,           // 변경 주체 회원 ID (시스템/스케줄러면 null)
+            String memo,
+            LocalDateTime createdAt
+    ) {
+        static StatusHistoryResponse from(com.commerce.api.order.entity.OrderStatusHistory h) {
+            return new StatusHistoryResponse(
+                    h.getFromStatus(), h.getToStatus(), h.getChangedBy(), h.getMemo(), h.getCreatedAt());
+        }
     }
 
     /** 배송지 응답 (주문 시점 스냅샷). 배송지가 없는 주문이면 null. */

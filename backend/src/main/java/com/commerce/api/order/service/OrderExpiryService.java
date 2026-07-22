@@ -59,7 +59,7 @@ public class OrderExpiryService {
             return 0;
         }
 
-        expired.forEach(Order::cancel);   // 영속 엔티티 → dirty checking flush
+        expired.forEach(order -> order.cancel(null, "결제 대기 만료"));   // 시스템 취소 → changedBy=null
         log.info("[order-expiry] 결제 대기 만료 주문 {}건 취소 (기준: {}분 경과)", expired.size(), pendingTtlMinutes);
         return expired.size();
     }

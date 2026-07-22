@@ -85,16 +85,39 @@ public class Order extends BaseEntity {
     @Column(name = "idempotency_key", unique = true, length = 80)
     private String idempotencyKey;
 
+    /** 택배사 (배송 시작 시 입력, 없으면 null). */
+    @Column(length = 40)
+    private String courier;
+
+    /** 운송장 번호 (배송 시작 시 입력, 없으면 null). */
+    @Column(name = "tracking_number", length = 60)
+    private String trackingNumber;
+
+    /**
+     * 상태 이력 (애그리거트 내부 — 전이마다 append). append-only라 정렬은 id 오름차순(발생 순).
+     * 전이 메서드가 스스로 기록하므로 "이력 없이 상태만 바뀌는" 일이 구조적으로 불가능하다.
+     */
+    @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
+    @jakarta.persistence.OrderBy("id asc")
+    private List<OrderStatusHistory> statusHistory = new ArrayList<>();
+
     private Order(Long memberId) {
         this.memberId = memberId;
         this.status = OrderStatus.PENDING;   // 생성 시점 = 결제 대기
         this.totalPrice = 0L;
         this.discountAmount = 0L;            // 쿠폰 미적용 기본값
+        // 타임라인 시작점: 이전 상태 없음(null) → PENDING, 주체=주문한 회원.
+        recordHistory(null, OrderStatus.PENDING, memberId, "주문 생성");
     }
 
     /** 빈 주문 생성 (항목은 addItem으로 추가) */
     public static Order create(Long memberId) {
         return new Order(memberId);
+    }
+
+    /** 상태 이력 1건 append — 모든 전이 메서드가 상태를 바꾼 뒤 이걸 호출한다(불변식). */
+    private void recordHistory(OrderStatus from, OrderStatus to, Long changedBy, String memo) {
+        this.statusHistory.add(OrderStatusHistory.of(this, from, to, changedBy, memo));
     }
 
     /**
@@ -189,13 +212,20 @@ public class Order extends BaseEntity {
         return shares;
     }
 
-    /** 주문 취소 (이미 취소된 주문·배송 시작된 주문은 불가) */
+    /** 주문 취소 (이미 취소된 주문·배송 시작된 주문은 불가). 주체/사유 미상(시스템·내부 호출). */
     public void cancel() {
+        cancel(null, null);
+    }
+
+    /** 주문 취소 + 이력 기록 — changedBy(취소한 회원, 시스템이면 null)·memo(사유). */
+    public void cancel(Long changedBy, String memo) {
         if (this.status == OrderStatus.CANCELLED) {
             throw new BusinessException(HttpStatus.CONFLICT, "이미 취소된 주문입니다.");
         }
         ensureCancellable();
+        OrderStatus from = this.status;
         this.status = OrderStatus.CANCELLED;
+        recordHistory(from, OrderStatus.CANCELLED, changedBy, memo);
     }
 
     /**
@@ -203,14 +233,21 @@ public class Order extends BaseEntity {
      * 취소된 항목을 반환한다(환불 금액·셀러 식별용). 없는 항목이면 404, 이미 취소면 409, 배송 시작됐으면 409.
      */
     public OrderItem cancelItem(Long orderItemId) {
+        return cancelItem(orderItemId, null);
+    }
+
+    /** 항목 단위 취소 + (주문 전체가 취소되면) 이력 기록. changedBy = 취소한 회원(시스템이면 null). */
+    public OrderItem cancelItem(Long orderItemId, Long changedBy) {
         ensureCancellable();
         OrderItem target = orderItems.stream()
                 .filter(i -> orderItemId.equals(i.getId()))
                 .findFirst()
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "주문 항목을 찾을 수 없습니다."));
+        OrderStatus from = this.status;
         target.cancel();
         if (orderItems.stream().noneMatch(OrderItem::isActive)) {
             this.status = OrderStatus.CANCELLED;   // 모든 항목 취소 → 주문도 취소
+            recordHistory(from, OrderStatus.CANCELLED, changedBy, "전체 항목 취소");
         }
         return target;
     }
@@ -221,13 +258,21 @@ public class Order extends BaseEntity {
             throw new BusinessException(HttpStatus.CONFLICT, "결제 대기 상태의 주문만 결제할 수 있습니다.");
         }
         this.status = OrderStatus.PAID;
+        recordHistory(OrderStatus.PENDING, OrderStatus.PAID, null, "결제 완료");
+    }
+
+    /** 배송 상태 전진(ADMIN) — 송장·주체 없이(기존 호출 호환). */
+    public void advanceShipping(OrderStatus next) {
+        advanceShipping(next, null, null, null);
     }
 
     /**
-     * 배송 상태 전진(ADMIN). 전이는 <b>forward-only</b>로 PAID → SHIPPING → DELIVERED 만 허용한다.
+     * 배송 상태 전진(ADMIN) + 이력·송장 기록. 전이는 <b>forward-only</b>로 PAID → SHIPPING → DELIVERED 만 허용한다.
      * 건너뛰기(PAID→DELIVERED)·되돌리기(SHIPPING→PAID)·그 외 상태(PENDING/CANCELLED 출발·도착)는 409.
+     *
+     * <p>SHIPPING으로 갈 때 택배사·운송장을 함께 받아 저장한다(구매자에게 노출). DELIVERED 전이엔 무시.
      */
-    public void advanceShipping(OrderStatus next) {
+    public void advanceShipping(OrderStatus next, Long changedBy, String courier, String trackingNumber) {
         boolean allowed =
                 (this.status == OrderStatus.PAID && next == OrderStatus.SHIPPING)
                 || (this.status == OrderStatus.SHIPPING && next == OrderStatus.DELIVERED);
@@ -236,7 +281,20 @@ public class Order extends BaseEntity {
                     "배송 상태를 " + this.status + "에서 " + next
                             + "(으)로 변경할 수 없습니다. (PAID→SHIPPING→DELIVERED 순서만 가능)");
         }
+        OrderStatus from = this.status;
         this.status = next;
+
+        String memo = null;
+        if (next == OrderStatus.SHIPPING) {
+            this.courier = courier;
+            this.trackingNumber = trackingNumber;
+            if (courier != null || trackingNumber != null) {
+                memo = (courier == null ? "" : courier)
+                        + (trackingNumber == null ? "" : " " + trackingNumber);
+                memo = memo.trim();
+            }
+        }
+        recordHistory(from, next, changedBy, memo);
     }
 
     /** 취소 가능 상태인지 — 배송이 시작(SHIPPING)되거나 완료(DELIVERED)된 주문은 취소할 수 없다(409). */

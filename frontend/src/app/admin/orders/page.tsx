@@ -61,10 +61,20 @@ export default function AdminOrdersPage() {
   };
 
   const advance = async (id: number, next: OrderStatus) => {
-    if (!confirm(`주문 #${id}을(를) '${ORDER_STATUS_LABEL[next]}' 상태로 변경할까요?`)) return;
+    // 배송 시작(SHIPPING) 전이엔 택배사·운송장을 함께 받는다(선택). 그 외 전이는 확인만.
+    const body: OrderStatusUpdateInput = { status: next };
+    if (next === "SHIPPING") {
+      const courier = prompt("택배사 (선택, 비우면 미입력)")?.trim();
+      if (courier === undefined) return; // 취소
+      const trackingNumber = prompt("운송장 번호 (선택, 비우면 미입력)")?.trim();
+      if (trackingNumber === undefined) return;
+      body.courier = courier || null;
+      body.trackingNumber = trackingNumber || null;
+    } else if (!confirm(`주문 #${id}을(를) '${ORDER_STATUS_LABEL[next]}' 상태로 변경할까요?`)) {
+      return;
+    }
     setBusy(true);
     setError(null);
-    const body: OrderStatusUpdateInput = { status: next };
     try {
       await apiPatch<Order>(`/api/orders/${id}/status`, body);
       load();

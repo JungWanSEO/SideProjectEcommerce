@@ -215,6 +215,15 @@ export interface ShippingInfo {
 }
 
 /** 주문 상세 (OrderResponse) */
+/** 주문 상태 이력 1건 (OrderResponse.statusHistory) — 상세 타임라인 */
+export interface OrderStatusHistory {
+  fromStatus: OrderStatus | null; // 생성 시 null
+  toStatus: OrderStatus;
+  changedBy: number | null; // 변경 주체 회원 ID (시스템/스케줄러면 null)
+  memo: string | null;
+  createdAt: string;
+}
+
 export interface Order {
   id: number;
   memberId: number;
@@ -225,6 +234,9 @@ export interface Order {
   couponCode: string | null; // 적용된 쿠폰 코드 (없으면 null)
   items: OrderItem[];
   shipping: ShippingInfo | null;
+  courier: string | null; // 택배사 (배송 시작 후, 없으면 null)
+  trackingNumber: string | null; // 운송장 번호 (없으면 null)
+  statusHistory: OrderStatusHistory[]; // 상태 타임라인 (발생 순)
   createdAt: string;
 }
 
@@ -242,6 +254,8 @@ export interface OrderSummary {
 /** 주문 배송 상태 전진 입력 — PATCH /api/orders/{id}/status (ADMIN, forward-only) */
 export interface OrderStatusUpdateInput {
   status: OrderStatus;
+  courier?: string | null; // SHIPPING일 때 택배사(선택)
+  trackingNumber?: string | null; // SHIPPING일 때 운송장(선택)
 }
 
 // ───────── 셀러(Seller) ─────────
