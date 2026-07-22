@@ -316,7 +316,7 @@ class ProductControllerTest {
     @DisplayName("POST /api/products/{id}/images - 이미지 추가 성공 시 201")
     void addImage_success() throws Exception {
         given(productService.addImage(eq(1L), any())).willReturn(
-                new ProductResponse(1L, "반팔티셔츠", 29000L, "면 100%", "/products/1.svg",
+                new ProductResponse(1L, "반팔티셔츠", 29000L, null, "면 100%", "/products/1.svg",
                         ProductStatus.ON_SALE, 1L, "상의", 1L, "Nike",
                         List.of(), 0, 0.0, 0, LocalDateTime.now(),
                         List.of(new ProductImageResponse(50L, "/products/2.svg", 0))));

@@ -15,7 +15,7 @@ const PAGE_SIZE = 20;
 
 type Sp = { [k: string]: string | string[] | undefined };
 
-const FILTER_KEYS = ["keyword", "categoryId", "brandId", "minPrice", "maxPrice", "optionSize"] as const;
+const FILTER_KEYS = ["keyword", "categoryId", "brandId", "minPrice", "maxPrice", "optionSize", "onSale"] as const;
 
 /** 백엔드 offset 검색 쿼리(필터+정렬+page). 크롤 폴백은 안정적 순회면 되므로 offset 사용. */
 function backendQuery(sp: Sp, page: number): string {
@@ -106,6 +106,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
     minPrice: pick("minPrice"),
     maxPrice: pick("maxPrice"),
     optionSize: pick("optionSize"),
+    onSale: pick("onSale"),
     sort: pick("sort"),
   };
 

@@ -43,7 +43,15 @@ public class Product extends BaseEntity {
     private String name;
 
     @Column(nullable = false)
-    private long price;        // 원 단위
+    private long price;        // 원 단위 (판매가 · 결제 기준)
+
+    /**
+     * 정가(취소선 표시용, nullable). null이면 비할인. {@code originalPrice > price}일 때만 "할인"이고
+     * 할인율 = (originalPrice − price) / originalPrice. <b>결제·정산은 언제나 price(판매가) 기준</b> —
+     * originalPrice는 표시/정렬 전용이라 돈 흐름(결제·환불·정산·대사)에 전혀 개입하지 않는다.
+     */
+    @Column
+    private Long originalPrice;
 
     @Column(length = 1000)
     private String description;
@@ -90,15 +98,27 @@ public class Product extends BaseEntity {
     private List<ProductImage> images = new ArrayList<>();
 
     @Builder
-    private Product(String name, long price, String description, String imageUrl, ProductStatus status,
-                    Long categoryId, Long brandId) {
+    private Product(String name, long price, Long originalPrice, String description, String imageUrl,
+                    ProductStatus status, Long categoryId, Long brandId) {
+        validateOriginalPrice(originalPrice, price);
         this.name = name;
         this.price = price;
+        this.originalPrice = originalPrice;
         this.description = description;
         this.imageUrl = imageUrl;
         this.status = status;
         this.categoryId = categoryId;
         this.brandId = brandId;
+    }
+
+    /**
+     * 정가는 판매가보다 작을 수 없다(음수 할인 방지). null(비할인)은 허용. 같으면 할인 0(표시 안 함).
+     * 엔티티에서 지켜 API(create/update)뿐 아니라 시드/배치 등 모든 경로가 불변식을 통과하게 한다.
+     */
+    private static void validateOriginalPrice(Long originalPrice, long price) {
+        if (originalPrice != null && originalPrice < price) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "정가는 판매가보다 작을 수 없습니다.");
+        }
     }
 
     /** 카테고리/브랜드 귀속(또는 null로 해제). 상품 분류 — 데모 시드/추후 재분류 API가 쓴다. */
@@ -113,14 +133,27 @@ public class Product extends BaseEntity {
     }
 
     /** 기본 정보 수정(ADMIN) — 옵션·이미지·상태는 각자 메서드/엔드포인트로 관리한다(여기선 안 건드림). */
-    public void updateBasics(String name, long price, String description, String imageUrl,
+    public void updateBasics(String name, long price, Long originalPrice, String description, String imageUrl,
                              Long categoryId, Long brandId) {
+        validateOriginalPrice(originalPrice, price);
         this.name = name;
         this.price = price;
+        this.originalPrice = originalPrice;
         this.description = description;
         this.imageUrl = imageUrl;
         this.categoryId = categoryId;
         this.brandId = brandId;
+    }
+
+    /** 할인 중인지 — 정가가 판매가보다 클 때만. (표시/필터 편의) */
+    public boolean isOnSale() {
+        return originalPrice != null && originalPrice > price;
+    }
+
+    /** 세일 설정(정가만 지정, null이면 해제) — 판매가·결제는 그대로. 정가는 판매가 이상이어야 한다. */
+    public void applyOriginalPrice(Long originalPrice) {
+        validateOriginalPrice(originalPrice, this.price);
+        this.originalPrice = originalPrice;
     }
 
     /** 평점 평균(소수 1자리). 리뷰가 없으면 0. (비정규화 카운터에서 계산 — 별도 집계 쿼리 불필요) */

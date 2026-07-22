@@ -55,7 +55,8 @@ public class ProductRepositoryImpl implements ProductRepositoryCustom {
                 .and(priceLoe(condition.maxPrice()))        // 최대가(있을 때만)
                 .and(eqCategory(condition.categoryId()))    // 카테고리(있을 때만)
                 .and(eqBrand(condition.brandId()))          // 브랜드(있을 때만)
-                .and(hasAvailableOption(condition.optionSize()));  // 사이즈(있을 때만)
+                .and(hasAvailableOption(condition.optionSize()))   // 사이즈(있을 때만)
+                .and(onSale(condition.onSale()));           // 할인중(SALE)만(true일 때만)
 
         // 2) 콘텐츠 조회: where + 정렬 + 페이지(offset/limit)
         List<Product> content = queryFactory
@@ -125,6 +126,13 @@ public class ProductRepositoryImpl implements ProductRepositoryCustom {
         return brandId != null ? product.brandId.eq(brandId) : null;                  // brand_id = ?
     }
 
+    /** 할인 중(정가 > 판매가)인 상품만 — SALE 탭/필터. true일 때만 적용(null/false는 무시). */
+    private BooleanExpression onSale(Boolean onSale) {
+        return Boolean.TRUE.equals(onSale)
+                ? product.originalPrice.isNotNull().and(product.originalPrice.gt(product.price))
+                : null;
+    }
+
     /**
      * 재고 임박·품절 옵션 목록. 상품이 아니라 <b>옵션 행</b>을 뽑으므로(사이즈별 재고) 여기선 exists가 아니라
      * option → product 조인이다. 재고 적은 순(품절이 맨 위) → 같은 재고면 상품·옵션 id로 안정 정렬.
@@ -192,6 +200,17 @@ public class ProductRepositoryImpl implements ProductRepositoryCustom {
                         .when(product.ratingCount.eq(0)).then(-1.0)
                         .otherwise(product.ratingSum.doubleValue().divide(product.ratingCount.doubleValue()));
                 orders.add(new OrderSpecifier<>(direction, avg));
+                continue;
+            }
+
+            // 할인율(discountRate)도 계산값 → 식으로 정렬. rate = (originalPrice-price)/originalPrice.
+            // 비할인(정가 null 또는 정가<=판매가)은 -1로 두어 desc 정렬 시 항상 맨 뒤(할인상품 먼저).
+            if ("discountRate".equals(o.getProperty())) {
+                NumberExpression<Double> rate = new CaseBuilder()
+                        .when(product.originalPrice.isNull().or(product.originalPrice.loe(product.price))).then(-1.0)
+                        .otherwise(product.originalPrice.subtract(product.price).doubleValue()
+                                .divide(product.originalPrice.doubleValue()));
+                orders.add(new OrderSpecifier<>(direction, rate));
                 continue;
             }
 

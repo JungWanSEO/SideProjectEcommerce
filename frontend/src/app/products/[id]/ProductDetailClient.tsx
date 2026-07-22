@@ -9,6 +9,7 @@ import { useAuth } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
 import { loginHref } from "@/lib/useRequireAuth";
 import Stars, { StarInput } from "@/components/ui/Stars";
+import PriceTag from "@/components/ui/PriceTag";
 import { buttonClass } from "@/components/ui/Button";
 import WishlistButton from "@/components/ui/WishlistButton";
 import CoOccurrenceSection from "@/components/CoOccurrenceSection";
@@ -273,7 +274,9 @@ export default function ProductDetailClient() {
             <p className="mt-3 text-sm text-muted">아직 리뷰가 없어요</p>
           )}
 
-          <p className="mt-5 text-2xl font-semibold text-ink">{product.price.toLocaleString()}원</p>
+          <p className="mt-5 text-2xl font-semibold text-ink">
+            <PriceTag price={product.price} originalPrice={product.originalPrice} size="lg" />
+          </p>
 
           {product.description && (
             <p className="mt-5 whitespace-pre-line leading-relaxed text-ink/80">{product.description}</p>

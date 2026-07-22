@@ -5,6 +5,7 @@ import Link from "next/link";
 import { apiGet } from "@/lib/api";
 import { Brand, Category, PageResponse, Product, ProductCursorResponse } from "@/lib/types";
 import ProductThumb from "@/components/ui/ProductThumb";
+import PriceTag from "@/components/ui/PriceTag";
 import Badge from "@/components/ui/Badge";
 import Stars from "@/components/ui/Stars";
 import Select from "@/components/ui/Select";
@@ -28,6 +29,7 @@ const SORTS = [
   { value: "ratingCount,desc", label: "리뷰 많은순" },
   { value: "ratingAverage,desc", label: "평점 높은순" },
   { value: "wishlistCount,desc", label: "인기순(찜)" },
+  { value: "discountRate,desc", label: "할인율순" },
 ];
 
 export interface Query {
@@ -37,6 +39,7 @@ export interface Query {
   minPrice: string;
   maxPrice: string;
   optionSize: string;
+  onSale: string; // "" | "true" — 할인중(SALE)만
   sort: string;
 }
 const DEFAULT_SORT = "createdAt,desc";
@@ -47,6 +50,7 @@ const EMPTY: Query = {
   minPrice: "",
   maxPrice: "",
   optionSize: "",
+  onSale: "",
   sort: DEFAULT_SORT,
 };
 
@@ -59,6 +63,7 @@ function queryToSearch(q: Query): string {
   if (q.minPrice) qs.set("minPrice", q.minPrice);
   if (q.maxPrice) qs.set("maxPrice", q.maxPrice);
   if (q.optionSize) qs.set("optionSize", q.optionSize);
+  if (q.onSale) qs.set("onSale", "true");
   if (q.sort && q.sort !== DEFAULT_SORT) qs.set("sort", q.sort);
   return qs.toString();
 }
@@ -142,6 +147,7 @@ export default function ProductsClient({ initialQuery }: { initialQuery?: Partia
     !query.minPrice &&
     !query.maxPrice &&
     !query.optionSize &&
+    !query.onSale &&
     query.sort === "createdAt,desc";
   const cursorRef = useRef<number | null>(null); // 피드 모드: 마지막으로 본 상품 id
   const pageRef = useRef(0); // 검색 모드: 다음에 요청할 페이지 번호
@@ -172,6 +178,7 @@ export default function ProductsClient({ initialQuery }: { initialQuery?: Partia
       if (query.minPrice) qs.set("minPrice", query.minPrice);
       if (query.maxPrice) qs.set("maxPrice", query.maxPrice);
       if (query.optionSize) qs.set("optionSize", query.optionSize);
+      if (query.onSale) qs.set("onSale", "true");
       qs.set("sort", query.sort);
       qs.set("page", String(p));
       const page = await apiGet<PageResponse<Product>>(`/api/products?${qs.toString()}`);
@@ -271,6 +278,7 @@ export default function ProductsClient({ initialQuery }: { initialQuery?: Partia
     });
   if (query.optionSize)
     chips.push({ key: "size", label: `사이즈 ${query.optionSize}`, clear: () => set({ optionSize: "" }) });
+  if (query.onSale) chips.push({ key: "sale", label: "세일", clear: () => set({ onSale: "" }) });
   if (query.minPrice || query.maxPrice)
     chips.push({
       key: "price",
@@ -352,6 +360,19 @@ export default function ProductsClient({ initialQuery }: { initialQuery?: Partia
             />
             <span>원</span>
           </div>
+
+          <button
+            type="button"
+            onClick={() => set({ onSale: query.onSale ? "" : "true" })}
+            aria-pressed={!!query.onSale}
+            className={`rounded-full border px-4 py-2 text-sm transition ${
+              query.onSale
+                ? "border-rose-500 bg-rose-500 text-white"
+                : "border-line bg-paper text-ink hover:border-rose-300"
+            }`}
+          >
+            세일만
+          </button>
 
           {sizes.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
@@ -435,7 +456,9 @@ export default function ProductsClient({ initialQuery }: { initialQuery?: Partia
                     <p className="text-xs uppercase tracking-wider text-muted">{p.brandName}</p>
                   )}
                   <h2 className="mt-1 font-serif text-lg text-ink">{p.name}</h2>
-                  <p className="mt-1 font-medium text-ink">{p.price.toLocaleString()}원</p>
+                  <p className="mt-1 font-medium text-ink">
+                    <PriceTag price={p.price} originalPrice={p.originalPrice} />
+                  </p>
 
                   {(p.ratingCount > 0 || p.wishlistCount > 0) && (
                     <div className="mt-1 flex items-center gap-2.5">

@@ -39,6 +39,7 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpStatus;
 import org.springframework.test.util.ReflectionTestUtils;
 
 /**
@@ -88,7 +89,7 @@ class ProductServiceTest {
     void create_success() {
         // given
         ProductCreateRequest request = new ProductCreateRequest(
-                "반팔티셔츠", 29000L, "면 100%", null, null, null,
+                "반팔티셔츠", 29000L, null, "면 100%", null, null, null,
                 List.of(new ProductOptionRequest("M", 100)));
         given(productRepository.save(any(Product.class))).willReturn(productWithId(1L));
 
@@ -103,6 +104,32 @@ class ProductServiceTest {
         assertThat(response.options().get(0).size()).isEqualTo("M");
         assertThat(response.options().get(0).stock()).isEqualTo(100);
         verify(productRepository).save(any(Product.class));
+    }
+
+    @Test
+    @DisplayName("상품 등록 - 정가(originalPrice)가 판매가 이상이면 응답에 실린다")
+    void create_withOriginalPrice() {
+        ProductCreateRequest request = new ProductCreateRequest(
+                "세일상품", 8000L, 10000L, "desc", null, null, null,   // 판매가 8000·정가 10000(20% off)
+                List.of(new ProductOptionRequest("M", 10)));
+        given(productRepository.save(any(Product.class))).willAnswer(inv -> inv.getArgument(0));
+
+        ProductResponse response = productService.create(request);
+
+        assertThat(response.price()).isEqualTo(8000L);
+        assertThat(response.originalPrice()).isEqualTo(10000L);   // 정가가 응답에 노출(할인율은 FE 계산)
+    }
+
+    @Test
+    @DisplayName("상품 등록 실패 - 정가가 판매가보다 작으면 400 (음수 할인 방지)")
+    void create_originalPriceBelowPrice_400() {
+        ProductCreateRequest request = new ProductCreateRequest(
+                "이상상품", 29000L, 20000L, "desc", null, null, null,   // 정가 20000 < 판매가 29000
+                List.of(new ProductOptionRequest("M", 10)));
+
+        assertThatThrownBy(() -> productService.create(request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("status").isEqualTo(HttpStatus.BAD_REQUEST);
     }
 
     @Test
@@ -334,7 +361,7 @@ class ProductServiceTest {
         given(productRepository.findById(1L)).willReturn(Optional.of(productWithId(1L)));
 
         ProductResponse response = productService.update(1L,
-                new ProductUpdateRequest("새이름", 50000L, "새설명", "/products/9.svg", null, null));
+                new ProductUpdateRequest("새이름", 50000L, null, "새설명", "/products/9.svg", null, null));
 
         assertThat(response.name()).isEqualTo("새이름");
         assertThat(response.price()).isEqualTo(50000L);
@@ -347,7 +374,7 @@ class ProductServiceTest {
         given(productRepository.findById(999L)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> productService.update(999L,
-                new ProductUpdateRequest("n", 1L, null, null, null, null)))
+                new ProductUpdateRequest("n", 1L, null, null, null, null, null)))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("상품을 찾을 수 없습니다");
     }
@@ -359,7 +386,7 @@ class ProductServiceTest {
         given(categoryRepository.existsById(99L)).willReturn(false);
 
         assertThatThrownBy(() -> productService.update(1L,
-                new ProductUpdateRequest("n", 1L, null, null, 99L, null)))
+                new ProductUpdateRequest("n", 1L, null, null, null, 99L, null)))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("존재하지 않는 카테고리");
     }
