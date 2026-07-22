@@ -3,6 +3,7 @@ package com.commerce.api.product.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 
@@ -29,6 +30,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -142,6 +144,38 @@ class ProductServiceTest {
         // 가시 상태(ON_SALE·SOLD_OUT) + 받은 조건/페이지를 그대로 리포지토리에 전달한다 (DISCONTINUED 제외)
         verify(productRepository).search(
                 List.of(ProductStatus.ON_SALE, ProductStatus.SOLD_OUT), condition, pageable);
+    }
+
+    @Test
+    @DisplayName("어드민 목록 - status 미지정이면 전 상태(판매중지 포함)로 조회한다 (공개 목록과 경계 분리)")
+    @SuppressWarnings("unchecked")
+    void getProductsForAdmin_nullStatus_includesDiscontinued() {
+        Pageable pageable = PageRequest.of(0, 20);
+        ProductSearchCondition condition = new ProductSearchCondition(null, null, null, null, null, null);
+        given(productRepository.search(any(), any(), any()))
+                .willReturn(new PageImpl<>(List.of(), pageable, 0));
+
+        productService.getProductsForAdmin(null, condition, pageable);
+
+        // 회귀 방어: 공개 뷰(ON_SALE·SOLD_OUT)로 좁히면 어드민이 DISCONTINUED를 못 봐 되돌릴 수 없다(데이터 잠금).
+        ArgumentCaptor<List<ProductStatus>> statuses = ArgumentCaptor.forClass(List.class);
+        verify(productRepository).search(statuses.capture(), eq(condition), eq(pageable));
+        assertThat(statuses.getValue())
+                .contains(ProductStatus.DISCONTINUED)
+                .containsExactlyInAnyOrder(ProductStatus.values());
+    }
+
+    @Test
+    @DisplayName("어드민 목록 - status 지정이면 그 상태만 조회한다")
+    void getProductsForAdmin_withStatus_filtersOne() {
+        Pageable pageable = PageRequest.of(0, 20);
+        ProductSearchCondition condition = new ProductSearchCondition(null, null, null, null, null, null);
+        given(productRepository.search(any(), any(), any()))
+                .willReturn(new PageImpl<>(List.of(), pageable, 0));
+
+        productService.getProductsForAdmin(ProductStatus.DISCONTINUED, condition, pageable);
+
+        verify(productRepository).search(List.of(ProductStatus.DISCONTINUED), condition, pageable);
     }
 
     @Test

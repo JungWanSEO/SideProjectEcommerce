@@ -308,4 +308,67 @@ class MemberServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .extracting("status").isEqualTo(HttpStatus.NOT_FOUND);
     }
+
+    // === 소셜 로그인 find-or-create (OAuth2 성공 핸들러가 호출) ===
+
+    @Test
+    @DisplayName("소셜 - (provider, providerId)로 이미 있으면 그대로 반환(생성 안 함)")
+    void findOrCreateSocialMember_existingByProvider_returnsAsIs() {
+        Member existing = memberWithId(5L, "kim@google.com", "김구글");
+        given(memberRepository.findByProviderAndProviderId(AuthProvider.GOOGLE, "g-1"))
+                .willReturn(Optional.of(existing));
+
+        Member result = memberService.findOrCreateSocialMember(AuthProvider.GOOGLE, "g-1", "kim@google.com", "김구글");
+
+        assertThat(result).isSameAs(existing);
+        verify(memberRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("소셜 - providerId 신규지만 같은 email 계정이 있으면 그 계정으로 연동(생성 안 함)")
+    void findOrCreateSocialMember_linksByEmail() {
+        Member existingLocal = memberWithId(6L, "same@mail.com", "기존회원");
+        given(memberRepository.findByProviderAndProviderId(AuthProvider.GOOGLE, "g-2"))
+                .willReturn(Optional.empty());
+        given(memberRepository.findByEmail("same@mail.com")).willReturn(Optional.of(existingLocal));
+
+        Member result = memberService.findOrCreateSocialMember(AuthProvider.GOOGLE, "g-2", "same@mail.com", "구글이름");
+
+        assertThat(result).isSameAs(existingLocal);
+        verify(memberRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("소셜 - 신규 + 같은 email 없음 → 준 email로 USER 계정 생성(닉네임=제공자 이름)")
+    void findOrCreateSocialMember_createsNewWithGivenEmail() {
+        given(memberRepository.findByProviderAndProviderId(AuthProvider.GOOGLE, "g-3"))
+                .willReturn(Optional.empty());
+        given(memberRepository.findByEmail("new@google.com")).willReturn(Optional.empty());
+        given(memberRepository.save(any(Member.class))).willAnswer(inv -> inv.getArgument(0));
+
+        Member result = memberService.findOrCreateSocialMember(
+                AuthProvider.GOOGLE, "g-3", "new@google.com", "새구글");
+
+        assertThat(result.getEmail()).isEqualTo("new@google.com");
+        assertThat(result.getProvider()).isEqualTo(AuthProvider.GOOGLE);
+        assertThat(result.getProviderId()).isEqualTo("g-3");
+        assertThat(result.getRole()).isEqualTo(Role.USER);
+        assertThat(result.getNickname()).isEqualTo("새구글");
+        assertThat(result.getPassword()).isNull();   // 소셜 전용(비번 없음)
+    }
+
+    @Test
+    @DisplayName("소셜 - email 미제공(카카오 email-free) → 플레이스홀더 email 생성, 닉네임=이름")
+    void findOrCreateSocialMember_emailFree_usesPlaceholder() {
+        given(memberRepository.findByProviderAndProviderId(AuthProvider.KAKAO, "k-9"))
+                .willReturn(Optional.empty());
+        given(memberRepository.save(any(Member.class))).willAnswer(inv -> inv.getArgument(0));
+
+        Member result = memberService.findOrCreateSocialMember(AuthProvider.KAKAO, "k-9", null, "카카오친구");
+
+        // email 없으면 providerId로 유일한 플레이스홀더(실제 메일 아님) — NOT NULL·UNIQUE 충족
+        assertThat(result.getEmail()).isEqualTo("kakao_k-9@social.local");
+        assertThat(result.getNickname()).isEqualTo("카카오친구");
+        verify(memberRepository, never()).findByEmail(anyString());   // email 없으니 연동 조회 자체를 안 한다
+    }
 }
