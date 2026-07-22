@@ -13,7 +13,8 @@ public interface SettlementRepository extends JpaRepository<SettlementEntry, Lon
     /**
      * 해당 결제에 대한 정산 항목이 이미 있는지.
      * 정산 배치가 같은 결제를 두 번 잡지 않도록(멱등) 사용한다.
-     * (DB에도 payment_id UNIQUE 제약을 둬서 동시 실행에도 중복을 막는다.)
+     * (예전엔 payment_id UNIQUE 제약이 중복을 막았으나, V24에서 역분개(같은 결제에 음수 상계 행 추가)를
+     *  위해 제거했다. 이제 멱등은 단일 스레드 배치 + 이 체크가 보장하고, DB엔 조회용 비-UNIQUE 인덱스만 있다[V40].)
      */
     boolean existsByPaymentId(Long paymentId);
 
