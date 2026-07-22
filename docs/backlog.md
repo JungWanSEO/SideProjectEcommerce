@@ -23,7 +23,7 @@
 2. **재고 예약 — 오버셀 구간 제거 여부** — PENDING이 재고를 **전혀 안 잡아** 결제 지연만큼 레이스 구간이 열려 있다. → (a) 현행(결제 시 차감) / (b) 주문 생성 시 차감+취소 복원 / (c) `stock_reservation` TTL 예약(DONE ③ 만료 스케줄러 `OrderExpiryService` 재사용). **동시성 서사로는 (c)가 최고, 공수도 최고.**
 3. **반품/교환** — DELIVERED가 막다른 길. 반품창 기간·반품 배송비 부담자·교환=취소후재주문 vs 진짜 스왑·자동승인 vs 셀러승인, 4개가 정해져야 상태머신이 그려진다.
 4. **배송비** (`shippingFee` 레포 전체 0회) — `payable = totalPrice - discount`라 PG 금액에 배송비가 **구조적으로 없다**. 나중에 넣으면 결제·환불·정산·대사를 동시에 건드린다. → (a) 도입 안 함(명시) / (b) 정액+무료임계 / (c) 셀러별. + 부분취소 시 환불 여부.
-5. **상품 할인가(정가 vs 판매가)** — `Product.price` 단일 필드라 "30% OFF"·SALE 탭·할인율 정렬이 **모델상 불가능**. → (a) `originalPrice` 필드 하나(S) / (b) 기간형 `product_promotion` 테이블(M~L).
+5. ✅ **상품 할인가(정가 vs 판매가)** — **완료(07-22, a안)** → DONE. (후속 선택지=b안 기간형 `product_promotion` 테이블.)
 6. **알림 인박스(벨) + 재입고 알림** — 아웃박스→RabbitMQ→핸들러는 **완성돼 있는데** `NotificationLog`에 `memberId`도 `readAt`도 없어 **아무도 못 읽는다**(컨트롤러 부재). → 알림 대상 이벤트·수신자 스코프·읽음처리 방식.
 7. **게스트 장바구니** — 담기 클릭 = 즉시 `/login`(전환 킬러). → (a) 현행 / (b) localStorage(S·FE) / (c) 서버 토큰 카트+로그인 시 병합(L·BE).
 8. **취소·환불 사유 taxonomy** — `Order.cancel(changedBy, memo)`로 **자유텍스트 메모**는 이미 이력에 남지만(V39), **구조화된 사유 enum**은 없다(집계·정책 연동 불가). 사유 enum + **정산 귀책·배송비 부담에 영향 주는지**. 배송비(#4)와 얽혀 단독 착수 애매. *(기존 '인자 0개' 서술은 obsolete — memo 오버로드 존재.)*
@@ -32,6 +32,8 @@
 > 그 외 정책 대기: 회원 탈퇴(보존기간·PII 마스킹)·적립금/등급·상품 일괄작업 부분실패 정책·셀러 자가수정 범위·`next/image` 도입(이미지 호스팅처).
 
 ## DONE (완료 — 기록)
+- [x] (07-22) **#5 상품 할인가 (정가 originalPrice·%OFF·SALE·할인율 정렬)** — `feature/product-discount-price`→dev `3f45a49` (565→**570 tests**·**V42**·FE 0). 결정필요 #5의 a안(정가 필드 하나). **불변식=결제·정산·환불·대사는 price 기준 그대로, originalPrice는 표시/정렬 전용**(적대적 리뷰 돈경로 격리 렌즈로 확인). BE=필드·V42·정가≥판매가 guard(3경로)·onSale 필터·discountRate 정렬·데모시드 3종. FE=재사용 PriceTag(%OFF+취소선)·할인율순 정렬·세일 필터(URL·SSR)·어드민 폼. **4렌즈 적대적 리뷰**(돈경로·백엔드 클린, low 2건 수정). ⚠️V42 EXPLAIN=MySQL 복귀 후. 후속=b안 기간형 promotion.
+- [x] (07-22) **기록/코드 정리 (8축 병렬 감사)** — dev `17732a8`. dev-log 7월분 `2026-07.md` 분리+인덱스 재구성·backlog 정합·메모리 276→46줄 압축. 코드/레포/테스트/마이그레이션은 감사 결과 **전부 클린**(손댈 것 0).
 - [x] (07-22·여유시) **대사 윈도우 DB 쿼리 + V41 인덱스** — `feature/reconcile-window-query`→dev `fd30dee` (564→**565 tests**). 윈도우 대사 `findAll`+Java필터 → `findBySettledDateWindow`(nullable-bound @Query·`inWindow` 동일 규칙)로 DB에서 좁힘. V41=`settlement_entry.settled_date` 인덱스. (16일차 `feature/reconciliation-daily-window` 기능 도입의 **후속 최적화**.) ⚠️EXPLAIN=MySQL 복귀 후.
 - [x] (07-22·여유시) **감사 targetId FE 필터 + "이 대상 이력" 드릴다운** — `feature/audit-targetid-fe`→dev `0ff9243` (순수 FE). #8 백엔드 필터의 화면 노출.
 - [x] (07-22·여유시) **순수 테스트 3종(+12)** — `feature/coverage-security-social`→dev `71d5ecf` (552→**564**·프로덕션 0). JwtAuthenticationFilter 6·getProductsForAdmin 회귀 2(판매중지 데이터잠금)·소셜 find-or-create 4.
