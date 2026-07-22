@@ -76,12 +76,12 @@ public class ReconciliationService {
 
         // 우리 정산은 (결제×셀러)로 쪼개져 한 pgTransactionId에 항목이 여러 개일 수 있다(Phase 2).
         // 대사는 결제(거래) 단위이므로 pgTransactionId로 묶어 매출(gross)을 합산한 뒤 PG 리포트와 대조한다.
-        // 윈도우면 정산일(settledDate)이 범위 밖인 항목은 건너뛴다.
+        // 윈도우면 정산일(settledDate) 범위를 <b>DB에서</b> 좁혀 읽는다(예전엔 findAll 후 Java 필터 → 전체 스캔).
+        List<SettlementEntry> entries = windowed
+                ? settlementRepository.findBySettledDateWindow(from, to)
+                : settlementRepository.findAll();
         Map<String, OursTx> ours = new HashMap<>();
-        for (SettlementEntry e : settlementRepository.findAll()) {
-            if (windowed && !inWindow(e.getSettledDate(), from, to)) {
-                continue;
-            }
+        for (SettlementEntry e : entries) {
             OursTx agg = ours.get(e.getPgTransactionId());
             if (agg == null) {
                 ours.put(e.getPgTransactionId(), new OursTx(e.getProvider(), e.getGrossAmount()));
