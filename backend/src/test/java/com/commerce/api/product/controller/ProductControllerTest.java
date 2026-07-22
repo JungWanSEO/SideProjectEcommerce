@@ -132,7 +132,8 @@ class ProductControllerTest {
                         .param("minPrice", "10000")
                         .param("maxPrice", "50000")
                         .param("categoryId", "3")
-                        .param("brandId", "7"))
+                        .param("brandId", "7")
+                        .param("onSale", "true"))
                 .andExpect(status().isOk());
 
         // 컨트롤러가 받은 ProductSearchCondition을 캡처해 쿼리 파라미터가 제대로 바인딩됐는지 확인
@@ -145,6 +146,7 @@ class ProductControllerTest {
         assertThat(cond.maxPrice()).isEqualTo(50000L);
         assertThat(cond.categoryId()).isEqualTo(3L);
         assertThat(cond.brandId()).isEqualTo(7L);
+        assertThat(cond.onSale()).isTrue();   // SALE 필터 파라미터 바인딩
     }
 
     @Test

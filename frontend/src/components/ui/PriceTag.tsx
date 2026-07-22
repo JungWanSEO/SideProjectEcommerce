@@ -17,7 +17,11 @@ export default function PriceTag({
   if (originalPrice == null || originalPrice <= price) {
     return <>{price.toLocaleString()}원</>;
   }
+  // 반올림 후 0%가 되는 미세 할인(예: 10000 vs 10001)은 "0% OFF"가 어색하니 판매가만 표시.
   const percent = Math.round((1 - price / originalPrice) * 100);
+  if (percent <= 0) {
+    return <>{price.toLocaleString()}원</>;
+  }
   return (
     <span className="inline-flex items-baseline gap-1.5">
       <span className="text-rose-600">{percent}%</span>

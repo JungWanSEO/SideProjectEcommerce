@@ -369,6 +369,17 @@ class ProductServiceTest {
     }
 
     @Test
+    @DisplayName("상품 수정 실패 - 정가가 판매가보다 작으면 400 (수정 경로도 가드)")
+    void update_originalPriceBelowPrice_400() {
+        given(productRepository.findById(1L)).willReturn(Optional.of(productWithId(1L)));
+
+        assertThatThrownBy(() -> productService.update(1L,
+                new ProductUpdateRequest("n", 50000L, 40000L, null, null, null, null)))   // 정가 40000 < 판매가 50000
+                .isInstanceOf(BusinessException.class)
+                .extracting("status").isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
     @DisplayName("상품 수정 실패 - 없는 상품이면 404")
     void update_notFound() {
         given(productRepository.findById(999L)).willReturn(Optional.empty());

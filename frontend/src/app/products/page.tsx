@@ -106,7 +106,8 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
     minPrice: pick("minPrice"),
     maxPrice: pick("maxPrice"),
     optionSize: pick("optionSize"),
-    onSale: pick("onSale"),
+    // 값 기반 정규화: 클라(존재-truthy)와 SSR/백엔드(Boolean)가 어긋나지 않게 "true"만 통과(그 외는 미적용).
+    onSale: sp.onSale === "true" ? "true" : undefined,
     sort: pick("sort"),
   };
 
