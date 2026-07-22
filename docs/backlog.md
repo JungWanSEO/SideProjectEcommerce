@@ -8,7 +8,8 @@
 > **2026-07-21 무결정 스캔 8건 전부 소진(07-22)** → 아래 DONE. **자율 진행 가능한 READY = 0** — 다음 배치는 **새 무결정 스캔** 필요(아래 "여유 시" 저긴급 3건은 남아 있음).
 
 ### (여유 시·무결정이나 저긴급) — 남은 저긴급 자율 후보
-- 대사 `reconcile`이 findAll 후 Java 필터 → `findBySettledDateBetween`(+인덱스). / 체크아웃·결제 항목당 findByOptionId N+1 → `findByOptionIdIn` 배치.
+- ⚠️**[오너 몫 권장] 체크아웃·결제·pay N+1 → `findByOptionIdIn` 배치** — 돈 쓰기 경로(재고차감·낙관적락·@Retryable)라 동시성 정합(동일상품 다옵션 매핑·락 거동)에 닿고 **MySQL 런타임 검증 필요**. 이득은 marginal(주문 항목 N 작음). 복귀 후 런타임과 함께.
+- ✅ (07-22) 대사 `reconcile` findAll+Java필터 → `findBySettledDateWindow`(+V41 인덱스) — `feature/reconcile-window-query`→dev `fd30dee`.
 - ✅ (07-22) #8 감사 targetId **FE 필터 입력 + 드릴다운** — `feature/audit-targetid-fe`→dev `0ff9243`.
 - ✅ (07-22) **순수 테스트 3종**(JwtAuthenticationFilter·getProductsForAdmin 회귀·소셜 find-or-create, +12) — `feature/coverage-security-social`→dev `71d5ecf`.
 
