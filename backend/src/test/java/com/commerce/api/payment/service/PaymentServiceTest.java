@@ -322,4 +322,61 @@ class PaymentServiceTest {
         verify(paymentGateway, never()).refund(any());
         verify(paymentRepository, never()).save(any());
     }
+
+    // === 회귀: 항목 CANCELLED 상태를 취소/환불 경로가 일관되게 존중하는가 ===
+
+    @Test
+    @DisplayName("회귀(과다환불 방지) - 부분환불이 있던 결제를 전체취소하면 '잔여'만 환불한다(전액 재환불 아님)")
+    void cancelOrder_afterPartialRefund_refundsOnlyRemaining() {
+        given(orderService.cancel(1L, 100L, false))
+                .willReturn(order(1L, 100L, OrderStatus.CANCELLED, 30000L));
+        // 결제 30000 중 이미 10000을 항목단위로 환불한 상태(refundedAmount=10000, 아직 PAID)
+        Payment paid = Payment.ready(1L, 30000L, "MOCK_CARD", "TOSS", "key-1");
+        paid.markPaid("MOCK-tx-1");
+        paid.partialRefund(10000L);
+        given(paymentRepository.findByOrderIdAndStatus(1L, PaymentStatus.PAID)).willReturn(Optional.of(paid));
+        given(paymentGatewayRouter.resolve("TOSS")).willReturn(paymentGateway);
+        given(paymentGateway.refund(any())).willReturn(PaymentRefund.refunded("MOCK-REFUND-2"));
+
+        paymentService.cancelOrder(100L, 1L, false);
+
+        ArgumentCaptor<PaymentGateway.PaymentRefundCommand> cmd =
+                ArgumentCaptor.forClass(PaymentGateway.PaymentRefundCommand.class);
+        verify(paymentGateway).refund(cmd.capture());
+        assertThat(cmd.getValue().amount()).isEqualTo(20000L);   // 전액 30000이 아니라 잔여 20000만
+        assertThat(paid.getStatus()).isEqualTo(PaymentStatus.CANCELLED);   // 잔여까지 환불돼 전액 도달
+        assertThat(paid.getRefundedAmount()).isEqualTo(30000L);
+    }
+
+    @Test
+    @DisplayName("회귀(과다환불 방지) - 모든 항목이 이미 부분환불로 소진됐으면 전체취소 시 추가 환불 없음")
+    void cancelOrder_alreadyFullyRefunded_noExtraRefund() {
+        given(orderService.cancel(1L, 100L, false))
+                .willReturn(order(1L, 100L, OrderStatus.CANCELLED, 30000L));
+        Payment paid = Payment.ready(1L, 30000L, "MOCK_CARD", "TOSS", "key-1");
+        paid.markPaid("MOCK-tx-1");
+        paid.partialRefund(30000L);   // 이미 전액 환불 → CANCELLED (findByOrderIdAndStatus(PAID) 못 찾음이 정상)
+        // PAID로 조회되지 않으므로(이미 CANCELLED) 환불 시도 자체가 없다
+        given(paymentRepository.findByOrderIdAndStatus(1L, PaymentStatus.PAID)).willReturn(Optional.empty());
+
+        paymentService.cancelOrder(100L, 1L, false);
+
+        verify(paymentGateway, never()).refund(any());
+    }
+
+    @Test
+    @DisplayName("회귀(0원 환불) - 실효가 0인 라인(100% 할인) 취소는 PG 환불 없이 통과(400 롤백 방지)")
+    void cancelOrderItem_zeroEffectivePrice_skipsRefund() {
+        // 소계 30000이 전액(30000) 할인 안분 → 실효가 0
+        given(orderService.cancelItem(1L, 100L, 100L, false))
+                .willReturn(orderWithItem(OrderStatus.PAID, 30000L, 30000L));
+        // 실효가 0이면 결제 조회조차 하지 않는다(refundAmount>0 가드가 블록 전체를 건너뜀).
+
+        // 예외 없이 통과해야 한다(partialRefund(0)이 400을 던지면 정당한 취소가 롤백됨)
+        paymentService.cancelOrderItem(100L, 1L, 100L, false);
+
+        verify(paymentRepository, never()).findByOrderIdAndStatus(any(), any());
+        verify(paymentGateway, never()).refund(any());
+        verify(paymentRepository, never()).save(any());
+    }
 }

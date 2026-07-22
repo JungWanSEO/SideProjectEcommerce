@@ -119,6 +119,35 @@ class OrderServiceTest {
     }
 
     @Test
+    @DisplayName("주문 취소(회귀) - 부분취소된(비활성) 항목은 재고를 이중 복원하지 않는다")
+    void cancel_afterPartialCancel_noDoubleStockRestore() {
+        // 결제 완료된 2항목 주문에서 한 항목(optionId 10)을 먼저 항목취소해 비활성으로 만든다
+        //   (실제 운영에선 그 시점에 재고가 이미 복원됨). 이후 주문 전체 취소는 활성 항목만 복원해야 한다.
+        OrderItem cancelledLine = OrderItem.builder()
+                .productId(1L).optionId(10L).productName("반팔티셔츠").size("M")
+                .orderPrice(10000L).quantity(3).build();
+        OrderItem activeLine = OrderItem.builder()
+                .productId(2L).optionId(20L).productName("맨투맨").size("L")
+                .orderPrice(20000L).quantity(2).build();
+        Order order = orderWithId(1L, 100L, cancelledLine, activeLine);
+        order.markPaid();
+        ReflectionTestUtils.setField(cancelledLine, "id", 500L);
+        ReflectionTestUtils.setField(activeLine, "id", 501L);
+        order.cancelItem(500L, 100L);   // optionId 10 라인 비활성(주문은 PAID 유지)
+
+        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        Product active = productWithOption(2L, 20L, 8);   // 결제로 8까지 차감된 활성 옵션
+        given(productRepository.findByOptionId(20L)).willReturn(Optional.of(active));
+
+        OrderResponse response = orderService.cancel(1L, 100L, false);
+
+        assertThat(response.status()).isEqualTo(OrderStatus.CANCELLED);
+        assertThat(active.getOptions().get(0).getStock()).isEqualTo(10);   // 활성 항목만 8 + 2
+        // 이미 취소된 항목의 옵션은 다시 복원하지 않는다(재고 인플레 방지)
+        verify(productRepository, never()).findByOptionId(10L);
+    }
+
+    @Test
     @DisplayName("주문 조회 실패 - 없는 주문이면 예외")
     void getOrder_notFound() {
         given(orderRepository.findById(999L)).willReturn(Optional.empty());

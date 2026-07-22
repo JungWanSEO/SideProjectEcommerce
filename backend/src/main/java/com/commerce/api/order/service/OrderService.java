@@ -177,7 +177,12 @@ public class OrderService {
 
         if (wasPaid) {
             // 결제 완료된 주문만 재고가 차감돼 있으므로 복원한다.
+            //   단 이미 항목단위로 취소(cancelItem)된 항목은 그때 재고를 복원했으므로 <b>활성 항목만</b> 복원한다
+            //   — 안 그러면 부분취소 후 전체취소 시 그 항목 재고가 이중 복원된다(재고 인플레).
             for (OrderItem item : order.getOrderItems()) {
+                if (!item.isActive()) {
+                    continue;
+                }
                 productRepository.findByOptionId(item.getOptionId())
                         .ifPresent(product -> product.increaseStock(item.getOptionId(), item.getQuantity()));
             }

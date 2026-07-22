@@ -216,6 +216,9 @@ public class OrderProcessor {
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "주문을 찾을 수 없습니다."));
 
         for (OrderItem item : order.getOrderItems()) {
+            if (!item.isActive()) {
+                continue;   // 결제 전 취소된 항목은 재고를 차감하지 않는다(결제액도 payable에서 이미 제외됨)
+            }
             // 루트 경유: 옵션 ID로 Product 애그리거트를 로드해 해당 옵션 재고를 차감
             Product product = productRepository.findByOptionId(item.getOptionId())
                     .orElseThrow(() -> new BusinessException(

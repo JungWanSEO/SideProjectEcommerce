@@ -358,4 +358,34 @@ class OrderProcessorTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("주문을 찾을 수 없습니다");
     }
+
+    @Test
+    @DisplayName("결제 확정(회귀) - 결제 전 취소된(비활성) 항목은 재고를 차감하지 않는다")
+    void pay_skipsCancelledItem() {
+        // 항목 2개짜리 PENDING 주문에서 한 항목(optionId 10)을 결제 전에 취소한다.
+        Order order = Order.create(100L);
+        OrderItem cancelledLine = OrderItem.builder()
+                .productId(1L).optionId(10L).productName("반팔티셔츠").size("M")
+                .orderPrice(10000L).quantity(3).build();
+        OrderItem activeLine = OrderItem.builder()
+                .productId(2L).optionId(20L).productName("맨투맨").size("L")
+                .orderPrice(20000L).quantity(2).build();
+        order.addItem(cancelledLine);
+        order.addItem(activeLine);
+        ReflectionTestUtils.setField(order, "id", 1L);
+        ReflectionTestUtils.setField(cancelledLine, "id", 500L);
+        ReflectionTestUtils.setField(activeLine, "id", 501L);
+        order.cancelItem(500L, 100L);   // optionId 10 라인 취소 → 비활성(주문은 PENDING 유지)
+
+        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        Product active = productWithOption(2L, 20L, "맨투맨", 20000L, 10);
+        given(productRepository.findByOptionId(20L)).willReturn(Optional.of(active));
+
+        OrderResponse response = orderProcessor.pay(1L);
+
+        assertThat(response.status()).isEqualTo(OrderStatus.PAID);
+        assertThat(active.getOptions().get(0).getStock()).isEqualTo(8);   // 활성 항목만 10 - 2
+        // 취소된 항목의 옵션은 조회조차 하지 않는다(재고 미차감)
+        verify(productRepository, never()).findByOptionId(10L);
+    }
 }
