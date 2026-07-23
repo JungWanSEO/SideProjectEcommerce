@@ -27,11 +27,12 @@
 6. **알림 인박스(벨) + 재입고 알림** — 아웃박스→RabbitMQ→핸들러는 **완성돼 있는데** `NotificationLog`에 `memberId`도 `readAt`도 없어 **아무도 못 읽는다**(컨트롤러 부재). → 알림 대상 이벤트·수신자 스코프·읽음처리 방식.
 7. **게스트 장바구니** — 담기 클릭 = 즉시 `/login`(전환 킬러). → (a) 현행 / (b) localStorage(S·FE) / (c) 서버 토큰 카트+로그인 시 병합(L·BE).
 8. **취소·환불 사유 taxonomy** — `Order.cancel(changedBy, memo)`로 **자유텍스트 메모**는 이미 이력에 남지만(V39), **구조화된 사유 enum**은 없다(집계·정책 연동 불가). 사유 enum + **정산 귀책·배송비 부담에 영향 주는지**. 배송비(#4)와 얽혀 단독 착수 애매. *(기존 '인자 0개' 서술은 obsolete — memo 오버로드 존재.)*
-9. **대시보드 매출 KPI = 환불 반영 여부** (07-22 무결정 스캔에서 발견한 *실제 divergence*) — `OrderRepository:52·63`의 "완료 매출"이 `sum(totalPrice − discountAmount)`(주문 전체)라, 부분취소된 항목까지 매출로 센다 → 결제 실수령·정산 net과 어긋난다(예: 2만원 2항목 중 1항목 취소 시 결제·정산은 1만원인데 KPI는 2만원). **결정 필요**: KPI를 (a) gross-of-refunds 현행 유지(주문 기준 "판매고") / (b) net-of-refunds(`getPayableAmount` 정합) 중 무엇으로? (b)면 항목별 안분할인·반올림 잔여 때문에 순수 SQL로 안 떨어져 집계 방식(엔티티 순회 배치 or 파생컬럼)도 함께 정해야 한다.
+9. ✅ **대시보드 매출 KPI = 환불 반영** — **완료(07-23, b안: 순매출)** → DONE. (Payment.amount−refundedAmount 순수 SQL로 해결 — 엔티티 순회 불요.)
 
 > 그 외 정책 대기: 회원 탈퇴(보존기간·PII 마스킹)·적립금/등급·상품 일괄작업 부분실패 정책·셀러 자가수정 범위·`next/image` 도입(이미지 호스팅처).
 
 ## DONE (완료 — 기록)
+- [x] (07-23) **#9 대시보드 매출 KPI = 순매출(환불 차감)** — `feature/dashboard-net-revenue`→dev `c68696b` (583 유지·FE 0). "완료 매출"이 주문 gross라 부분취소를 과다계상하던 것을 **b안(순매출)**으로: `PaymentRepository.sumNetRevenueByStatus(PAID)` = `sum(amount−refundedAmount)` **순수 SQL**(refundedAmount가 이미 net 담음 → 엔티티 순회/파생컬럼 불요). 추이도 payment net. OrderRepository 구쿼리 제거·DTO netRevenue·FE 라벨. DashboardServiceTest가 부분환불·전액환불 제외·합 검증.
 - [x] (07-22~23) **#2 재고 예약(TTL) — 오버셀 구간 제거** — `feature/stock-reservation`→dev `d700daa` (570→**583 tests**·**V43/V44**·FE 0). c안(정석: `stock_reservation` 테이블 + `product_option.reserved` 카운터). 주문 생성 시 **원자적 조건부 UPDATE**(reserved+=q WHERE stock-reserved>=q, 선착순 쿠폰과 동형)로 예약→오버셀 0(동시성 IT 30→10 실증). 결제=소진(결정적)·만료/취소=해제·PAID취소=실재고복원. **4렌즈 적대적 리뷰 → 동시성 엣지 6종 수정**: 원자 UPDATE version+1(관리자 lost-update)·consume 0행 409+stock가드·**Order @Version(V44)**+만료 배치 per-order 워커(pay↔만료 경합)·optionId 락순서+데드락 재시도·PLP 필터 available 기준·@DataJpaTest 슬라이스. ⚠️V43/V44 MySQL 스모크=복귀 후.
 - [x] (07-22) **#5 상품 할인가 (정가 originalPrice·%OFF·SALE·할인율 정렬)** — `feature/product-discount-price`→dev `3f45a49` (565→**570 tests**·**V42**·FE 0). 결정필요 #5의 a안(정가 필드 하나). **불변식=결제·정산·환불·대사는 price 기준 그대로, originalPrice는 표시/정렬 전용**(적대적 리뷰 돈경로 격리 렌즈로 확인). BE=필드·V42·정가≥판매가 guard(3경로)·onSale 필터·discountRate 정렬·데모시드 3종. FE=재사용 PriceTag(%OFF+취소선)·할인율순 정렬·세일 필터(URL·SSR)·어드민 폼. **4렌즈 적대적 리뷰**(돈경로·백엔드 클린, low 2건 수정). ⚠️V42 EXPLAIN=MySQL 복귀 후. 후속=b안 기간형 promotion.
 - [x] (07-22) **기록/코드 정리 (8축 병렬 감사)** — dev `17732a8`. dev-log 7월분 `2026-07.md` 분리+인덱스 재구성·backlog 정합·메모리 276→46줄 압축. 코드/레포/테스트/마이그레이션은 감사 결과 **전부 클린**(손댈 것 0).
