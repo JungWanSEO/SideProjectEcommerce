@@ -2,6 +2,7 @@ package com.commerce.api.order.repository;
 
 import com.commerce.api.order.entity.Order;
 import com.commerce.api.order.entity.OrderStatus;
+import jakarta.persistence.LockModeType;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
@@ -9,7 +10,9 @@ import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 /**
  * 주문 DB 접근.
@@ -60,4 +63,13 @@ public interface OrderRepository extends JpaRepository<Order, Long>, OrderReposi
             + "com.commerce.api.order.entity.OrderStatus.DELIVERED) "
             + "and not exists (select 1 from Shipment s where s.order = o)")
     List<Order> findPurchasedWithoutShipments();
+
+    /**
+     * shipment 전이 시 부모 주문을 <b>낙관 버전 강제 증가</b>로 잡는다(#1 P3). 같은 주문의 서로 다른 shipment를
+     * 동시에 전진하면 둘 다 orders.version을 올리려다 충돌 → 늦은 쪽이 @Retryable로 재시도해 fresh 컨텍스트에서
+     * rollup을 다시 계산한다. (rollup write가 조건부라 낙관락만으론 stale sibling lost update가 나므로 강제 증가로 직렬화.)
+     */
+    @Lock(LockModeType.OPTIMISTIC_FORCE_INCREMENT)
+    @Query("select o from Order o where o.id = :id")
+    Optional<Order> findByIdForShipmentRollup(@Param("id") Long id);
 }

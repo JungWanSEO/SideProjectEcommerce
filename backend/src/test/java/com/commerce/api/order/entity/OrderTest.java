@@ -136,4 +136,70 @@ class OrderTest {
         assertThat(order.backfillShipments()).isFalse();
         assertThat(order.getShipments()).isEmpty();
     }
+
+    // === #1 P3: Order.status rollup(shipment 파생) ====================================
+
+    @Test
+    @DisplayName("rollup - 하나라도 출고 시작이면 주문 SHIPPING")
+    void rollup_anyShippingMakesOrderShipping() {
+        Order order = orderWith(item(1L, 5000L), item(2L, 4000L));
+        order.markPaid();   // shipment 2건 PAID → 주문 PAID
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.PAID);
+
+        order.getShipments().get(0).advanceShipping(ShipmentStatus.SHIPPING, null, "CJ", "1");
+        order.recomputeStatusFromShipments(null, null);
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.SHIPPING);   // 셀러A만 출고해도 주문 SHIPPING
+    }
+
+    @Test
+    @DisplayName("rollup - 전부 DELIVERED만 DELIVERED, 일부만 완료면 SHIPPING(forward-only 단조)")
+    void rollup_allDeliveredOnly() {
+        Order order = orderWith(item(1L, 5000L), item(2L, 4000L));
+        order.markPaid();
+        Shipment a = order.getShipments().get(0);
+        Shipment b = order.getShipments().get(1);
+        a.advanceShipping(ShipmentStatus.SHIPPING, null, "CJ", "1");
+        b.advanceShipping(ShipmentStatus.SHIPPING, null, "CJ", "2");
+
+        a.advanceShipping(ShipmentStatus.DELIVERED, null, null, null);
+        order.recomputeStatusFromShipments(null, null);
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.SHIPPING);   // A완료·B배송중 → 아직 SHIPPING(후퇴 없음)
+
+        b.advanceShipping(ShipmentStatus.DELIVERED, null, null, null);
+        order.recomputeStatusFromShipments(null, null);
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.DELIVERED);  // 둘 다 완료
+    }
+
+    @Test
+    @DisplayName("rollup - 일부 취소는 남은 활성 기준, 전부 취소면 CANCELLED")
+    void rollup_cancellations() {
+        Order order = orderWith(item(1L, 5000L), item(2L, 4000L));
+        order.markPaid();
+        Shipment a = order.getShipments().get(0);
+        Shipment b = order.getShipments().get(1);
+
+        a.cancel(null, "셀러A 취소");
+        order.recomputeStatusFromShipments(null, null);
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.PAID);       // B 활성 PAID
+
+        b.cancel(null, "셀러B 취소");
+        order.recomputeStatusFromShipments(null, null);
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);  // 전부 취소
+    }
+
+    @Test
+    @DisplayName("rollup - 값이 바뀔 때만 주문 이력 append(불변이면 shipment 이력만)")
+    void rollup_recordsHistoryOnChangeOnly() {
+        Order order = orderWith(item(1L, 5000L), item(2L, 4000L));
+        order.markPaid();   // 주문 이력: PENDING, PAID
+        int base = order.getStatusHistory().size();
+
+        order.getShipments().get(0).advanceShipping(ShipmentStatus.SHIPPING, 7L, "CJ", "1");
+        order.recomputeStatusFromShipments(7L, "CJ 1");
+        assertThat(order.getStatusHistory()).hasSize(base + 1);   // PAID→SHIPPING 변화 → 이력 1건
+
+        order.getShipments().get(1).advanceShipping(ShipmentStatus.SHIPPING, 8L, "CJ", "2");
+        order.recomputeStatusFromShipments(8L, "CJ 2");
+        assertThat(order.getStatusHistory()).hasSize(base + 1);   // rollup 여전히 SHIPPING → 주문 이력 불변
+    }
 }

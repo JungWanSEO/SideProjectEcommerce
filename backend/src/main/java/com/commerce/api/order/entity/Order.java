@@ -337,40 +337,94 @@ public class Order extends BaseEntity {
         return !shipments.isEmpty();
     }
 
-    /** 배송 상태 전진(ADMIN) — 송장·주체 없이(기존 호출 호환). */
+    /** 배송 상태 전진(ADMIN 일괄) — 송장·주체 없이(기존 호출 호환). */
     public void advanceShipping(OrderStatus next) {
         advanceShipping(next, null, null, null);
     }
 
     /**
-     * 배송 상태 전진(ADMIN) + 이력·송장 기록. 전이는 <b>forward-only</b>로 PAID → SHIPPING → DELIVERED 만 허용한다.
-     * 건너뛰기(PAID→DELIVERED)·되돌리기(SHIPPING→PAID)·그 외 상태(PENDING/CANCELLED 출발·도착)는 409.
+     * 배송 상태 전진(ADMIN 편의, #1 c안) — 주문의 <b>활성 shipment를 일괄</b> 다음 단계로 전진하고
+     * {@link #status}를 shipment rollup으로 재계산한다. 셀러별 개별 전진은 shipment 단위 경로(P5)가 담당한다.
      *
-     * <p>SHIPPING으로 갈 때 택배사·운송장을 함께 받아 저장한다(구매자에게 노출). DELIVERED 전이엔 무시.
+     * <p>전이는 forward-only PAID→SHIPPING→DELIVERED. next는 SHIPPING/DELIVERED만 유효하고, 전진 가능한
+     * shipment가 하나도 없으면 409(건너뛰기·되돌리기·PENDING/CANCELLED에서의 전진 차단 — 기존 order-grain 의미 보존).
+     * SHIPPING 전이 시 송장은 각 shipment에 저장하고, order-level courier/tracking에도 복제한다(P6에서 컬럼 제거 전까지 응답 호환).
      */
     public void advanceShipping(OrderStatus next, Long changedBy, String courier, String trackingNumber) {
-        boolean allowed =
-                (this.status == OrderStatus.PAID && next == OrderStatus.SHIPPING)
-                || (this.status == OrderStatus.SHIPPING && next == OrderStatus.DELIVERED);
-        if (!allowed) {
-            throw new BusinessException(HttpStatus.CONFLICT,
-                    "배송 상태를 " + this.status + "에서 " + next
-                            + "(으)로 변경할 수 없습니다. (PAID→SHIPPING→DELIVERED 순서만 가능)");
-        }
-        OrderStatus from = this.status;
-        this.status = next;
-
-        String memo = null;
+        ShipmentStatus prereq;
+        ShipmentStatus target;
         if (next == OrderStatus.SHIPPING) {
-            this.courier = courier;
-            this.trackingNumber = trackingNumber;
-            if (courier != null || trackingNumber != null) {
-                memo = (courier == null ? "" : courier)
-                        + (trackingNumber == null ? "" : " " + trackingNumber);
-                memo = memo.trim();
+            prereq = ShipmentStatus.PAID;
+            target = ShipmentStatus.SHIPPING;
+        } else if (next == OrderStatus.DELIVERED) {
+            prereq = ShipmentStatus.SHIPPING;
+            target = ShipmentStatus.DELIVERED;
+        } else {
+            throw shippingConflict(next);   // PENDING/PAID/CANCELLED로의 전진은 무효
+        }
+
+        int advanced = 0;
+        for (Shipment s : shipments) {
+            if (s.isActive() && s.getStatus() == prereq) {
+                s.advanceShipping(target, changedBy, courier, trackingNumber);
+                advanced++;
             }
         }
-        recordHistory(from, next, changedBy, memo);
+        if (advanced == 0) {
+            throw shippingConflict(next);   // 전진 가능한 shipment 없음(건너뛰기·되돌리기·미결제 등)
+        }
+        if (next == OrderStatus.SHIPPING) {
+            this.courier = courier;                 // 잔존 order-level 필드(P6 제거 전 응답 back-compat)
+            this.trackingNumber = trackingNumber;
+        }
+        recomputeStatusFromShipments(changedBy, shippingMemo(next, courier, trackingNumber));
+    }
+
+    private BusinessException shippingConflict(OrderStatus next) {
+        return new BusinessException(HttpStatus.CONFLICT,
+                "배송 상태를 " + this.status + "에서 " + next
+                        + "(으)로 변경할 수 없습니다. (PAID→SHIPPING→DELIVERED 순서만 가능)");
+    }
+
+    private static String shippingMemo(OrderStatus next, String courier, String trackingNumber) {
+        if (next == OrderStatus.SHIPPING && (courier != null || trackingNumber != null)) {
+            return ((courier == null ? "" : courier)
+                    + (trackingNumber == null ? "" : " " + trackingNumber)).trim();
+        }
+        return null;
+    }
+
+    /**
+     * shipment들의 상태를 {@link #status}에 반영한다(rollup 파생, #1 c안). 값이 <b>실제로 바뀔 때만</b> 이력 1건 append
+     * ("전이=흔적" 불변식 유지, 셀러 A만 전진해 rollup이 불변이면 shipment 이력만 남는다).
+     *
+     * <p>rollup 규칙(활성=비취소 shipment 기준, forward-only라 값 후퇴 불가):
+     * 전부 취소→CANCELLED / 전부 DELIVERED→DELIVERED / 하나라도 출고 시작(SHIPPING·DELIVERED)→SHIPPING / 전부 PAID→PAID.
+     * 저장된 파생 컬럼이라 PURCHASED 리더(리뷰자격·추천·대시보드)와 기존 인덱스가 무변경 생존한다.
+     */
+    public void recomputeStatusFromShipments(Long changedBy, String memo) {
+        if (shipments.isEmpty()) {
+            return;   // 결제 전(PENDING) — shipment 없음
+        }
+        OrderStatus rolled = rollupStatus();
+        if (rolled != this.status) {
+            OrderStatus from = this.status;
+            this.status = rolled;
+            recordHistory(from, rolled, changedBy, memo);
+        }
+    }
+
+    private OrderStatus rollupStatus() {
+        List<Shipment> active = shipments.stream().filter(Shipment::isActive).toList();
+        if (active.isEmpty()) {
+            return OrderStatus.CANCELLED;   // 모든 shipment 취소 → 주문 취소
+        }
+        if (active.stream().allMatch(s -> s.getStatus() == ShipmentStatus.DELIVERED)) {
+            return OrderStatus.DELIVERED;
+        }
+        boolean anyStarted = active.stream()
+                .anyMatch(s -> s.getStatus() == ShipmentStatus.SHIPPING || s.getStatus() == ShipmentStatus.DELIVERED);
+        return anyStarted ? OrderStatus.SHIPPING : OrderStatus.PAID;
     }
 
     /** 취소 가능 상태인지 — 배송이 시작(SHIPPING)되거나 완료(DELIVERED)된 주문은 취소할 수 없다(409). */
