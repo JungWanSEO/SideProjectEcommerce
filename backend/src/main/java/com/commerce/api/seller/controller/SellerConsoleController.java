@@ -1,10 +1,13 @@
 package com.commerce.api.seller.controller;
 
+import com.commerce.api.audit.aspect.Auditable;
 import com.commerce.api.global.common.ApiResponse;
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.security.SecurityUtil;
+import com.commerce.api.order.dto.OrderResponse;
 import com.commerce.api.order.dto.OrderSearchCondition;
 import com.commerce.api.order.dto.OrderSummaryResponse;
+import com.commerce.api.order.dto.ShipmentStatusUpdateRequest;
 import com.commerce.api.seller.dto.SellerResponse;
 import com.commerce.api.seller.service.SellerConsoleService;
 import com.commerce.api.settlement.dto.PayoutResponse;
@@ -14,6 +17,7 @@ import com.commerce.api.settlement.entity.PayoutStatus;
 import com.commerce.api.settlement.entity.SettlementStatus;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import java.time.LocalDate;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +28,9 @@ import org.springframework.data.web.PageableDefault;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -92,5 +99,19 @@ public class SellerConsoleController {
             Pageable pageable) {
         return ResponseEntity.ok(ApiResponse.success(
                 sellerConsoleService.getMyOrders(SecurityUtil.getCurrentMemberId(), condition, pageable)));
+    }
+
+    @Operation(summary = "내 배송 상태 전진",
+            description = "내 셀러의 배송 건(shipment)을 다음 단계로 전진한다(PAID→SHIPPING→DELIVERED, forward-only). "
+                    + "내 셀러 것이 아니거나 플랫폼 직매입 배송이면 403, 잘못된 전이면 409. SHIPPING일 때 택배사·운송장 실으면 저장된다.")
+    // 📦 셀러가 자기 몫을 출고하는 지점 — 주체(셀러 회원)를 감사 이력에 남긴다.
+    @Auditable(action = "SHIPMENT_ADVANCE", targetType = "SHIPMENT", targetId = "#shipmentId")
+    @PatchMapping("/me/shipments/{shipmentId}/status")
+    public ResponseEntity<ApiResponse<OrderResponse>> advanceMyShipment(
+            @PathVariable Long shipmentId, @Valid @RequestBody ShipmentStatusUpdateRequest request) {
+        OrderResponse response = sellerConsoleService.advanceMyShipment(
+                SecurityUtil.getCurrentMemberId(), shipmentId,
+                request.status(), request.courier(), request.trackingNumber());
+        return ResponseEntity.ok(ApiResponse.success("배송 상태가 변경되었습니다.", response));
     }
 }

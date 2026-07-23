@@ -4,6 +4,8 @@ import com.commerce.api.order.entity.Order;
 import com.commerce.api.order.entity.OrderItem;
 import com.commerce.api.order.entity.OrderItemStatus;
 import com.commerce.api.order.entity.OrderStatus;
+import com.commerce.api.order.entity.Shipment;
+import com.commerce.api.order.entity.ShipmentStatus;
 import com.commerce.api.order.entity.ShippingInfo;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -24,7 +26,8 @@ public record OrderResponse(
         ShippingResponse shipping,   // 배송지 스냅샷 (없으면 null)
         String courier,              // 택배사 (배송 시작 후, 없으면 null)
         String trackingNumber,       // 운송장 번호 (없으면 null)
-        List<StatusHistoryResponse> statusHistory,   // 상태 타임라인 (발생 순)
+        List<StatusHistoryResponse> statusHistory,   // 주문 상태 타임라인 (발생 순, shipment rollup 파생)
+        List<ShipmentResponse> shipments,            // 셀러별 배송 단위(#1 c안) — 상태·송장. 결제 전(PENDING)은 빈 목록
         LocalDateTime createdAt
 ) {
     public static OrderResponse from(Order order) {
@@ -35,6 +38,9 @@ public record OrderResponse(
                 .toList();
         List<StatusHistoryResponse> history = order.getStatusHistory().stream()
                 .map(StatusHistoryResponse::from)
+                .toList();
+        List<ShipmentResponse> shipments = order.getShipments().stream()
+                .map(ShipmentResponse::from)
                 .toList();
         return new OrderResponse(
                 order.getId(),
@@ -49,8 +55,23 @@ public record OrderResponse(
                 order.getCourier(),
                 order.getTrackingNumber(),
                 history,
+                shipments,
                 order.getCreatedAt()
         );
+    }
+
+    /** 셀러별 배송 단위 응답(#1 c안) — 셀러가 자기 shipment 상태·송장을 보고, 구매자는 셀러별 배송 진행을 본다. */
+    public record ShipmentResponse(
+            Long id,
+            Long sellerId,            // null = 플랫폼 직매입 버킷
+            ShipmentStatus status,    // PAID / SHIPPING / DELIVERED / CANCELLED
+            String courier,
+            String trackingNumber
+    ) {
+        static ShipmentResponse from(Shipment s) {
+            return new ShipmentResponse(
+                    s.getId(), s.getSellerId(), s.getStatus(), s.getCourier(), s.getTrackingNumber());
+        }
     }
 
     /** 상태 이력 1건 — 주문 상세 타임라인용. */

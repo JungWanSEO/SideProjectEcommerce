@@ -29,4 +29,24 @@ public class ShipmentService {
             String courier, String trackingNumber) {
         return worker.advance(shipmentId, next, changedBy, courier, trackingNumber);
     }
+
+    /** 셀러가 자기 shipment를 전진(소유권 검증 포함). */
+    @Retryable(
+            retryFor = ConcurrencyFailureException.class,
+            maxAttempts = 3,
+            backoff = @Backoff(delay = 100))
+    public OrderResponse advanceForSeller(Long shipmentId, Long sellerId, ShipmentStatus next,
+            Long changedBy, String courier, String trackingNumber) {
+        return worker.advanceForSeller(shipmentId, sellerId, next, changedBy, courier, trackingNumber);
+    }
+
+    /** ADMIN이 지정 주문의 shipment를 전진(플랫폼 null 버킷 포함). */
+    @Retryable(
+            retryFor = ConcurrencyFailureException.class,
+            maxAttempts = 3,
+            backoff = @Backoff(delay = 100))
+    public OrderResponse advanceForAdmin(Long orderId, Long shipmentId, ShipmentStatus next,
+            Long changedBy, String courier, String trackingNumber) {
+        return worker.advanceForAdmin(orderId, shipmentId, next, changedBy, courier, trackingNumber);
+    }
 }
