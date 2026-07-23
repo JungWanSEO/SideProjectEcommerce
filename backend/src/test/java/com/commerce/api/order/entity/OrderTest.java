@@ -1,10 +1,14 @@
 package com.commerce.api.order.entity;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.commerce.api.global.exception.BusinessException;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 /**
  * Order 엔티티 — 쿠폰 할인의 항목별 안분(discountShares) 단위 테스트 (쿠폰 Step 2b).
@@ -201,5 +205,74 @@ class OrderTest {
         order.getShipments().get(1).advanceShipping(ShipmentStatus.SHIPPING, 8L, "CJ", "2");
         order.recomputeStatusFromShipments(8L, "CJ 2");
         assertThat(order.getStatusHistory()).hasSize(base + 1);   // rollup 여전히 SHIPPING → 주문 이력 불변
+    }
+
+    // === #1 P4: shipment-grain 취소 ===================================================
+
+    private Shipment shipmentOfSeller(Order order, Long sellerId) {
+        return order.getShipments().stream().filter(s -> s.belongsToSeller(sellerId)).findFirst().orElseThrow();
+    }
+
+    @Test
+    @DisplayName("cancel(부분) - 출고된 셀러 항목은 남고 미출고 셀러만 취소, 주문은 SHIPPING 유지")
+    void cancel_partial_keepsShippedSeller() {
+        OrderItem s1 = item(1L, 5000L);
+        OrderItem s2 = item(2L, 4000L);
+        Order order = orderWith(s1, s2);
+        order.markPaid();
+        shipmentOfSeller(order, 1L).advanceShipping(ShipmentStatus.SHIPPING, null, "CJ", "1");
+        order.recomputeStatusFromShipments(null, null);   // 셀러1 출고 → 주문 SHIPPING
+
+        List<OrderItem> cancelled = order.cancel(100L, "부분취소");
+
+        assertThat(cancelled).containsExactly(s2);           // 미출고 셀러2 항목만 취소
+        assertThat(s1.isActive()).isTrue();                  // 출고된 셀러1 항목은 남음
+        assertThat(s2.isActive()).isFalse();
+        assertThat(shipmentOfSeller(order, 2L).getStatus()).isEqualTo(ShipmentStatus.CANCELLED);  // 셀러2 shipment 취소
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.SHIPPING);   // 셀러1 여전히 배송중
+    }
+
+    @Test
+    @DisplayName("cancel(전부 출고) - 모든 셀러가 출고 시작이면 409")
+    void cancel_allShipped_conflict() {
+        Order order = orderWith(item(1L, 5000L), item(2L, 4000L));
+        order.markPaid();
+        order.advanceShipping(OrderStatus.SHIPPING);   // 두 shipment 모두 SHIPPING
+
+        assertThatThrownBy(() -> order.cancel(100L, "취소시도"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("배송이 시작");
+    }
+
+    @Test
+    @DisplayName("cancelItem - 출고 시작된 셀러 항목은 409")
+    void cancelItem_shipped_blocked() {
+        OrderItem s1 = item(1L, 5000L);
+        Order order = orderWith(s1, item(2L, 4000L));
+        order.markPaid();
+        ReflectionTestUtils.setField(s1, "id", 500L);
+        shipmentOfSeller(order, 1L).advanceShipping(ShipmentStatus.SHIPPING, null, "CJ", "1");
+
+        assertThatThrownBy(() -> order.cancelItem(500L, 100L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("배송이 시작");
+    }
+
+    @Test
+    @DisplayName("cancelItem - 셀러의 마지막 활성 항목 취소 시 그 shipment도 CANCELLED, 전부 취소면 주문 CANCELLED")
+    void cancelItem_lastSellerItem_cancelsShipmentAndOrder() {
+        OrderItem s1 = item(1L, 5000L);
+        OrderItem s2 = item(2L, 4000L);
+        Order order = orderWith(s1, s2);
+        order.markPaid();
+        ReflectionTestUtils.setField(s1, "id", 500L);
+        ReflectionTestUtils.setField(s2, "id", 501L);
+
+        order.cancelItem(500L, 100L);   // 셀러1 마지막 항목
+        assertThat(shipmentOfSeller(order, 1L).getStatus()).isEqualTo(ShipmentStatus.CANCELLED);
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.PAID);   // 셀러2 아직 PAID
+
+        order.cancelItem(501L, 100L);   // 셀러2 마지막 항목 → 전부 취소
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
     }
 }

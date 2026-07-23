@@ -13,7 +13,6 @@ import com.commerce.api.order.entity.Order;
 import com.commerce.api.order.entity.OrderItem;
 import com.commerce.api.order.entity.OrderStatus;
 import com.commerce.api.order.repository.OrderRepository;
-import com.commerce.api.product.repository.ProductOptionRepository;
 import com.commerce.api.product.service.StockReservationService;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -38,8 +37,7 @@ public class OrderService {
 
     private final OrderProcessor orderProcessor;
     private final OrderRepository orderRepository;
-    private final ProductOptionRepository productOptionRepository;   // 재고 원자 복원(#2)
-    private final StockReservationService stockReservationService;   // 예약 해제(#2)
+    private final StockReservationService stockReservationService;   // 예약 해제·항목별 재고 되돌리기(#2·#1)
 
     /**
      * 주문 생성. 동시 재고 차감으로 낙관적 락 충돌이 나면 최대 3회까지 (새 트랜잭션으로) 재시도.
@@ -168,48 +166,31 @@ public class OrderService {
     }
 
     /**
-     * 주문 취소: 상태를 CANCELLED로 바꾸고, 결제 완료(PAID)였던 주문이면 차감했던 재고를 복원한다.
-     * (PENDING 주문은 재고가 차감된 적 없으므로 복원하지 않는다.) 본인 주문이거나 ADMIN일 때만 허용.
+     * 주문 취소(#1 c안): 아직 출고 전인 활성 항목을 취소하고, <b>취소된 각 항목의 재고를 항목별로 되돌린다</b>
+     * (예약 상태로 판정 — CONSUMED면 실재고 복원, ACTIVE면 예약 해제). 출고 시작된 셀러 항목은 남는다(부분 취소).
+     * 본인 주문이거나 ADMIN일 때만 허용. 취소 가능한 항목이 하나도 없으면 409.
      */
     @Transactional
     public OrderResponse cancel(Long id, Long requesterId, boolean admin) {
         Order order = findOwnedOrder(id, requesterId, admin);
-        boolean wasPaid = order.isPaid();   // 상태를 바꾸기 전에 결제 여부 확인
-        order.cancel(requesterId, admin ? "관리자 취소" : "주문자 취소");   // 이미 취소된 주문이면 예외
-
-        if (wasPaid) {
-            // 결제 완료 → 예약은 결제 시 이미 소진(실차감)됐으므로, <b>실재고</b>를 원자적으로 복원한다.
-            //   단 이미 항목단위로 취소(cancelItem)된 항목은 그때 복원했으므로 <b>활성 항목만</b> — 안 그러면 이중 복원.
-            for (OrderItem item : order.getOrderItems()) {
-                if (item.isActive()) {
-                    productOptionRepository.restore(item.getOptionId(), item.getQuantity());
-                }
-            }
-        } else {
-            // 미결제(PENDING) → 실재고는 차감된 적 없고 <b>예약(reserved)만 잡혀</b> 있으므로 예약을 해제한다.
-            //   (활성 예약만 ACTIVE로 남아 있어 이미 항목취소된 몫은 자동 제외된다.)
-            stockReservationService.releaseForOrder(id);
+        // 취소된 항목만 정확히 되돌린다(이미 취소됐거나 출고된 항목은 대상 아님 — 이중 복원 방지).
+        for (OrderItem item : order.cancel(requesterId, admin ? "관리자 취소" : "주문자 취소")) {
+            stockReservationService.undoForOrderItem(item.getId());
         }
         return OrderResponse.from(order);
     }
 
     /**
      * 주문 항목 단위 취소(부분환불의 주문/재고 부분). 본인 주문이거나 ADMIN만.
-     * 항목을 CANCELLED로 만들고, 결제 완료(PAID)였던 주문이면 그 항목 수량만큼 재고를 복원한다.
-     * (PG 부분 환불은 호출자=PaymentService가 이어서 처리. 순환 의존 회피.)
+     * 항목을 CANCELLED로 만들고, <b>그 항목의 재고를 예약 상태로 되돌린다</b>(CONSUMED→실재고 복원 / ACTIVE→예약 해제).
+     * 전체 Order.status가 아니라 항목별 실차감 여부로 판정해, 멀티셀러에서 다른 셀러가 출고해 주문이 PAID를 벗어나도
+     * 이 항목 재고가 정확히 돌아온다. (PG 부분 환불은 호출자=PaymentService가 이어서 처리 — 순환 의존 회피.)
      */
     @Transactional
     public OrderResponse cancelItem(Long orderId, Long orderItemId, Long requesterId, boolean admin) {
         Order order = findOwnedOrder(orderId, requesterId, admin);
-        boolean wasPaid = order.isPaid();
-        OrderItem cancelled = order.cancelItem(orderItemId, requesterId);   // 항목 CANCELLED(+전부 취소면 주문도 CANCELLED)
-        if (wasPaid) {
-            // 결제 완료 → 그 항목 실재고 복원(예약은 이미 소진됨).
-            productOptionRepository.restore(cancelled.getOptionId(), cancelled.getQuantity());
-        } else {
-            // 미결제(PENDING) → 그 항목 예약만 정확히 해제.
-            stockReservationService.releaseForOrderItem(cancelled.getId());
-        }
+        OrderItem cancelled = order.cancelItem(orderItemId, requesterId);   // shipment-grain 취소 가능 판정 + rollup
+        stockReservationService.undoForOrderItem(cancelled.getId());
         return OrderResponse.from(order);
     }
 

@@ -240,44 +240,98 @@ public class Order extends BaseEntity {
         return shares;
     }
 
-    /** 주문 취소 (이미 취소된 주문·배송 시작된 주문은 불가). 주체/사유 미상(시스템·내부 호출). */
-    public void cancel() {
-        cancel(null, null);
-    }
-
-    /** 주문 취소 + 이력 기록 — changedBy(취소한 회원, 시스템이면 null)·memo(사유). */
-    public void cancel(Long changedBy, String memo) {
-        if (this.status == OrderStatus.CANCELLED) {
-            throw new BusinessException(HttpStatus.CONFLICT, "이미 취소된 주문입니다.");
-        }
-        ensureCancellable();
-        OrderStatus from = this.status;
-        this.status = OrderStatus.CANCELLED;
-        recordHistory(from, OrderStatus.CANCELLED, changedBy, memo);
+    /** 주문 취소 — 주체/사유 미상(시스템·내부 호출). 취소한 항목 목록 반환. */
+    public List<OrderItem> cancel() {
+        return cancel(null, null);
     }
 
     /**
-     * 항목 단위 취소(부분환불). 해당 항목을 CANCELLED로 만들고, 남은 활성 항목이 없으면 주문도 CANCELLED.
-     * 취소된 항목을 반환한다(환불 금액·셀러 식별용). 없는 항목이면 404, 이미 취소면 409, 배송 시작됐으면 409.
+     * 주문 취소(#1 c안) — 아직 <b>출고 전</b>(shipment PAID 또는 미결제)인 활성 항목을 모두 취소한다.
+     * 이미 출고된 셀러 항목은 남고(부분 취소), 취소 가능한 항목이 하나도 없으면 409. 취소한 항목 목록을 반환한다
+     * (재고 되돌리기·환불 금액 산정용 — 호출자 OrderService/PaymentService가 이 집합에만 재고 복원/환불을 적용).
      */
+    public List<OrderItem> cancel(Long changedBy, String memo) {
+        if (this.status == OrderStatus.CANCELLED) {
+            throw new BusinessException(HttpStatus.CONFLICT, "이미 취소된 주문입니다.");
+        }
+        List<OrderItem> activeItems = orderItems.stream().filter(OrderItem::isActive).toList();
+        List<OrderItem> cancellable = activeItems.stream().filter(this::isItemCancellable).toList();
+        // 활성 항목이 있는데 하나도 취소할 수 없다(전부 출고) → 409. (항목 자체가 없는 주문은 그대로 취소.)
+        if (!activeItems.isEmpty() && cancellable.isEmpty()) {
+            throw new BusinessException(HttpStatus.CONFLICT, "배송이 시작되어 취소할 수 있는 항목이 없습니다.");
+        }
+        for (OrderItem item : cancellable) {
+            cancelItemInternal(item, changedBy);
+        }
+        applyCancellationRollup(changedBy, memo);
+        return cancellable;
+    }
+
+    /** 항목 단위 취소 — 주체 미상. */
     public OrderItem cancelItem(Long orderItemId) {
         return cancelItem(orderItemId, null);
     }
 
-    /** 항목 단위 취소 + (주문 전체가 취소되면) 이력 기록. changedBy = 취소한 회원(시스템이면 null). */
+    /**
+     * 항목 단위 취소(부분환불, #1 c안) — 그 항목의 셀러 shipment가 <b>미출고(PAID)</b>이거나 shipment 없음(PENDING)일 때만.
+     * 출고 시작(SHIPPING/DELIVERED)됐으면 409. 셀러의 마지막 활성 항목이면 그 shipment도 CANCELLED가 되고,
+     * 모든 shipment(또는 PENDING의 모든 항목)가 취소되면 주문도 CANCELLED로 rollup된다. 취소된 항목을 반환한다.
+     */
     public OrderItem cancelItem(Long orderItemId, Long changedBy) {
-        ensureCancellable();
         OrderItem target = orderItems.stream()
                 .filter(i -> orderItemId.equals(i.getId()))
                 .findFirst()
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "주문 항목을 찾을 수 없습니다."));
-        OrderStatus from = this.status;
-        target.cancel();
-        if (orderItems.stream().noneMatch(OrderItem::isActive)) {
-            this.status = OrderStatus.CANCELLED;   // 모든 항목 취소 → 주문도 취소
-            recordHistory(from, OrderStatus.CANCELLED, changedBy, "전체 항목 취소");
+        if (target.getStatus() == OrderItemStatus.CANCELLED) {
+            throw new BusinessException(HttpStatus.CONFLICT, "이미 취소된 주문 항목입니다.");
         }
+        if (!isItemCancellable(target)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "배송이 시작된 항목은 취소할 수 없습니다.");
+        }
+        cancelItemInternal(target, changedBy);
+        applyCancellationRollup(changedBy, "항목 취소");
         return target;
+    }
+
+    /** 항목을 CANCELLED로 만들고, 그 셀러의 남은 활성 항목이 없으면 그 셀러 shipment도 취소한다(내부 공통). */
+    private void cancelItemInternal(OrderItem item, Long changedBy) {
+        item.cancel();
+        Shipment shipment = shipmentForItem(item);
+        if (shipment != null && shipment.getStatus() == ShipmentStatus.PAID) {
+            boolean sellerHasActive = orderItems.stream()
+                    .filter(OrderItem::isActive)
+                    .anyMatch(i -> java.util.Objects.equals(i.getSellerId(), item.getSellerId()));
+            if (!sellerHasActive) {
+                shipment.cancel(changedBy, "셀러 항목 전량 취소");
+            }
+        }
+    }
+
+    /** 취소 후 주문 상태 재계산 — shipment가 있으면 rollup, 없으면(PENDING) 활성 항목이 0이 되면 CANCELLED. */
+    private void applyCancellationRollup(Long changedBy, String memo) {
+        if (!shipments.isEmpty()) {
+            recomputeStatusFromShipments(changedBy, memo);
+            return;
+        }
+        if (this.status != OrderStatus.CANCELLED && orderItems.stream().noneMatch(OrderItem::isActive)) {
+            OrderStatus from = this.status;
+            this.status = OrderStatus.CANCELLED;
+            recordHistory(from, OrderStatus.CANCELLED, changedBy, memo);
+        }
+    }
+
+    /** 그 항목이 취소 가능한가 — shipment 없음(PENDING)이거나, 그 셀러 shipment가 아직 미출고(PAID)면 가능. */
+    private boolean isItemCancellable(OrderItem item) {
+        Shipment shipment = shipmentForItem(item);
+        return shipment == null || shipment.getStatus() == ShipmentStatus.PAID;
+    }
+
+    /** 이 항목이 속한 셀러의 shipment(없으면 null — PENDING). null(플랫폼 버킷) null-safe 매칭. */
+    private Shipment shipmentForItem(OrderItem item) {
+        return shipments.stream()
+                .filter(s -> s.belongsToSeller(item.getSellerId()))
+                .findFirst()
+                .orElse(null);
     }
 
     /** 결제 완료 처리 (PENDING → PAID). 결제 대기 상태가 아니면 예외. 결제 시점에 셀러별 shipment를 팬아웃 생성한다(#1 P2). */
@@ -425,17 +479,5 @@ public class Order extends BaseEntity {
         boolean anyStarted = active.stream()
                 .anyMatch(s -> s.getStatus() == ShipmentStatus.SHIPPING || s.getStatus() == ShipmentStatus.DELIVERED);
         return anyStarted ? OrderStatus.SHIPPING : OrderStatus.PAID;
-    }
-
-    /** 취소 가능 상태인지 — 배송이 시작(SHIPPING)되거나 완료(DELIVERED)된 주문은 취소할 수 없다(409). */
-    private void ensureCancellable() {
-        if (this.status == OrderStatus.SHIPPING || this.status == OrderStatus.DELIVERED) {
-            throw new BusinessException(HttpStatus.CONFLICT, "배송이 시작된 주문은 취소할 수 없습니다.");
-        }
-    }
-
-    /** 결제 완료(재고가 차감된) 주문인지 — 취소 시 재고 복원 여부 판단에 사용. */
-    public boolean isPaid() {
-        return this.status == OrderStatus.PAID;
     }
 }

@@ -15,4 +15,10 @@ public interface StockReservationRepository extends JpaRepository<StockReservati
 
     /** 이 주문 항목의 특정 상태 예약들(항목 단위 부분취소 시 그 항목 예약만 정확히 해제). */
     List<StockReservation> findByOrderItemIdAndStatus(Long orderItemId, StockReservationStatus status);
+
+    /**
+     * 이 주문 항목의 예약 전부(상태 무관) — 항목 취소 시 예약 상태로 실재고 복원(CONSUMED) vs 예약 해제(ACTIVE)를
+     * 가르는 데 쓴다(#1 P4). 전체 Order.status가 아니라 항목별 실차감 여부로 판정해 멀티셀러 재고 누락을 막는다.
+     */
+    List<StockReservation> findByOrderItemId(Long orderItemId);
 }
