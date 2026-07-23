@@ -24,10 +24,8 @@ public record OrderResponse(
         String couponCode,        // 적용된 쿠폰 코드 (없으면 null)
         List<OrderItemResponse> items,
         ShippingResponse shipping,   // 배송지 스냅샷 (없으면 null)
-        String courier,              // 택배사 (배송 시작 후, 없으면 null)
-        String trackingNumber,       // 운송장 번호 (없으면 null)
         List<StatusHistoryResponse> statusHistory,   // 주문 상태 타임라인 (발생 순, shipment rollup 파생)
-        List<ShipmentResponse> shipments,            // 셀러별 배송 단위(#1 c안) — 상태·송장. 결제 전(PENDING)은 빈 목록
+        List<ShipmentResponse> shipments,            // 셀러별 배송 단위(#1 c안) — 상태·송장(택배사/운송장은 여기에). 결제 전(PENDING)은 빈 목록
         LocalDateTime createdAt
 ) {
     public static OrderResponse from(Order order) {
@@ -52,8 +50,6 @@ public record OrderResponse(
                 order.getCouponCode(),
                 items,
                 ShippingResponse.from(order.getShippingInfo()),
-                order.getCourier(),
-                order.getTrackingNumber(),
                 history,
                 shipments,
                 order.getCreatedAt()

@@ -80,7 +80,7 @@ class OrderControllerTest {
                 List.of(new OrderItemResponse(
                         100L, 1L, 10L, 7L, 3L, "반팔티셔츠", "M", 10000L, 3, 30000L, 0L, OrderItemStatus.ACTIVE)),
                 null,   // shipping (배송지 없음 — 컨트롤러 슬라이스 테스트엔 불필요)
-                null, null, List.of(), List.of(),   // courier, trackingNumber, statusHistory, shipments
+                List.of(), List.of(),   // statusHistory, shipments (송장은 shipments에)
                 LocalDateTime.now());
     }
 

@@ -123,7 +123,8 @@ class OrderTest {
         assertThat(order.backfillShipments()).isTrue();
         assertThat(order.getShipments()).hasSize(2);
         assertThat(order.getShipments()).allMatch(s -> s.getStatus() == ShipmentStatus.SHIPPING); // 상태 상속
-        assertThat(order.getShipments()).allMatch(s -> "CJ".equals(s.getCourier()));              // 송장 복제
+        // 레거시 주문은 셀러별 개별 송장 정보가 없으므로 백필은 courier/tracking을 비운다(orders 단일 송장 컬럼은 P6 DROP).
+        assertThat(order.getShipments()).allMatch(s -> s.getCourier() == null);
 
         assertThat(order.backfillShipments()).isFalse();   // 이미 있음 → 멱등 no-op
         assertThat(order.getShipments()).hasSize(2);

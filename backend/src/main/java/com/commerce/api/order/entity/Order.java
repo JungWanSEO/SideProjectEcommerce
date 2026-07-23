@@ -94,13 +94,7 @@ public class Order extends BaseEntity {
     @Column(name = "idempotency_key", unique = true, length = 80)
     private String idempotencyKey;
 
-    /** 택배사 (배송 시작 시 입력, 없으면 null). */
-    @Column(length = 40)
-    private String courier;
-
-    /** 운송장 번호 (배송 시작 시 입력, 없으면 null). */
-    @Column(name = "tracking_number", length = 60)
-    private String trackingNumber;
+    // 택배사·운송장은 주문 단위가 아니라 셀러별 shipment에 있다(#1 c안 P6에서 orders 컬럼 DROP·V46).
 
     /**
      * 상태 이력 (애그리거트 내부 — 전이마다 append). append-only라 정렬은 id 오름차순(발생 순).
@@ -386,7 +380,7 @@ public class Order extends BaseEntity {
             return false;
         }
         for (Long sellerId : distinctActiveSellerIds()) {
-            this.shipments.add(Shipment.forBackfill(this, sellerId, target, this.courier, this.trackingNumber));
+            this.shipments.add(Shipment.forBackfill(this, sellerId, target));   // 레거시 주문은 셀러별 송장 정보가 없다
         }
         return !shipments.isEmpty();
     }
@@ -427,10 +421,7 @@ public class Order extends BaseEntity {
         if (advanced == 0) {
             throw shippingConflict(next);   // 전진 가능한 shipment 없음(건너뛰기·되돌리기·미결제 등)
         }
-        if (next == OrderStatus.SHIPPING) {
-            this.courier = courier;                 // 잔존 order-level 필드(P6 제거 전 응답 back-compat)
-            this.trackingNumber = trackingNumber;
-        }
+        // 송장은 각 shipment에 저장됐다(order-level courier/tracking 컬럼은 P6에서 제거).
         recomputeStatusFromShipments(changedBy, shippingMemo(next, courier, trackingNumber));
     }
 

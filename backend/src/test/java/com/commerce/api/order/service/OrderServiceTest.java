@@ -299,9 +299,11 @@ class OrderServiceTest {
         OrderResponse response = orderService.advanceShipping(
                 1L, OrderStatus.SHIPPING, 9L, "CJ대한통운", "1234567890");
 
-        assertThat(response.courier()).isEqualTo("CJ대한통운");
-        assertThat(response.trackingNumber()).isEqualTo("1234567890");
-        // 타임라인: 생성(PENDING) → PAID → SHIPPING(주체 9·송장 메모)
+        // 송장은 이제 셀러별 shipment에 저장된다(#1 c안)
+        assertThat(response.shipments()).anyMatch(
+                s -> "CJ대한통운".equals(s.courier()) && "1234567890".equals(s.trackingNumber())
+                        && s.status() == com.commerce.api.order.entity.ShipmentStatus.SHIPPING);
+        // 주문 타임라인: 생성(PENDING) → PAID → SHIPPING(rollup·주체 9·송장 메모)
         assertThat(response.statusHistory()).extracting(r -> r.toStatus())
                 .containsExactly(OrderStatus.PENDING, OrderStatus.PAID, OrderStatus.SHIPPING);
         var shipEvent = response.statusHistory().get(2);

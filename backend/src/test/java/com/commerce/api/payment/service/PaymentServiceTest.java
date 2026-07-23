@@ -69,13 +69,13 @@ class PaymentServiceTest {
     /** 취소 후 남은 활성 실효가(payable)를 명시 — 부분 취소(출고분 잔존) 시나리오용. */
     private OrderResponse order(Long id, Long memberId, OrderStatus status, long total, long payable) {
         return new OrderResponse(id, memberId, status, total, 0L, payable, null, List.of(), null,
-                null, null, List.of(), List.of(), LocalDateTime.now());
+                List.of(), List.of(), LocalDateTime.now());
     }
 
     /** 쿠폰 할인이 적용된 주문(gross=total, 할인=discount → payable=total-discount). */
     private OrderResponse discountedOrder(Long id, Long memberId, OrderStatus status, long total, long discount) {
         return new OrderResponse(id, memberId, status, total, discount, total - discount, "WELCOME5000",
-                List.of(), null, null, null, List.of(), List.of(), LocalDateTime.now());
+                List.of(), null, List.of(), List.of(), LocalDateTime.now());
     }
 
     private PaymentRequest request() {
@@ -262,7 +262,7 @@ class PaymentServiceTest {
                 OrderItemStatus.CANCELLED);
         return new OrderResponse(1L, 100L, status, subtotal, discountShare, subtotal - discountShare,
                 discountShare > 0 ? "WELCOME5000" : null, List.of(item), null,
-                null, null, List.of(), List.of(), LocalDateTime.now());
+                List.of(), List.of(), LocalDateTime.now());
     }
 
     @Test
