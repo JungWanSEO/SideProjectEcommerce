@@ -110,6 +110,15 @@ public class Order extends BaseEntity {
     @jakarta.persistence.OrderBy("id asc")
     private List<OrderStatusHistory> statusHistory = new ArrayList<>();
 
+    /**
+     * 셀러별 배송 단위(#1 c안 — 애그리거트 내부). 결제 시점에 활성 항목을 sellerId로 팬아웃해 생성한다(P2).
+     * PENDING 주문은 비어 있다. {@link #status}는 이 shipment들의 rollup으로 재계산되는 파생값(P3).
+     * <p>P1(현재)은 읽기 매핑만 — 생성/전이/rollup은 후속 phase에서 연결한다.
+     */
+    @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
+    @jakarta.persistence.OrderBy("id asc")
+    private List<Shipment> shipments = new ArrayList<>();
+
     private Order(Long memberId) {
         this.memberId = memberId;
         this.status = OrderStatus.PENDING;   // 생성 시점 = 결제 대기
