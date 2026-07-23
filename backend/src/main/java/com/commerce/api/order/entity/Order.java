@@ -280,13 +280,61 @@ public class Order extends BaseEntity {
         return target;
     }
 
-    /** 결제 완료 처리 (PENDING → PAID). 결제 대기 상태가 아니면 예외. */
+    /** 결제 완료 처리 (PENDING → PAID). 결제 대기 상태가 아니면 예외. 결제 시점에 셀러별 shipment를 팬아웃 생성한다(#1 P2). */
     public void markPaid() {
         if (this.status != OrderStatus.PENDING) {
             throw new BusinessException(HttpStatus.CONFLICT, "결제 대기 상태의 주문만 결제할 수 있습니다.");
         }
         this.status = OrderStatus.PAID;
         recordHistory(OrderStatus.PENDING, OrderStatus.PAID, null, "결제 완료");
+        createShipmentsForPayment();
+    }
+
+    /** 활성 항목의 셀러별 distinct 집합(insertion 순서 유지, null=플랫폼 버킷 포함) — shipment 팬아웃의 그룹 키. */
+    private java.util.Set<Long> distinctActiveSellerIds() {
+        java.util.Set<Long> sellers = new java.util.LinkedHashSet<>();   // null 키 1개 허용(플랫폼 버킷)
+        for (OrderItem item : orderItems) {
+            if (item.isActive()) {
+                sellers.add(item.getSellerId());
+            }
+        }
+        return sellers;
+    }
+
+    /**
+     * 결제 시점 팬아웃(#1 P2) — 활성 항목을 셀러별로 묶어 shipment 1건씩(status=PAID) 생성한다.
+     * 전량 취소된 셀러는 활성 항목이 없어 shipment가 안 생긴다(정산 활성-항목 기준과 정합).
+     */
+    private void createShipmentsForPayment() {
+        for (Long sellerId : distinctActiveSellerIds()) {
+            this.shipments.add(Shipment.forPayment(this, sellerId));
+        }
+    }
+
+    /**
+     * 백필(#1 P2) — shipment 없는 기존 PURCHASED 주문에 <b>현재 주문 상태를 상속</b>한 shipment를 소급 생성한다.
+     * per-order 멱등(이미 shipment가 있으면 no-op)이라 재실행에 안전. PENDING(shipment 없음)·CANCELLED(생략)는 건너뛴다.
+     * SHIPPING/DELIVERED면 주문 단위 송장(courier/tracking)을 각 shipment에 복제한다(상태 동일 상속이라 무해).
+     *
+     * @return 이번 호출로 shipment를 생성했으면 true(백필 대상이었음)
+     */
+    public boolean backfillShipments() {
+        if (!shipments.isEmpty()) {
+            return false;   // per-order 멱등
+        }
+        ShipmentStatus target = switch (this.status) {
+            case PAID -> ShipmentStatus.PAID;
+            case SHIPPING -> ShipmentStatus.SHIPPING;
+            case DELIVERED -> ShipmentStatus.DELIVERED;
+            case PENDING, CANCELLED -> null;   // PENDING=shipment 없음, CANCELLED=출고 무의미라 생략
+        };
+        if (target == null) {
+            return false;
+        }
+        for (Long sellerId : distinctActiveSellerIds()) {
+            this.shipments.add(Shipment.forBackfill(this, sellerId, target, this.courier, this.trackingNumber));
+        }
+        return !shipments.isEmpty();
     }
 
     /** 배송 상태 전진(ADMIN) — 송장·주체 없이(기존 호출 호환). */

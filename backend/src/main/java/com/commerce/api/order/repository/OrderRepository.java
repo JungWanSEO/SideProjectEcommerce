@@ -49,4 +49,15 @@ public interface OrderRepository extends JpaRepository<Order, Long>, OrderReposi
     /** 상태별 주문 수 — [status, count] 행 목록. 서비스가 모든 enum 값으로 0 채워 분포를 만든다. */
     @Query("select o.status, count(o) from Order o group by o.status")
     List<Object[]> countGroupByStatus();
+
+    /**
+     * shipment가 아직 없는 PURCHASED(PAID/SHIPPING/DELIVERED) 주문 — #1 P2 백필 대상.
+     * per-order 멱등: 이미 shipment가 있는 주문(P2 이후 결제분)은 제외해 재실행에 안전하다.
+     */
+    @Query("select o from Order o where o.status in "
+            + "(com.commerce.api.order.entity.OrderStatus.PAID, "
+            + "com.commerce.api.order.entity.OrderStatus.SHIPPING, "
+            + "com.commerce.api.order.entity.OrderStatus.DELIVERED) "
+            + "and not exists (select 1 from Shipment s where s.order = o)")
+    List<Order> findPurchasedWithoutShipments();
 }

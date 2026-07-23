@@ -80,11 +80,11 @@ public class Shipment extends BaseEntity {
     @jakarta.persistence.OrderBy("id asc")
     private List<ShipmentStatusHistory> statusHistory = new ArrayList<>();
 
-    private Shipment(Order order, Long sellerId) {
+    private Shipment(Order order, Long sellerId, ShipmentStatus initialStatus, String memo) {
         this.order = order;
         this.sellerId = sellerId;
-        this.status = ShipmentStatus.PAID;   // 결제 시점 생성 = 출고 대기
-        recordHistory(null, ShipmentStatus.PAID, null, "결제 완료 · 출고 대기");
+        this.status = initialStatus;
+        recordHistory(null, initialStatus, null, memo);
     }
 
     /**
@@ -92,7 +92,22 @@ public class Shipment extends BaseEntity {
      * {@link Order#markPaid()}가 셀러별로 호출한다(P2).
      */
     public static Shipment forPayment(Order order, Long sellerId) {
-        return new Shipment(order, sellerId);
+        return new Shipment(order, sellerId, ShipmentStatus.PAID, "결제 완료 · 출고 대기");
+    }
+
+    /**
+     * 백필(P2) — shipment 없는 기존 PURCHASED 주문에 <b>현재 주문 상태를 상속</b>한 shipment를 소급 생성한다
+     * ({@link Order#backfillShipments()}가 호출). 이력은 단일 항목(null→status, "백필"). SHIPPING/DELIVERED면
+     * 주문 단위 송장을 복제한다(상태 동일 상속이라 무해 — 과거 주문은 셀러별 개별 송장 정보가 없다).
+     */
+    public static Shipment forBackfill(Order order, Long sellerId, ShipmentStatus status,
+                                       String courier, String trackingNumber) {
+        Shipment s = new Shipment(order, sellerId, status, "백필(기존 주문 상태 소급)");
+        if (status == ShipmentStatus.SHIPPING || status == ShipmentStatus.DELIVERED) {
+            s.courier = courier;
+            s.trackingNumber = trackingNumber;
+        }
+        return s;
     }
 
     /** 상태 이력 1건 append — 모든 전이 메서드가 상태를 바꾼 뒤 이걸 호출한다(불변식). */

@@ -78,4 +78,62 @@ class OrderTest {
         assertThat(shares.get(a)).isZero();
         assertThat(shares.get(b)).isZero();
     }
+
+    // === #1 P2: 결제 팬아웃 · 백필 =====================================================
+
+    @Test
+    @DisplayName("markPaid - 활성 항목을 셀러별로 팬아웃해 shipment 생성(플랫폼 null 버킷 포함, 모두 PAID)")
+    void markPaid_fansOutShipmentsBySeller() {
+        Order order = orderWith(item(1L, 5000L), item(1L, 3000L), item(2L, 4000L), item(null, 2000L));
+
+        order.markPaid();
+
+        // 셀러1(항목 2개→1건), 셀러2, 플랫폼(null) → 셀러당 shipment 1건 = 3건
+        assertThat(order.getShipments()).hasSize(3);
+        assertThat(order.getShipments()).extracting(Shipment::getSellerId)
+                .containsExactlyInAnyOrder(1L, 2L, null);
+        assertThat(order.getShipments()).allMatch(s -> s.getStatus() == ShipmentStatus.PAID);
+    }
+
+    @Test
+    @DisplayName("markPaid - 전량 취소된 셀러는 shipment 없음(활성 항목 기준, 정산과 정합)")
+    void markPaid_skipsFullyCancelledSeller() {
+        OrderItem s1 = item(1L, 5000L);
+        OrderItem s2 = item(2L, 4000L);
+        Order order = orderWith(s1, s2);
+        s2.cancel();   // 셀러2 항목 PENDING 중 취소
+
+        order.markPaid();
+
+        assertThat(order.getShipments()).extracting(Shipment::getSellerId).containsExactly(1L);
+    }
+
+    @Test
+    @DisplayName("backfillShipments - 현재 상태 상속 + 송장 복제, per-order 멱등")
+    void backfill_inheritsStatusAndIdempotent() {
+        Order order = orderWith(item(1L, 5000L), item(2L, 4000L));
+        order.markPaid();
+        order.advanceShipping(OrderStatus.SHIPPING, null, "CJ", "1234");
+        order.getShipments().clear();   // 레거시(P2 이전) 시뮬 — shipment 없음
+
+        assertThat(order.backfillShipments()).isTrue();
+        assertThat(order.getShipments()).hasSize(2);
+        assertThat(order.getShipments()).allMatch(s -> s.getStatus() == ShipmentStatus.SHIPPING); // 상태 상속
+        assertThat(order.getShipments()).allMatch(s -> "CJ".equals(s.getCourier()));              // 송장 복제
+
+        assertThat(order.backfillShipments()).isFalse();   // 이미 있음 → 멱등 no-op
+        assertThat(order.getShipments()).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("backfillShipments - CANCELLED 주문은 생략(출고 무의미)")
+    void backfill_skipsCancelled() {
+        Order order = orderWith(item(1L, 5000L));
+        order.markPaid();
+        order.getShipments().clear();
+        order.cancel();   // PAID → CANCELLED
+
+        assertThat(order.backfillShipments()).isFalse();
+        assertThat(order.getShipments()).isEmpty();
+    }
 }
