@@ -9,6 +9,8 @@ import com.commerce.api.global.config.CacheConfig;
 import com.commerce.api.member.repository.MemberRepository;
 import com.commerce.api.order.entity.OrderStatus;
 import com.commerce.api.order.repository.OrderRepository;
+import com.commerce.api.payment.entity.PaymentStatus;
+import com.commerce.api.payment.repository.PaymentRepository;
 import com.commerce.api.product.entity.ProductStatus;
 import com.commerce.api.product.repository.ProductRepository;
 import com.commerce.api.settlement.entity.SettlementStatus;
@@ -51,6 +53,7 @@ public class DashboardService {
             List.of(ProductStatus.ON_SALE, ProductStatus.SOLD_OUT);
 
     private final OrderRepository orderRepository;
+    private final PaymentRepository paymentRepository;   // 순매출(환불 차감) KPI·추이 — #9
     private final SettlementRepository settlementRepository;
     private final MemberRepository memberRepository;
     private final ProductRepository productRepository;
@@ -62,7 +65,9 @@ public class DashboardService {
 
         Kpi kpi = new Kpi(
                 orderRepository.count(),
-                orderRepository.sumPayableAmountByStatusIn(OrderStatus.PURCHASED),
+                // 순매출(환불 차감) — 주문 gross(totalPrice−discount)는 부분취소분까지 세 결제·정산 net과 어긋난다.
+                //   PAID 결제의 amount−refundedAmount 합이 실제 받은 순매출과 일치(전액 환불은 CANCELLED로 제외).
+                paymentRepository.sumNetRevenueByStatus(PaymentStatus.PAID),
                 settlementRepository.sumNetAmountByStatus(SettlementStatus.SCHEDULED),
                 memberRepository.count(),
                 productRepository.countByStatus(ProductStatus.ON_SALE));
@@ -98,12 +103,12 @@ public class DashboardService {
                 .toList();
     }
 
-    /** 최근 range일 일별 매출 — 기간 내 PURCHASED 주문을 자바에서 일자별 합산 후 빈 날 0 채움. */
+    /** 최근 range일 일별 순매출 — 기간 내 PAID 결제의 순매출(amount−refunded)을 결제일별로 합산 후 빈 날 0 채움. */
     private List<DailyRevenue> revenueTrend(int range) {
         LocalDate today = LocalDate.now();
         LocalDate start = today.minusDays(range - 1L);
-        Map<LocalDate, Long> byDay = orderRepository
-                .findAmountsByStatusInSince(OrderStatus.PURCHASED, start.atStartOfDay()).stream()
+        Map<LocalDate, Long> byDay = paymentRepository
+                .findNetAmountsByStatusSince(PaymentStatus.PAID, start.atStartOfDay()).stream()
                 .collect(Collectors.groupingBy(
                         r -> ((LocalDateTime) r[0]).toLocalDate(),
                         Collectors.summingLong(r -> (Long) r[1])));

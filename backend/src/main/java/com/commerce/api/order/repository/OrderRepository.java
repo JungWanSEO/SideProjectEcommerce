@@ -10,7 +10,6 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
 
 /**
  * 주문 DB 접근.
@@ -44,24 +43,10 @@ public interface OrderRepository extends JpaRepository<Order, Long>, OrderReposi
             Long memberId, Collection<OrderStatus> statuses, Long productId);
 
     // === 어드민 대시보드 집계 (읽기 전용) =========================================
-
-    /**
-     * 주어진 상태들의 결제액(= totalPrice - discountAmount) 합. 대시보드 "결제완료 매출" KPI.
-     * {@code coalesce(...,0)} 으로 대상이 없을 때 null 대신 0을 돌려 primitive 언박싱 안전.
-     */
-    @Query("select coalesce(sum(o.totalPrice - o.discountAmount), 0) from Order o where o.status in :statuses")
-    long sumPayableAmountByStatusIn(@Param("statuses") Collection<OrderStatus> statuses);
+    //   매출 KPI·추이는 주문 gross(totalPrice−discount)가 부분취소를 과다계상해 결제·정산 net과 어긋나므로,
+    //   PaymentRepository의 순매출(amount−refundedAmount) 쿼리로 옮겼다(#9). 여기엔 상태 분포만 남는다.
 
     /** 상태별 주문 수 — [status, count] 행 목록. 서비스가 모든 enum 값으로 0 채워 분포를 만든다. */
     @Query("select o.status, count(o) from Order o group by o.status")
     List<Object[]> countGroupByStatus();
-
-    /**
-     * 기간 시작 이후(>=) 해당 상태들 주문의 [createdAt, 결제액] 행 — 일별 매출 추이용.
-     * 일자 그룹핑은 H2/MySQL 날짜함수 차이를 피해 <b>서비스(자바)에서</b> 한다.
-     */
-    @Query("select o.createdAt, (o.totalPrice - o.discountAmount) from Order o "
-            + "where o.status in :statuses and o.createdAt >= :from")
-    List<Object[]> findAmountsByStatusInSince(
-            @Param("statuses") Collection<OrderStatus> statuses, @Param("from") LocalDateTime from);
 }

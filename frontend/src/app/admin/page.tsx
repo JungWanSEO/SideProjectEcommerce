@@ -65,7 +65,7 @@ export default function AdminDashboardPage() {
           {/* KPI 카드 */}
           <section className="grid grid-cols-2 gap-4 lg:grid-cols-5">
             <KpiCard label="전체 주문" value={`${data.kpi.totalOrders.toLocaleString()}건`} />
-            <KpiCard label="결제완료 매출" value={formatWon(data.kpi.paidRevenue)} accent />
+            <KpiCard label="순매출 (환불 차감)" value={formatWon(data.kpi.netRevenue)} accent />
             <KpiCard label="정산 대기" value={formatWon(data.kpi.pendingSettlement)} />
             <KpiCard label="회원 수" value={`${data.kpi.memberCount.toLocaleString()}명`} />
             <KpiCard label="판매 중 상품" value={`${data.kpi.activeProductCount.toLocaleString()}개`} />
@@ -177,7 +177,7 @@ export default function AdminDashboardPage() {
           {/* 매출 추이 */}
           <section className="rounded-2xl border border-gray-200 bg-white p-5">
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-gray-500">매출 추이 (결제완료 기준)</h2>
+              <h2 className="text-sm font-semibold text-gray-500">순매출 추이 (환불 차감)</h2>
               <div className="flex gap-1">
                 {[7, 30].map((d) => (
                   <button
@@ -214,7 +214,7 @@ export default function AdminDashboardPage() {
                     width={48}
                   />
                   <Tooltip
-                    formatter={(v) => [formatWon(Number(v)), "매출"]}
+                    formatter={(v) => [formatWon(Number(v)), "순매출"]}
                     labelFormatter={(label) => String(label)}
                     contentStyle={{ borderRadius: 12, border: "1px solid #e8e0d4", fontSize: 12 }}
                   />

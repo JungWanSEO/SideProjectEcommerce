@@ -517,7 +517,7 @@ export interface CouponPreview {
 /** 상단 요약 카드 (DashboardResponse.Kpi) — 금액은 원(KRW) */
 export interface DashboardKpi {
   totalOrders: number; // 전체 주문 수
-  paidRevenue: number; // 결제완료 매출 합(PURCHASED)
+  netRevenue: number; // 순매출(환불 차감) — PAID 결제 amount−refundedAmount 합
   pendingSettlement: number; // 정산 대기 금액(SCHEDULED net 합)
   memberCount: number;
   activeProductCount: number; // 판매 중(ON_SALE) 상품 수

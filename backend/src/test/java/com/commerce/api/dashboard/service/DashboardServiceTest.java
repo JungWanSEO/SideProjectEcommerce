@@ -15,6 +15,8 @@ import com.commerce.api.order.entity.Order;
 import com.commerce.api.order.entity.OrderItem;
 import com.commerce.api.order.entity.OrderStatus;
 import com.commerce.api.order.repository.OrderRepository;
+import com.commerce.api.payment.entity.Payment;
+import com.commerce.api.payment.repository.PaymentRepository;
 import com.commerce.api.product.entity.Product;
 import com.commerce.api.product.entity.ProductStatus;
 import com.commerce.api.product.repository.ProductRepository;
@@ -43,6 +45,7 @@ class DashboardServiceTest {
 
     @Autowired private DashboardService dashboardService;
     @Autowired private OrderRepository orderRepository;
+    @Autowired private PaymentRepository paymentRepository;
     @Autowired private MemberRepository memberRepository;
     @Autowired private ProductRepository productRepository;
     @Autowired private SettlementRepository settlementRepository;
@@ -61,13 +64,20 @@ class DashboardServiceTest {
         productRepository.save(product(ProductStatus.ON_SALE));
         productRepository.save(product(ProductStatus.DISCONTINUED));
 
-        // 주문 5건: PURCHASED(PAID 20000 + SHIPPING 3000 + DELIVERED 5000) + PENDING 9999 + CANCELLED 7000
+        // 주문 5건: 상태 분포용(각 상태 +1). 매출은 이제 결제(Payment) 기준이라 주문 금액과 무관.
         orderRepository.save(paidOrder(20000L));
         orderRepository.save(shippingOrder(3000L));
         orderRepository.save(deliveredOrder(5000L));
         orderRepository.save(pendingOrder(9999L));
         orderRepository.save(cancelledOrder(7000L));
-        long knownPaidRevenue = 20000L + 3000L + 5000L;   // = 28000 (PURCHASED만)
+
+        // 순매출 = PAID 결제의 amount − refundedAmount. 부분환불은 net에 반영, 전액환불(CANCELLED)은 제외.
+        paidPayment(20000L, 0L);        // net 20000
+        paidPayment(3000L, 0L);         // net 3000
+        paidPayment(5000L, 0L);         // net 5000
+        paidPayment(10000L, 4000L);     // 부분환불 → net 6000
+        paidPayment(8000L, 8000L);      // 전액환불 → CANCELLED → 제외(net 0)
+        long knownNetRevenue = 20000L + 3000L + 5000L + 6000L;   // = 34000
 
         // 정산: SCHEDULED net 8750 (대기) + PAID_OUT net (대기 아님)
         settlementRepository.save(SettlementEntry.scheduled(
@@ -81,7 +91,7 @@ class DashboardServiceTest {
 
         // KPI 델타
         assertThat(after.kpi().totalOrders()).isEqualTo(before.kpi().totalOrders() + 5);
-        assertThat(after.kpi().paidRevenue()).isEqualTo(before.kpi().paidRevenue() + knownPaidRevenue);
+        assertThat(after.kpi().netRevenue()).isEqualTo(before.kpi().netRevenue() + knownNetRevenue);
         assertThat(after.kpi().pendingSettlement()).isEqualTo(before.kpi().pendingSettlement() + 8750L);
         assertThat(after.kpi().memberCount()).isEqualTo(before.kpi().memberCount() + 2);
         assertThat(after.kpi().activeProductCount()).isEqualTo(before.kpi().activeProductCount() + 2); // ON_SALE만
@@ -93,12 +103,12 @@ class DashboardServiceTest {
             assertThat(countOf(after, s)).isEqualTo(countOf(before, s) + 1);
         }
 
-        // 매출 추이: 7일치 연속, 마지막=오늘, 오늘 버킷이 knownPaidRevenue만큼 증가
+        // 순매출 추이: 7일치 연속, 마지막=오늘, 오늘 버킷이 knownNetRevenue만큼 증가(결제일=오늘)
         assertThat(after.revenueTrend()).hasSize(7);
         DailyRevenue lastBefore = before.revenueTrend().get(6);
         DailyRevenue lastAfter = after.revenueTrend().get(6);
         assertThat(lastAfter.date()).isEqualTo(LocalDate.now());
-        assertThat(lastAfter.revenue()).isEqualTo(lastBefore.revenue() + knownPaidRevenue);
+        assertThat(lastAfter.revenue()).isEqualTo(lastBefore.revenue() + knownNetRevenue);
     }
 
     @Test
@@ -212,6 +222,16 @@ class DashboardServiceTest {
         Order o = order(amount);
         o.cancel();
         return o;
+    }
+
+    /** PAID 결제 한 건 저장(refunded>0이면 그만큼 부분/전액 환불 — 전액이면 CANCELLED로 빠진다). */
+    private void paidPayment(long amount, long refunded) {
+        Payment p = Payment.ready(1L, amount, "MOCK", "TOSS", "dash-pay-" + seq());
+        p.markPaid("tx-" + seq());
+        if (refunded > 0) {
+            p.partialRefund(refunded);
+        }
+        paymentRepository.save(p);
     }
 
     private long countOf(DashboardResponse r, OrderStatus status) {
