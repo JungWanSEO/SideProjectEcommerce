@@ -18,7 +18,7 @@ public record DashboardResponse(
     /** 상단 요약 카드 묶음. 금액은 원(KRW) 정수. */
     public record Kpi(
             long totalOrders,        // 전체 주문 수(모든 상태)
-            long paidRevenue,        // 결제완료 매출 합(PURCHASED 상태의 결제액)
+            long netRevenue,         // 순매출(환불 차감) — PAID 결제의 amount−refundedAmount 합, 결제·정산 net과 정합
             long pendingSettlement,  // 정산 대기 금액(SCHEDULED 정산항목 netAmount 합)
             long memberCount,        // 회원 수
             long activeProductCount  // 판매 중(ON_SALE) 상품 수

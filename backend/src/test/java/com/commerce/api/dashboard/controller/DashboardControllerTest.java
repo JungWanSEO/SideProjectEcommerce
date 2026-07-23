@@ -44,7 +44,7 @@ class DashboardControllerTest {
         mockMvc.perform(get("/api/dashboard").param("days", "7"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.kpi.totalOrders").value(10))
-                .andExpect(jsonPath("$.data.kpi.paidRevenue").value(50000))
+                .andExpect(jsonPath("$.data.kpi.netRevenue").value(50000))
                 .andExpect(jsonPath("$.data.orderStatusDistribution[0].status").value("PAID"))
                 .andExpect(jsonPath("$.data.revenueTrend[0].revenue").value(50000));
     }
