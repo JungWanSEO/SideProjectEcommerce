@@ -46,6 +46,10 @@ app:
   order:
     expiry:
       enabled: false
+  # shipment 백필 러너 OFF — 기동 시 자동 소급 생성 방지(백필 로직은 ShipmentBackfillServiceTest로 직접 검증).
+  shipment:
+    backfill:
+      enabled: false
   cache:
     enabled: false
   ratelimit:

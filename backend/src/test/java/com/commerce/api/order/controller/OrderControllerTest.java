@@ -19,6 +19,7 @@ import com.commerce.api.order.dto.OrderSearchCondition;
 import com.commerce.api.order.dto.OrderSummaryResponse;
 import com.commerce.api.order.entity.OrderItemStatus;
 import com.commerce.api.order.entity.OrderStatus;
+import com.commerce.api.order.entity.ShipmentStatus;
 import com.commerce.api.order.service.OrderService;
 import com.commerce.api.payment.service.PaymentService;
 import java.time.LocalDateTime;
@@ -58,6 +59,9 @@ class OrderControllerTest {
     @MockitoBean
     private PaymentService paymentService;   // 컨트롤러가 취소를 위임하는 대상
 
+    @MockitoBean
+    private com.commerce.api.order.service.ShipmentService shipmentService;   // 배송 건 전진 위임 대상(#1 c안)
+
     @BeforeEach
     void setAuth() {
         SecurityContextHolder.getContext().setAuthentication(
@@ -76,7 +80,7 @@ class OrderControllerTest {
                 List.of(new OrderItemResponse(
                         100L, 1L, 10L, 7L, 3L, "반팔티셔츠", "M", 10000L, 3, 30000L, 0L, OrderItemStatus.ACTIVE)),
                 null,   // shipping (배송지 없음 — 컨트롤러 슬라이스 테스트엔 불필요)
-                null, null, List.of(),   // courier, trackingNumber, statusHistory
+                List.of(), List.of(),   // statusHistory, shipments (송장은 shipments에)
                 LocalDateTime.now());
     }
 
@@ -209,6 +213,21 @@ class OrderControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.status").value("SHIPPING"));
+    }
+
+    @Test
+    @DisplayName("PATCH /api/orders/{id}/shipments/{sid}/status - ADMIN 배송 건 전진 200(shipmentService 위임)")
+    void advanceShipment_admin_success() throws Exception {
+        given(shipmentService.advanceForAdmin(eq(1L), eq(9L), eq(ShipmentStatus.SHIPPING), any(), any(), any()))
+                .willReturn(sampleOrder(OrderStatus.SHIPPING));
+
+        mockMvc.perform(patch("/api/orders/1/shipments/9/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"SHIPPING\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.status").value("SHIPPING"));
+        verify(shipmentService).advanceForAdmin(eq(1L), eq(9L), eq(ShipmentStatus.SHIPPING), any(), any(), any());
     }
 
     @Test

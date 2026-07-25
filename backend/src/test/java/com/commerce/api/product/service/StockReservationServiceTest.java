@@ -123,4 +123,46 @@ class StockReservationServiceTest {
         verify(productOptionRepository).release(10L, 2);
         Assertions.assertThat(r.getStatus()).isEqualTo(StockReservationStatus.RELEASED);
     }
+
+    // === #1 P4: undoForOrderItem — 예약 상태로 복원/해제를 가른다(trap#7 차단) ===
+
+    @Test
+    @DisplayName("되돌리기 - CONSUMED(결제 실차감) 예약은 실재고 복원(restore) 후 RELEASED로 마감")
+    void undoForOrderItem_consumed_restores() {
+        StockReservation r = StockReservation.active(1L, 500L, 10L, 2, EXP);
+        r.markConsumed();   // 결제로 실차감된 상태
+        given(stockReservationRepository.findByOrderItemId(500L)).willReturn(List.of(r));
+
+        stockReservationService.undoForOrderItem(500L);
+
+        verify(productOptionRepository).restore(10L, 2);                    // 실재고 복원
+        verify(productOptionRepository, never()).release(anyLong(), anyInt());
+        Assertions.assertThat(r.getStatus()).isEqualTo(StockReservationStatus.RELEASED);
+    }
+
+    @Test
+    @DisplayName("되돌리기 - ACTIVE(미결제 예약) 예약은 예약만 해제(release)")
+    void undoForOrderItem_active_releases() {
+        StockReservation r = StockReservation.active(1L, 500L, 10L, 2, EXP);
+        given(stockReservationRepository.findByOrderItemId(500L)).willReturn(List.of(r));
+
+        stockReservationService.undoForOrderItem(500L);
+
+        verify(productOptionRepository).release(10L, 2);
+        verify(productOptionRepository, never()).restore(anyLong(), anyInt());
+        Assertions.assertThat(r.getStatus()).isEqualTo(StockReservationStatus.RELEASED);
+    }
+
+    @Test
+    @DisplayName("되돌리기 - 이미 RELEASED면 아무것도 안 함(멱등 no-op)")
+    void undoForOrderItem_released_noop() {
+        StockReservation r = StockReservation.active(1L, 500L, 10L, 2, EXP);
+        r.markReleased();
+        given(stockReservationRepository.findByOrderItemId(500L)).willReturn(List.of(r));
+
+        stockReservationService.undoForOrderItem(500L);
+
+        verify(productOptionRepository, never()).restore(anyLong(), anyInt());
+        verify(productOptionRepository, never()).release(anyLong(), anyInt());
+    }
 }

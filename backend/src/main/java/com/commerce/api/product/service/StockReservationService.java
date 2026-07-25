@@ -78,6 +78,34 @@ public class StockReservationService {
         }
     }
 
+    /**
+     * 항목 취소 시 재고 되돌리기(#1 P4, trap#7 차단) — 그 항목의 <b>예약 상태로</b> 처리를 가른다.
+     *   · CONSUMED(결제로 실차감됨) → 실재고 복원(restore)
+     *   · ACTIVE(예약만, 미결제) → 예약 해제(release)
+     *   · RELEASED(이미 처리) → no-op(멱등)
+     *
+     * <p>전체 Order.status가 아니라 항목별 실차감 여부로 판정하는 게 핵심 — 멀티셀러에서 다른 셀러가 출고해
+     * 주문이 PAID를 벗어나도, 이 항목의 예약이 CONSUMED면 실재고가 정확히 복원된다(셀러 재고 영구누락 차단).
+     */
+    @Transactional
+    public void undoForOrderItem(Long orderItemId) {
+        for (StockReservation r : stockReservationRepository.findByOrderItemId(orderItemId)) {
+            switch (r.getStatus()) {
+                case CONSUMED -> {
+                    productOptionRepository.restore(r.getOptionId(), r.getQuantity());
+                    r.markReleased();   // 되돌림 완료 — 중복 복원 방지
+                }
+                case ACTIVE -> {
+                    productOptionRepository.release(r.getOptionId(), r.getQuantity());
+                    r.markReleased();
+                }
+                case RELEASED -> {
+                    // 이미 되돌려짐 — 멱등 no-op
+                }
+            }
+        }
+    }
+
     private List<StockReservation> activeOf(Long orderId) {
         return stockReservationRepository.findByOrderIdAndStatus(orderId, StockReservationStatus.ACTIVE);
     }

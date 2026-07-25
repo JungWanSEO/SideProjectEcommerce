@@ -94,13 +94,7 @@ public class Order extends BaseEntity {
     @Column(name = "idempotency_key", unique = true, length = 80)
     private String idempotencyKey;
 
-    /** 택배사 (배송 시작 시 입력, 없으면 null). */
-    @Column(length = 40)
-    private String courier;
-
-    /** 운송장 번호 (배송 시작 시 입력, 없으면 null). */
-    @Column(name = "tracking_number", length = 60)
-    private String trackingNumber;
+    // 택배사·운송장은 주문 단위가 아니라 셀러별 shipment에 있다(#1 c안 P6에서 orders 컬럼 DROP·V46).
 
     /**
      * 상태 이력 (애그리거트 내부 — 전이마다 append). append-only라 정렬은 id 오름차순(발생 순).
@@ -109,6 +103,15 @@ public class Order extends BaseEntity {
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
     @jakarta.persistence.OrderBy("id asc")
     private List<OrderStatusHistory> statusHistory = new ArrayList<>();
+
+    /**
+     * 셀러별 배송 단위(#1 c안 — 애그리거트 내부). 결제 시점에 활성 항목을 sellerId로 팬아웃해 생성한다(P2).
+     * PENDING 주문은 비어 있다. {@link #status}는 이 shipment들의 rollup으로 재계산되는 파생값(P3).
+     * <p>P1(현재)은 읽기 매핑만 — 생성/전이/rollup은 후속 phase에서 연결한다.
+     */
+    @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
+    @jakarta.persistence.OrderBy("id asc")
+    private List<Shipment> shipments = new ArrayList<>();
 
     private Order(Long memberId) {
         this.memberId = memberId;
@@ -231,100 +234,241 @@ public class Order extends BaseEntity {
         return shares;
     }
 
-    /** 주문 취소 (이미 취소된 주문·배송 시작된 주문은 불가). 주체/사유 미상(시스템·내부 호출). */
-    public void cancel() {
-        cancel(null, null);
-    }
-
-    /** 주문 취소 + 이력 기록 — changedBy(취소한 회원, 시스템이면 null)·memo(사유). */
-    public void cancel(Long changedBy, String memo) {
-        if (this.status == OrderStatus.CANCELLED) {
-            throw new BusinessException(HttpStatus.CONFLICT, "이미 취소된 주문입니다.");
-        }
-        ensureCancellable();
-        OrderStatus from = this.status;
-        this.status = OrderStatus.CANCELLED;
-        recordHistory(from, OrderStatus.CANCELLED, changedBy, memo);
+    /** 주문 취소 — 주체/사유 미상(시스템·내부 호출). 취소한 항목 목록 반환. */
+    public List<OrderItem> cancel() {
+        return cancel(null, null);
     }
 
     /**
-     * 항목 단위 취소(부분환불). 해당 항목을 CANCELLED로 만들고, 남은 활성 항목이 없으면 주문도 CANCELLED.
-     * 취소된 항목을 반환한다(환불 금액·셀러 식별용). 없는 항목이면 404, 이미 취소면 409, 배송 시작됐으면 409.
+     * 주문 취소(#1 c안) — 아직 <b>출고 전</b>(shipment PAID 또는 미결제)인 활성 항목을 모두 취소한다.
+     * 이미 출고된 셀러 항목은 남고(부분 취소), 취소 가능한 항목이 하나도 없으면 409. 취소한 항목 목록을 반환한다
+     * (재고 되돌리기·환불 금액 산정용 — 호출자 OrderService/PaymentService가 이 집합에만 재고 복원/환불을 적용).
      */
+    public List<OrderItem> cancel(Long changedBy, String memo) {
+        if (this.status == OrderStatus.CANCELLED) {
+            throw new BusinessException(HttpStatus.CONFLICT, "이미 취소된 주문입니다.");
+        }
+        List<OrderItem> activeItems = orderItems.stream().filter(OrderItem::isActive).toList();
+        List<OrderItem> cancellable = activeItems.stream().filter(this::isItemCancellable).toList();
+        // 활성 항목이 있는데 하나도 취소할 수 없다(전부 출고) → 409. (항목 자체가 없는 주문은 그대로 취소.)
+        if (!activeItems.isEmpty() && cancellable.isEmpty()) {
+            throw new BusinessException(HttpStatus.CONFLICT, "배송이 시작되어 취소할 수 있는 항목이 없습니다.");
+        }
+        for (OrderItem item : cancellable) {
+            cancelItemInternal(item, changedBy);
+        }
+        applyCancellationRollup(changedBy, memo);
+        return cancellable;
+    }
+
+    /** 항목 단위 취소 — 주체 미상. */
     public OrderItem cancelItem(Long orderItemId) {
         return cancelItem(orderItemId, null);
     }
 
-    /** 항목 단위 취소 + (주문 전체가 취소되면) 이력 기록. changedBy = 취소한 회원(시스템이면 null). */
+    /**
+     * 항목 단위 취소(부분환불, #1 c안) — 그 항목의 셀러 shipment가 <b>미출고(PAID)</b>이거나 shipment 없음(PENDING)일 때만.
+     * 출고 시작(SHIPPING/DELIVERED)됐으면 409. 셀러의 마지막 활성 항목이면 그 shipment도 CANCELLED가 되고,
+     * 모든 shipment(또는 PENDING의 모든 항목)가 취소되면 주문도 CANCELLED로 rollup된다. 취소된 항목을 반환한다.
+     */
     public OrderItem cancelItem(Long orderItemId, Long changedBy) {
-        ensureCancellable();
         OrderItem target = orderItems.stream()
                 .filter(i -> orderItemId.equals(i.getId()))
                 .findFirst()
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "주문 항목을 찾을 수 없습니다."));
-        OrderStatus from = this.status;
-        target.cancel();
-        if (orderItems.stream().noneMatch(OrderItem::isActive)) {
-            this.status = OrderStatus.CANCELLED;   // 모든 항목 취소 → 주문도 취소
-            recordHistory(from, OrderStatus.CANCELLED, changedBy, "전체 항목 취소");
+        if (target.getStatus() == OrderItemStatus.CANCELLED) {
+            throw new BusinessException(HttpStatus.CONFLICT, "이미 취소된 주문 항목입니다.");
         }
+        if (!isItemCancellable(target)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "배송이 시작된 항목은 취소할 수 없습니다.");
+        }
+        cancelItemInternal(target, changedBy);
+        applyCancellationRollup(changedBy, "항목 취소");
         return target;
     }
 
-    /** 결제 완료 처리 (PENDING → PAID). 결제 대기 상태가 아니면 예외. */
+    /** 항목을 CANCELLED로 만들고, 그 셀러의 남은 활성 항목이 없으면 그 셀러 shipment도 취소한다(내부 공통). */
+    private void cancelItemInternal(OrderItem item, Long changedBy) {
+        item.cancel();
+        Shipment shipment = shipmentForItem(item);
+        if (shipment != null && shipment.getStatus() == ShipmentStatus.PAID) {
+            boolean sellerHasActive = orderItems.stream()
+                    .filter(OrderItem::isActive)
+                    .anyMatch(i -> java.util.Objects.equals(i.getSellerId(), item.getSellerId()));
+            if (!sellerHasActive) {
+                shipment.cancel(changedBy, "셀러 항목 전량 취소");
+            }
+        }
+    }
+
+    /** 취소 후 주문 상태 재계산 — shipment가 있으면 rollup, 없으면(PENDING) 활성 항목이 0이 되면 CANCELLED. */
+    private void applyCancellationRollup(Long changedBy, String memo) {
+        if (!shipments.isEmpty()) {
+            recomputeStatusFromShipments(changedBy, memo);
+            return;
+        }
+        if (this.status != OrderStatus.CANCELLED && orderItems.stream().noneMatch(OrderItem::isActive)) {
+            OrderStatus from = this.status;
+            this.status = OrderStatus.CANCELLED;
+            recordHistory(from, OrderStatus.CANCELLED, changedBy, memo);
+        }
+    }
+
+    /** 그 항목이 취소 가능한가 — shipment 없음(PENDING)이거나, 그 셀러 shipment가 아직 미출고(PAID)면 가능. */
+    private boolean isItemCancellable(OrderItem item) {
+        Shipment shipment = shipmentForItem(item);
+        return shipment == null || shipment.getStatus() == ShipmentStatus.PAID;
+    }
+
+    /** 이 항목이 속한 셀러의 shipment(없으면 null — PENDING). null(플랫폼 버킷) null-safe 매칭. */
+    private Shipment shipmentForItem(OrderItem item) {
+        return shipments.stream()
+                .filter(s -> s.belongsToSeller(item.getSellerId()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    /** 결제 완료 처리 (PENDING → PAID). 결제 대기 상태가 아니면 예외. 결제 시점에 셀러별 shipment를 팬아웃 생성한다(#1 P2). */
     public void markPaid() {
         if (this.status != OrderStatus.PENDING) {
             throw new BusinessException(HttpStatus.CONFLICT, "결제 대기 상태의 주문만 결제할 수 있습니다.");
         }
         this.status = OrderStatus.PAID;
         recordHistory(OrderStatus.PENDING, OrderStatus.PAID, null, "결제 완료");
+        createShipmentsForPayment();
     }
 
-    /** 배송 상태 전진(ADMIN) — 송장·주체 없이(기존 호출 호환). */
+    /** 활성 항목의 셀러별 distinct 집합(insertion 순서 유지, null=플랫폼 버킷 포함) — shipment 팬아웃의 그룹 키. */
+    private java.util.Set<Long> distinctActiveSellerIds() {
+        java.util.Set<Long> sellers = new java.util.LinkedHashSet<>();   // null 키 1개 허용(플랫폼 버킷)
+        for (OrderItem item : orderItems) {
+            if (item.isActive()) {
+                sellers.add(item.getSellerId());
+            }
+        }
+        return sellers;
+    }
+
+    /**
+     * 결제 시점 팬아웃(#1 P2) — 활성 항목을 셀러별로 묶어 shipment 1건씩(status=PAID) 생성한다.
+     * 전량 취소된 셀러는 활성 항목이 없어 shipment가 안 생긴다(정산 활성-항목 기준과 정합).
+     */
+    private void createShipmentsForPayment() {
+        for (Long sellerId : distinctActiveSellerIds()) {
+            this.shipments.add(Shipment.forPayment(this, sellerId));
+        }
+    }
+
+    /**
+     * 백필(#1 P2) — shipment 없는 기존 PURCHASED 주문에 <b>현재 주문 상태를 상속</b>한 shipment를 소급 생성한다.
+     * per-order 멱등(이미 shipment가 있으면 no-op)이라 재실행에 안전. PENDING(shipment 없음)·CANCELLED(생략)는 건너뛴다.
+     * SHIPPING/DELIVERED면 주문 단위 송장(courier/tracking)을 각 shipment에 복제한다(상태 동일 상속이라 무해).
+     *
+     * @return 이번 호출로 shipment를 생성했으면 true(백필 대상이었음)
+     */
+    public boolean backfillShipments() {
+        if (!shipments.isEmpty()) {
+            return false;   // per-order 멱등
+        }
+        ShipmentStatus target = switch (this.status) {
+            case PAID -> ShipmentStatus.PAID;
+            case SHIPPING -> ShipmentStatus.SHIPPING;
+            case DELIVERED -> ShipmentStatus.DELIVERED;
+            case PENDING, CANCELLED -> null;   // PENDING=shipment 없음, CANCELLED=출고 무의미라 생략
+        };
+        if (target == null) {
+            return false;
+        }
+        for (Long sellerId : distinctActiveSellerIds()) {
+            this.shipments.add(Shipment.forBackfill(this, sellerId, target));   // 레거시 주문은 셀러별 송장 정보가 없다
+        }
+        return !shipments.isEmpty();
+    }
+
+    /** 배송 상태 전진(ADMIN 일괄) — 송장·주체 없이(기존 호출 호환). */
     public void advanceShipping(OrderStatus next) {
         advanceShipping(next, null, null, null);
     }
 
     /**
-     * 배송 상태 전진(ADMIN) + 이력·송장 기록. 전이는 <b>forward-only</b>로 PAID → SHIPPING → DELIVERED 만 허용한다.
-     * 건너뛰기(PAID→DELIVERED)·되돌리기(SHIPPING→PAID)·그 외 상태(PENDING/CANCELLED 출발·도착)는 409.
+     * 배송 상태 전진(ADMIN 편의, #1 c안) — 주문의 <b>활성 shipment를 일괄</b> 다음 단계로 전진하고
+     * {@link #status}를 shipment rollup으로 재계산한다. 셀러별 개별 전진은 shipment 단위 경로(P5)가 담당한다.
      *
-     * <p>SHIPPING으로 갈 때 택배사·운송장을 함께 받아 저장한다(구매자에게 노출). DELIVERED 전이엔 무시.
+     * <p>전이는 forward-only PAID→SHIPPING→DELIVERED. next는 SHIPPING/DELIVERED만 유효하고, 전진 가능한
+     * shipment가 하나도 없으면 409(건너뛰기·되돌리기·PENDING/CANCELLED에서의 전진 차단 — 기존 order-grain 의미 보존).
+     * SHIPPING 전이 시 송장은 각 shipment에 저장하고, order-level courier/tracking에도 복제한다(P6에서 컬럼 제거 전까지 응답 호환).
      */
     public void advanceShipping(OrderStatus next, Long changedBy, String courier, String trackingNumber) {
-        boolean allowed =
-                (this.status == OrderStatus.PAID && next == OrderStatus.SHIPPING)
-                || (this.status == OrderStatus.SHIPPING && next == OrderStatus.DELIVERED);
-        if (!allowed) {
-            throw new BusinessException(HttpStatus.CONFLICT,
-                    "배송 상태를 " + this.status + "에서 " + next
-                            + "(으)로 변경할 수 없습니다. (PAID→SHIPPING→DELIVERED 순서만 가능)");
-        }
-        OrderStatus from = this.status;
-        this.status = next;
-
-        String memo = null;
+        ShipmentStatus prereq;
+        ShipmentStatus target;
         if (next == OrderStatus.SHIPPING) {
-            this.courier = courier;
-            this.trackingNumber = trackingNumber;
-            if (courier != null || trackingNumber != null) {
-                memo = (courier == null ? "" : courier)
-                        + (trackingNumber == null ? "" : " " + trackingNumber);
-                memo = memo.trim();
+            prereq = ShipmentStatus.PAID;
+            target = ShipmentStatus.SHIPPING;
+        } else if (next == OrderStatus.DELIVERED) {
+            prereq = ShipmentStatus.SHIPPING;
+            target = ShipmentStatus.DELIVERED;
+        } else {
+            throw shippingConflict(next);   // PENDING/PAID/CANCELLED로의 전진은 무효
+        }
+
+        int advanced = 0;
+        for (Shipment s : shipments) {
+            if (s.isActive() && s.getStatus() == prereq) {
+                s.advanceShipping(target, changedBy, courier, trackingNumber);
+                advanced++;
             }
         }
-        recordHistory(from, next, changedBy, memo);
+        if (advanced == 0) {
+            throw shippingConflict(next);   // 전진 가능한 shipment 없음(건너뛰기·되돌리기·미결제 등)
+        }
+        // 송장은 각 shipment에 저장됐다(order-level courier/tracking 컬럼은 P6에서 제거).
+        recomputeStatusFromShipments(changedBy, shippingMemo(next, courier, trackingNumber));
     }
 
-    /** 취소 가능 상태인지 — 배송이 시작(SHIPPING)되거나 완료(DELIVERED)된 주문은 취소할 수 없다(409). */
-    private void ensureCancellable() {
-        if (this.status == OrderStatus.SHIPPING || this.status == OrderStatus.DELIVERED) {
-            throw new BusinessException(HttpStatus.CONFLICT, "배송이 시작된 주문은 취소할 수 없습니다.");
+    private BusinessException shippingConflict(OrderStatus next) {
+        return new BusinessException(HttpStatus.CONFLICT,
+                "배송 상태를 " + this.status + "에서 " + next
+                        + "(으)로 변경할 수 없습니다. (PAID→SHIPPING→DELIVERED 순서만 가능)");
+    }
+
+    private static String shippingMemo(OrderStatus next, String courier, String trackingNumber) {
+        if (next == OrderStatus.SHIPPING && (courier != null || trackingNumber != null)) {
+            return ((courier == null ? "" : courier)
+                    + (trackingNumber == null ? "" : " " + trackingNumber)).trim();
+        }
+        return null;
+    }
+
+    /**
+     * shipment들의 상태를 {@link #status}에 반영한다(rollup 파생, #1 c안). 값이 <b>실제로 바뀔 때만</b> 이력 1건 append
+     * ("전이=흔적" 불변식 유지, 셀러 A만 전진해 rollup이 불변이면 shipment 이력만 남는다).
+     *
+     * <p>rollup 규칙(활성=비취소 shipment 기준, forward-only라 값 후퇴 불가):
+     * 전부 취소→CANCELLED / 전부 DELIVERED→DELIVERED / 하나라도 출고 시작(SHIPPING·DELIVERED)→SHIPPING / 전부 PAID→PAID.
+     * 저장된 파생 컬럼이라 PURCHASED 리더(리뷰자격·추천·대시보드)와 기존 인덱스가 무변경 생존한다.
+     */
+    public void recomputeStatusFromShipments(Long changedBy, String memo) {
+        if (shipments.isEmpty()) {
+            return;   // 결제 전(PENDING) — shipment 없음
+        }
+        OrderStatus rolled = rollupStatus();
+        if (rolled != this.status) {
+            OrderStatus from = this.status;
+            this.status = rolled;
+            recordHistory(from, rolled, changedBy, memo);
         }
     }
 
-    /** 결제 완료(재고가 차감된) 주문인지 — 취소 시 재고 복원 여부 판단에 사용. */
-    public boolean isPaid() {
-        return this.status == OrderStatus.PAID;
+    private OrderStatus rollupStatus() {
+        List<Shipment> active = shipments.stream().filter(Shipment::isActive).toList();
+        if (active.isEmpty()) {
+            return OrderStatus.CANCELLED;   // 모든 shipment 취소 → 주문 취소
+        }
+        if (active.stream().allMatch(s -> s.getStatus() == ShipmentStatus.DELIVERED)) {
+            return OrderStatus.DELIVERED;
+        }
+        boolean anyStarted = active.stream()
+                .anyMatch(s -> s.getStatus() == ShipmentStatus.SHIPPING || s.getStatus() == ShipmentStatus.DELIVERED);
+        return anyStarted ? OrderStatus.SHIPPING : OrderStatus.PAID;
     }
 }

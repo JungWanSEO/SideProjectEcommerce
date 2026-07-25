@@ -20,6 +20,7 @@ import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -103,33 +104,35 @@ public class PaymentService {
      * (모의 PG라 환불 호출이 즉시 끝난다. 실제 고지연 PG라면 환불을 트랜잭션 밖으로 빼고 이벤트/아웃박스로
      * 보강한다 — architecture.md §13.5.)
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public OrderResponse cancelOrder(Long memberId, Long orderId, boolean admin) {
-        // 1) 주문 취소 위임 — 소유권(404/403) + 상태 가드(이미 취소면 409) + PAID였으면 재고 복원.
-        //    무효한 요청이면 여기서 예외가 나 환불을 시도하지 않는다.
+        // 1) 주문 취소 위임 — 소유권(404/403) + 상태 가드 + 취소된 항목만 재고 되돌림. 멀티셀러(#1 c안)에선
+        //    출고 전 항목만 취소되는 <b>부분 취소</b>일 수 있다(출고된 셀러 항목은 남는다).
         OrderResponse cancelled = orderService.cancel(orderId, memberId, admin);
-        // 발급형 쿠폰이면 미사용으로 복원 — "취소했는데 쿠폰 날림" 방지(공개형/미보유면 no-op).
-        memberCouponService.release(cancelled.memberId(), cancelled.couponCode());
+        // 발급형 쿠폰 복원은 주문이 <b>전부</b> 취소됐을 때만 — 부분 취소면 남은(출고된) 항목에 쿠폰이 유효하다.
+        if (cancelled.status() == OrderStatus.CANCELLED) {
+            memberCouponService.release(cancelled.memberId(), cancelled.couponCode());
+        }
 
-        // 2) 결제 완료(PAID) 건이 있으면 환불. PENDING 주문은 결제 레코드가 없으므로 환불 대상이 없다.
-        //    (주문이 CANCELLED로 바뀌면 재취소가 409로 막히므로 중복 환불도 함께 방지된다.)
+        // 2) 결제 완료(PAID) 건이 있으면 <b>이번에 취소된 항목의 실효가 합만</b> 환불한다(#1 P4, 과다환불 차단).
+        //    = (잔여 결제액) − (취소 후에도 남은 활성 항목 실효가 합). 전량 취소면 남은 활성 0이라 잔여 전액,
+        //    부분 취소(출고분 잔존)면 그만큼 적게 환불해 출고된 셀러 몫까지 재환불되는 것을 막는다.
         paymentRepository.findByOrderIdAndStatus(orderId, PaymentStatus.PAID)
                 .ifPresent(payment -> {
-                    // 이미 항목단위로 부분환불한 금액을 뺀 <b>잔여</b>만 환불한다 — 안 그러면 원 결제액 전액을 환불해
-                    //   이미 돌려준 항목까지 재환불(과다환불)된다. 잔여가 0이면(모두 부분환불로 소진) 환불 없이 종료.
-                    long remaining = payment.getAmount() - payment.getRefundedAmount();
-                    if (remaining <= 0) {
-                        return;   // 이미 전액 환불됨(마지막 활성 항목이 없어 여기까지 온 경우)
+                    long remainingActive = cancelled.payableAmount();   // 취소 후 남은 활성 항목 실효가 합
+                    long refundNow = (payment.getAmount() - payment.getRefundedAmount()) - remainingActive;
+                    if (refundNow <= 0) {
+                        return;   // 돌려줄 잔여 없음(전액 환불됐거나 남은 활성이 잔여와 같음)
                     }
                     // 환불은 반드시 승인한 그 PG로 — 결제에 저장된 provider로 라우팅한다.
                     PaymentRefund refund = paymentGatewayRouter.resolve(payment.getProvider())
                             .refund(new PaymentRefundCommand(
-                                    orderId, remaining, payment.getPgTransactionId()));
+                                    orderId, refundNow, payment.getPgTransactionId()));
                     if (!refund.refunded()) {
                         throw new BusinessException(HttpStatus.BAD_GATEWAY,
                                 "환불에 실패했습니다. (" + refund.failureReason() + ")");
                     }
-                    payment.partialRefund(remaining);   // 잔여 누적 → refundedAmount==amount 도달 시 CANCELLED
+                    payment.partialRefund(refundNow);   // 누적 → refundedAmount==amount 도달 시 CANCELLED
                     paymentRepository.save(payment);
                 });
 
@@ -144,7 +147,7 @@ public class PaymentService {
      * cancelOrder와 같이 @Transactional로 원자성 보장(환불 실패 시 항목 취소·재고 복원까지 롤백).
      * 정산 상계(역분개)는 settlement 도메인의 reverseRefunds 배치가 사후 처리한다(settlement → order/payment 단방향).
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public OrderResponse cancelOrderItem(Long memberId, Long orderId, Long orderItemId, boolean admin) {
         OrderResponse order = orderService.cancelItem(orderId, orderItemId, memberId, admin);
         OrderResponse.OrderItemResponse cancelledItem = order.items().stream()

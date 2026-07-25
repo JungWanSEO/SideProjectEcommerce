@@ -2,6 +2,7 @@ package com.commerce.api.order.repository;
 
 import com.commerce.api.order.entity.Order;
 import com.commerce.api.order.entity.OrderStatus;
+import jakarta.persistence.LockModeType;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
@@ -9,7 +10,9 @@ import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 /**
  * 주문 DB 접근.
@@ -49,4 +52,40 @@ public interface OrderRepository extends JpaRepository<Order, Long>, OrderReposi
     /** 상태별 주문 수 — [status, count] 행 목록. 서비스가 모든 enum 값으로 0 채워 분포를 만든다. */
     @Query("select o.status, count(o) from Order o group by o.status")
     List<Object[]> countGroupByStatus();
+
+    /**
+     * shipment가 아직 없는 PURCHASED(PAID/SHIPPING/DELIVERED) 주문 — #1 P2 백필 대상.
+     * per-order 멱등: 이미 shipment가 있는 주문(P2 이후 결제분)은 제외해 재실행에 안전하다.
+     */
+    @Query("select o from Order o where o.status in "
+            + "(com.commerce.api.order.entity.OrderStatus.PAID, "
+            + "com.commerce.api.order.entity.OrderStatus.SHIPPING, "
+            + "com.commerce.api.order.entity.OrderStatus.DELIVERED) "
+            + "and not exists (select 1 from Shipment s where s.order = o)")
+    List<Order> findPurchasedWithoutShipments();
+
+    /**
+     * shipment 없는 PURCHASED 주문의 <b>ID만</b> — 백필을 주문별 개별 트랜잭션으로 처리하기 위한 후보 목록(#1 리뷰 #4·#6 교정).
+     * 대량 주문을 한 트랜잭션/힙에 다 올리지 않고, 주문마다 락+재확인 후 백필해 동시 취소와 직렬화하고 tx 크기를 제한한다.
+     */
+    @Query("select o.id from Order o where o.status in "
+            + "(com.commerce.api.order.entity.OrderStatus.PAID, "
+            + "com.commerce.api.order.entity.OrderStatus.SHIPPING, "
+            + "com.commerce.api.order.entity.OrderStatus.DELIVERED) "
+            + "and not exists (select 1 from Shipment s where s.order = o)")
+    List<Long> findPurchasedWithoutShipmentIds();
+
+    /**
+     * 주문 상태/원장을 바꾸는 <b>모든 경로</b>가 부모 주문 행을 <b>비관적 쓰기 락</b>으로 먼저 잡는다(#1 리뷰 교정).
+     * shipment 전진·취소(cancel/cancelItem)·ADMIN 일괄 전진·백필이 이 락으로 <b>부작용(PG 환불) 이전에</b> 직렬화된다.
+     *
+     * <p>왜 비관락인가: {@link Order#status}는 shipment rollup 파생값이고 rollup write는 <b>조건부</b>(값이 바뀔 때만)라,
+     * 낙관락만으론 서로 다른 자식(shipment/항목)을 동시에 바꾸는 두 tx가 각자 형제를 stale로 읽어 둘 다 "변화 없음"으로
+     * 판단→충돌 없이 커밋되는 lost update가 난다(리뷰 확정). 부모 행을 락으로 잡으면 늦은 tx가 <b>로드 시점에</b> 막혀
+     * 앞 tx 커밋 후 형제의 최신 상태를 읽어 rollup을 정확히 재계산한다. 취소는 PG 환불 부작용이 있어 낙관락 재시도가
+     * 부적합(재시도=이중 환불)하므로, 부작용 전에 직렬화하는 비관락이 정답이다.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select o from Order o where o.id = :id")
+    Optional<Order> findByIdForUpdate(@Param("id") Long id);
 }

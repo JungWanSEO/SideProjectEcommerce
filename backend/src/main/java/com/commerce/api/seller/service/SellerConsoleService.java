@@ -6,7 +6,10 @@ import com.commerce.api.member.entity.Member;
 import com.commerce.api.member.repository.MemberRepository;
 import com.commerce.api.order.dto.OrderSearchCondition;
 import com.commerce.api.order.dto.OrderSummaryResponse;
+import com.commerce.api.order.dto.SellerShipmentResponse;
+import com.commerce.api.order.entity.ShipmentStatus;
 import com.commerce.api.order.service.OrderService;
+import com.commerce.api.order.service.ShipmentService;
 import com.commerce.api.seller.dto.SellerResponse;
 import com.commerce.api.settlement.dto.PayoutResponse;
 import com.commerce.api.settlement.dto.SellerSettlementSummary;
@@ -22,6 +25,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -40,6 +44,7 @@ public class SellerConsoleService {
     private final SettlementService settlementService;
     private final PayoutService payoutService;
     private final OrderService orderService;   // "내 주문"(내 셀러 상품이 든 주문) 조회 — 셀러 스코프는 서비스가 강제
+    private final ShipmentService shipmentService;   // 내 shipment 출고 전진(#1 c안) — 소유권은 워커가 검증
 
     /** 내 셀러 정보. */
     public SellerResponse getMySeller(Long memberId) {
@@ -75,6 +80,21 @@ public class SellerConsoleService {
     public PageResponse<PayoutResponse> getMyPayouts(Long memberId, PayoutStatus status, Pageable pageable) {
         Long sellerId = requireSellerId(memberId);
         return payoutService.getPayouts(sellerId, status, pageable);
+    }
+
+    /**
+     * 내 shipment 출고 전진(#1 c안) — 로그인 셀러가 자기 shipment를 PAID→SHIPPING→DELIVERED로 보낸다.
+     * 소유권(그 shipment가 내 셀러 것인지·플랫폼 null 버킷 아닌지)은 {@link ShipmentService}의 워커가
+     * 트랜잭션 안에서 검증한다(아니면 403). 잘못된 전이면 409.
+     *
+     * <p>{@link Propagation#NOT_SUPPORTED}로 클래스의 read-only 트랜잭션 밖에서 실행한다 — 안 그러면 read-only
+     * 컨텍스트에 쓰기가 막히고, ShipmentService의 낙관락 재시도(새 트랜잭션)도 깨진다.
+     */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public SellerShipmentResponse advanceMyShipment(Long memberId, Long shipmentId, ShipmentStatus next,
+            String courier, String trackingNumber) {
+        Long sellerId = requireSellerId(memberId);
+        return shipmentService.advanceForSeller(shipmentId, sellerId, next, memberId, courier, trackingNumber);
     }
 
     /** 로그인 회원의 셀러 ID — 셀러 계정(sellerId 보유)이 아니면 403. */

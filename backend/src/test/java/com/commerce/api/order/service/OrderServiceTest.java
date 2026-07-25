@@ -3,7 +3,6 @@ package com.commerce.api.order.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
@@ -43,9 +42,7 @@ class OrderServiceTest {
     @Mock
     private OrderRepository orderRepository;
     @Mock
-    private com.commerce.api.product.repository.ProductOptionRepository productOptionRepository;   // 재고 원자 복원(#2)
-    @Mock
-    private com.commerce.api.product.service.StockReservationService stockReservationService;      // 예약 해제(#2)
+    private com.commerce.api.product.service.StockReservationService stockReservationService;   // 항목별 재고 되돌리기(#2·#1)
 
     @InjectMocks
     private OrderService orderService;
@@ -67,16 +64,19 @@ class OrderServiceTest {
     }
 
     @Test
-    @DisplayName("주문 취소 성공(결제 완료) - 상태 CANCELLED + 실재고 원자 복원")
+    @DisplayName("주문 취소 성공(결제 완료) - 상태 CANCELLED + 취소 항목 재고 되돌리기")
     void cancel_success() {
-        Order order = orderWithId(1L, 100L, item(3));
-        order.markPaid();   // 결제 완료 주문이어야 취소 시 재고가 복원됨(예약은 결제 시 소진됨)
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        OrderItem line = item(3);
+        Order order = orderWithId(1L, 100L, line);
+        order.markPaid();
+        ReflectionTestUtils.setField(line, "id", 500L);
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         OrderResponse response = orderService.cancel(1L, 100L, false);   // 주문 주인(100번) 본인
 
         assertThat(response.status()).isEqualTo(OrderStatus.CANCELLED);
-        verify(productOptionRepository).restore(10L, 3);   // 결제로 차감됐던 실재고를 되돌림
+        // 재고 되돌리기는 항목별로 위임 — 복원/해제 판정(예약 상태)은 StockReservationService가 담당.
+        verify(stockReservationService).undoForOrderItem(500L);
     }
 
     @Test
@@ -84,7 +84,7 @@ class OrderServiceTest {
     void cancel_alreadyCancelled() {
         Order order = orderWithId(1L, 100L, item(3));
         order.cancel();
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         assertThatThrownBy(() -> orderService.cancel(1L, 100L, false))
                 .isInstanceOf(BusinessException.class)
@@ -92,23 +92,24 @@ class OrderServiceTest {
     }
 
     @Test
-    @DisplayName("주문 취소 - 미결제(PENDING) 주문은 실재고 복원 없이 예약만 해제한다")
-    void cancel_pendingOrder_releasesReservation() {
-        Order order = orderWithId(1L, 100L, item(3));   // PENDING (결제 전)
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+    @DisplayName("주문 취소 - 미결제(PENDING) 주문도 취소 항목 재고를 항목별로 되돌린다(해제 판정은 예약 상태)")
+    void cancel_pendingOrder_undoesReservation() {
+        OrderItem line = item(3);
+        Order order = orderWithId(1L, 100L, line);   // PENDING (결제 전)
+        ReflectionTestUtils.setField(line, "id", 500L);
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         OrderResponse response = orderService.cancel(1L, 100L, false);
 
         assertThat(response.status()).isEqualTo(OrderStatus.CANCELLED);
-        verify(stockReservationService).releaseForOrder(1L);            // 잡아 둔 예약을 해제
-        verify(productOptionRepository, never()).restore(any(), anyInt());   // 실재고는 차감된 적 없어 복원 안 함
+        verify(stockReservationService).undoForOrderItem(500L);
     }
 
     @Test
-    @DisplayName("주문 취소(회귀) - 부분취소된(비활성) 항목은 재고를 이중 복원하지 않는다")
+    @DisplayName("주문 취소(회귀) - 부분취소된(비활성) 항목은 재고를 이중 복원하지 않는다(이번 취소 항목만)")
     void cancel_afterPartialCancel_noDoubleStockRestore() {
-        // 결제 완료된 2항목 주문에서 한 항목(optionId 10)을 먼저 항목취소해 비활성으로 만든다
-        //   (실제 운영에선 그 시점에 재고가 이미 복원됨). 이후 주문 전체 취소는 활성 항목만 복원해야 한다.
+        // 결제 완료된 2항목 주문에서 한 항목(500)을 먼저 항목취소해 비활성으로 만든다.
+        //   이후 주문 전체 취소는 이번에 취소된 활성 항목(501)만 되돌려야 한다(500은 이미 그때 처리됨).
         OrderItem cancelledLine = OrderItem.builder()
                 .productId(1L).optionId(10L).productName("반팔티셔츠").size("M")
                 .orderPrice(10000L).quantity(3).build();
@@ -119,15 +120,15 @@ class OrderServiceTest {
         order.markPaid();
         ReflectionTestUtils.setField(cancelledLine, "id", 500L);
         ReflectionTestUtils.setField(activeLine, "id", 501L);
-        order.cancelItem(500L, 100L);   // optionId 10 라인 비활성(주문은 PAID 유지)
+        order.cancelItem(500L, 100L);   // 500 라인 비활성(주문은 rollup PAID 유지)
 
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         OrderResponse response = orderService.cancel(1L, 100L, false);
 
         assertThat(response.status()).isEqualTo(OrderStatus.CANCELLED);
-        verify(productOptionRepository).restore(20L, 2);            // 활성 항목만 복원
-        verify(productOptionRepository, never()).restore(eq(10L), anyInt());   // 이미 취소된 항목은 이중 복원 안 함
+        verify(stockReservationService).undoForOrderItem(501L);              // 이번에 취소된 항목만
+        verify(stockReservationService, never()).undoForOrderItem(500L);     // 이미 취소된 항목은 재차 안 함
     }
 
     private OrderItem itemOn(long optionId, int quantity) {
@@ -137,36 +138,36 @@ class OrderServiceTest {
     }
 
     @Test
-    @DisplayName("항목 취소(미결제) - 그 항목 예약만 해제, 실재고 복원 없음 (결제 시 소진 안 됨)")
-    void cancelItem_pending_releasesItemReservation() {
+    @DisplayName("항목 취소(미결제) - 그 항목 재고만 항목별로 되돌린다")
+    void cancelItem_pending_undoesItemReservation() {
         OrderItem line1 = itemOn(10L, 2);
         OrderItem line2 = itemOn(20L, 3);
         Order order = orderWithId(1L, 100L, line1, line2);   // PENDING, 항목 2개
         ReflectionTestUtils.setField(line1, "id", 500L);
         ReflectionTestUtils.setField(line2, "id", 501L);
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         orderService.cancelItem(1L, 500L, 100L, false);
 
-        verify(stockReservationService).releaseForOrderItem(500L);          // 그 항목 예약만 해제
-        verify(productOptionRepository, never()).restore(any(), anyInt());  // 미결제라 실재고 복원 없음
+        verify(stockReservationService).undoForOrderItem(500L);              // 그 항목만
+        verify(stockReservationService, never()).undoForOrderItem(501L);
     }
 
     @Test
-    @DisplayName("항목 취소(결제완료) - 그 항목 실재고만 복원 (예약은 이미 소진)")
-    void cancelItem_paid_restoresItemStock() {
+    @DisplayName("항목 취소(결제완료) - 그 항목 재고만 되돌린다(복원 판정은 예약 상태)")
+    void cancelItem_paid_undoesItemStock() {
         OrderItem line1 = itemOn(10L, 2);
         OrderItem line2 = itemOn(20L, 3);
         Order order = orderWithId(1L, 100L, line1, line2);
         order.markPaid();
         ReflectionTestUtils.setField(line1, "id", 500L);
         ReflectionTestUtils.setField(line2, "id", 501L);
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         orderService.cancelItem(1L, 500L, 100L, false);
 
-        verify(productOptionRepository).restore(10L, 2);                        // 그 항목 실재고 복원
-        verify(stockReservationService, never()).releaseForOrderItem(any());    // 결제 완료라 예약 해제 아님
+        verify(stockReservationService).undoForOrderItem(500L);
+        verify(stockReservationService, never()).undoForOrderItem(501L);
     }
 
     @Test
@@ -234,7 +235,7 @@ class OrderServiceTest {
     @DisplayName("주문 취소 - 남의 주문이면 403, 취소·재고복원 일어나지 않음")
     void cancel_nonOwnerForbidden() {
         Order order = orderWithId(1L, 100L, item(3));
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         assertThatThrownBy(() -> orderService.cancel(1L, 999L, false))
                 .isInstanceOf(BusinessException.class)
@@ -270,7 +271,7 @@ class OrderServiceTest {
     @DisplayName("배송 상태 전진 - PAID→SHIPPING 성공")
     void advanceShipping_paidToShipping() {
         Order order = orderInStatus(1L, OrderStatus.PAID);
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         OrderResponse response = orderService.advanceShipping(1L, OrderStatus.SHIPPING, 1L, null, null);
 
@@ -282,7 +283,7 @@ class OrderServiceTest {
     @DisplayName("배송 상태 전진 - SHIPPING→DELIVERED 성공")
     void advanceShipping_shippingToDelivered() {
         Order order = orderInStatus(1L, OrderStatus.SHIPPING);
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         OrderResponse response = orderService.advanceShipping(1L, OrderStatus.DELIVERED, 1L, null, null);
 
@@ -293,14 +294,16 @@ class OrderServiceTest {
     @DisplayName("배송 상태 전진 - SHIPPING 전이 시 택배사·운송장을 주문에 저장하고 타임라인에 남긴다")
     void advanceShipping_recordsCourierAndHistory() {
         Order order = orderInStatus(1L, OrderStatus.PAID);
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         OrderResponse response = orderService.advanceShipping(
                 1L, OrderStatus.SHIPPING, 9L, "CJ대한통운", "1234567890");
 
-        assertThat(response.courier()).isEqualTo("CJ대한통운");
-        assertThat(response.trackingNumber()).isEqualTo("1234567890");
-        // 타임라인: 생성(PENDING) → PAID → SHIPPING(주체 9·송장 메모)
+        // 송장은 이제 셀러별 shipment에 저장된다(#1 c안)
+        assertThat(response.shipments()).anyMatch(
+                s -> "CJ대한통운".equals(s.courier()) && "1234567890".equals(s.trackingNumber())
+                        && s.status() == com.commerce.api.order.entity.ShipmentStatus.SHIPPING);
+        // 주문 타임라인: 생성(PENDING) → PAID → SHIPPING(rollup·주체 9·송장 메모)
         assertThat(response.statusHistory()).extracting(r -> r.toStatus())
                 .containsExactly(OrderStatus.PENDING, OrderStatus.PAID, OrderStatus.SHIPPING);
         var shipEvent = response.statusHistory().get(2);
@@ -313,7 +316,7 @@ class OrderServiceTest {
     @DisplayName("주문 취소 - 타임라인에 X→CANCELLED가 취소 주체와 함께 남는다")
     void cancel_recordsHistory() {
         Order order = orderInStatus(1L, OrderStatus.PAID);
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         OrderResponse response = orderService.cancel(1L, 100L, false);   // 주인=100
 
@@ -329,7 +332,7 @@ class OrderServiceTest {
     @DisplayName("배송 상태 전진 실패 - 건너뛰기(PAID→DELIVERED) 409, 상태 불변")
     void advanceShipping_skipForbidden() {
         Order order = orderInStatus(1L, OrderStatus.PAID);
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         assertThatThrownBy(() -> orderService.advanceShipping(1L, OrderStatus.DELIVERED, 1L, null, null))
                 .isInstanceOf(BusinessException.class)
@@ -341,7 +344,7 @@ class OrderServiceTest {
     @DisplayName("배송 상태 전진 실패 - 되돌리기(SHIPPING→PAID) 409")
     void advanceShipping_reverseForbidden() {
         Order order = orderInStatus(1L, OrderStatus.SHIPPING);
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         assertThatThrownBy(() -> orderService.advanceShipping(1L, OrderStatus.PAID, 1L, null, null))
                 .isInstanceOf(BusinessException.class)
@@ -352,7 +355,7 @@ class OrderServiceTest {
     @DisplayName("배송 상태 전진 실패 - PENDING(미결제)에서 전진 409")
     void advanceShipping_fromPendingForbidden() {
         Order order = orderInStatus(1L, OrderStatus.PENDING);
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         assertThatThrownBy(() -> orderService.advanceShipping(1L, OrderStatus.SHIPPING, 1L, null, null))
                 .isInstanceOf(BusinessException.class)
@@ -362,7 +365,7 @@ class OrderServiceTest {
     @Test
     @DisplayName("배송 상태 전진 실패 - 없는 주문 404")
     void advanceShipping_notFound() {
-        given(orderRepository.findById(99L)).willReturn(Optional.empty());
+        given(orderRepository.findByIdForUpdate(99L)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> orderService.advanceShipping(99L, OrderStatus.SHIPPING, 1L, null, null))
                 .isInstanceOf(BusinessException.class)
@@ -370,17 +373,16 @@ class OrderServiceTest {
     }
 
     @Test
-    @DisplayName("주문 취소 실패 - 배송 시작(SHIPPING) 주문은 409, 재고 복원 없음")
+    @DisplayName("주문 취소 실패 - 단일셀러 배송 시작(SHIPPING) 주문은 409, 재고 되돌리기 없음")
     void cancel_shippingBlocked() {
-        Order order = orderInStatus(1L, OrderStatus.SHIPPING);
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        Order order = orderInStatus(1L, OrderStatus.SHIPPING);   // 단일 항목·단일 shipment SHIPPING
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         assertThatThrownBy(() -> orderService.cancel(1L, 100L, false))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("배송이 시작된");
+                .hasMessageContaining("배송이 시작");
         assertThat(order.getStatus()).isEqualTo(OrderStatus.SHIPPING);
-        verify(productOptionRepository, never()).restore(any(), anyInt());   // 재고 복원/예약 해제 시도 없음
-        verify(stockReservationService, never()).releaseForOrder(any());
+        verify(stockReservationService, never()).undoForOrderItem(any());   // 되돌리기 시도 없음
     }
 
     // ----- 어드민 주문 검색 -----

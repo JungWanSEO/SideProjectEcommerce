@@ -13,7 +13,6 @@ import com.commerce.api.order.entity.Order;
 import com.commerce.api.order.entity.OrderItem;
 import com.commerce.api.order.entity.OrderStatus;
 import com.commerce.api.order.repository.OrderRepository;
-import com.commerce.api.product.repository.ProductOptionRepository;
 import com.commerce.api.product.service.StockReservationService;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +23,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -38,8 +38,7 @@ public class OrderService {
 
     private final OrderProcessor orderProcessor;
     private final OrderRepository orderRepository;
-    private final ProductOptionRepository productOptionRepository;   // 재고 원자 복원(#2)
-    private final StockReservationService stockReservationService;   // 예약 해제(#2)
+    private final StockReservationService stockReservationService;   // 예약 해제·항목별 재고 되돌리기(#2·#1)
 
     /**
      * 주문 생성. 동시 재고 차감으로 낙관적 락 충돌이 나면 최대 3회까지 (새 트랜잭션으로) 재시도.
@@ -159,57 +158,45 @@ public class OrderService {
      * 배송 상태 전진(ADMIN): PAID → SHIPPING → DELIVERED (forward-only). 없으면 404,
      * 잘못된 전이(건너뛰기·되돌리기·취소/대기 상태)면 409(Order.advanceShipping이 강제).
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public OrderResponse advanceShipping(Long id, OrderStatus next, Long changedBy,
             String courier, String trackingNumber) {
-        Order order = findOrder(id);
-        order.advanceShipping(next, changedBy, courier, trackingNumber);   // 이력·송장 기록 + dirty checking flush
+        // 부모 주문을 비관적 락으로 — shipment 단위 전진(worker)·동시 취소와 같은 락으로 직렬화(#1 리뷰 교정).
+        Order order = findOrderForUpdate(id);
+        order.advanceShipping(next, changedBy, courier, trackingNumber);   // shipment 일괄 전진 + rollup
         return OrderResponse.from(order);
     }
 
     /**
-     * 주문 취소: 상태를 CANCELLED로 바꾸고, 결제 완료(PAID)였던 주문이면 차감했던 재고를 복원한다.
-     * (PENDING 주문은 재고가 차감된 적 없으므로 복원하지 않는다.) 본인 주문이거나 ADMIN일 때만 허용.
+     * 주문 취소(#1 c안): 아직 출고 전인 활성 항목을 취소하고, <b>취소된 각 항목의 재고를 항목별로 되돌린다</b>
+     * (예약 상태로 판정 — CONSUMED면 실재고 복원, ACTIVE면 예약 해제). 출고 시작된 셀러 항목은 남는다(부분 취소).
+     * 본인 주문이거나 ADMIN일 때만 허용. 취소 가능한 항목이 하나도 없으면 409.
      */
     @Transactional
     public OrderResponse cancel(Long id, Long requesterId, boolean admin) {
-        Order order = findOwnedOrder(id, requesterId, admin);
-        boolean wasPaid = order.isPaid();   // 상태를 바꾸기 전에 결제 여부 확인
-        order.cancel(requesterId, admin ? "관리자 취소" : "주문자 취소");   // 이미 취소된 주문이면 예외
-
-        if (wasPaid) {
-            // 결제 완료 → 예약은 결제 시 이미 소진(실차감)됐으므로, <b>실재고</b>를 원자적으로 복원한다.
-            //   단 이미 항목단위로 취소(cancelItem)된 항목은 그때 복원했으므로 <b>활성 항목만</b> — 안 그러면 이중 복원.
-            for (OrderItem item : order.getOrderItems()) {
-                if (item.isActive()) {
-                    productOptionRepository.restore(item.getOptionId(), item.getQuantity());
-                }
-            }
-        } else {
-            // 미결제(PENDING) → 실재고는 차감된 적 없고 <b>예약(reserved)만 잡혀</b> 있으므로 예약을 해제한다.
-            //   (활성 예약만 ACTIVE로 남아 있어 이미 항목취소된 몫은 자동 제외된다.)
-            stockReservationService.releaseForOrder(id);
+        // 부모 주문 비관적 락 — shipment 전진·동시 취소와 직렬화(#1 리뷰 교정, PG 환불 이전에). 격리는 호출자
+        //   PaymentService.cancelOrder(READ_COMMITTED)가 정한다 → 락 이후 형제 shipment를 fresh로 읽는다.
+        Order order = findOwnedOrderForUpdate(id, requesterId, admin);
+        // 취소된 항목만 정확히 되돌린다(이미 취소됐거나 출고된 항목은 대상 아님 — 이중 복원 방지).
+        for (OrderItem item : order.cancel(requesterId, admin ? "관리자 취소" : "주문자 취소")) {
+            stockReservationService.undoForOrderItem(item.getId());
         }
         return OrderResponse.from(order);
     }
 
     /**
      * 주문 항목 단위 취소(부분환불의 주문/재고 부분). 본인 주문이거나 ADMIN만.
-     * 항목을 CANCELLED로 만들고, 결제 완료(PAID)였던 주문이면 그 항목 수량만큼 재고를 복원한다.
-     * (PG 부분 환불은 호출자=PaymentService가 이어서 처리. 순환 의존 회피.)
+     * 항목을 CANCELLED로 만들고, <b>그 항목의 재고를 예약 상태로 되돌린다</b>(CONSUMED→실재고 복원 / ACTIVE→예약 해제).
+     * 전체 Order.status가 아니라 항목별 실차감 여부로 판정해, 멀티셀러에서 다른 셀러가 출고해 주문이 PAID를 벗어나도
+     * 이 항목 재고가 정확히 돌아온다. (PG 부분 환불은 호출자=PaymentService가 이어서 처리 — 순환 의존 회피.)
      */
     @Transactional
     public OrderResponse cancelItem(Long orderId, Long orderItemId, Long requesterId, boolean admin) {
-        Order order = findOwnedOrder(orderId, requesterId, admin);
-        boolean wasPaid = order.isPaid();
-        OrderItem cancelled = order.cancelItem(orderItemId, requesterId);   // 항목 CANCELLED(+전부 취소면 주문도 CANCELLED)
-        if (wasPaid) {
-            // 결제 완료 → 그 항목 실재고 복원(예약은 이미 소진됨).
-            productOptionRepository.restore(cancelled.getOptionId(), cancelled.getQuantity());
-        } else {
-            // 미결제(PENDING) → 그 항목 예약만 정확히 해제.
-            stockReservationService.releaseForOrderItem(cancelled.getId());
-        }
+        // 부모 주문 비관적 락(#1 리뷰 교정) — 동시 항목취소/전진과 직렬화. 이 락이 결제 원장 읽기·갱신도 보호해
+        //   Payment.refundedAmount lost update(리뷰 #2)를 함께 막는다(PaymentService가 이 락을 잡은 뒤 결제를 만진다).
+        Order order = findOwnedOrderForUpdate(orderId, requesterId, admin);
+        OrderItem cancelled = order.cancelItem(orderItemId, requesterId);   // shipment-grain 취소 가능 판정 + rollup
+        stockReservationService.undoForOrderItem(cancelled.getId());
         return OrderResponse.from(order);
     }
 
@@ -218,12 +205,26 @@ public class OrderService {
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "주문을 찾을 수 없습니다."));
     }
 
+    /** 주문을 <b>비관적 쓰기 락</b>으로 찾는다 — 상태/원장 변경 경로가 부모 주문에서 직렬화되도록(#1 리뷰 교정). */
+    private Order findOrderForUpdate(Long id) {
+        return orderRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "주문을 찾을 수 없습니다."));
+    }
+
     /**
      * 주문을 찾고, 요청자가 소유자이거나 ADMIN인지 검증한다.
      * 둘 다 아니면 403 — 인증은 됐지만 남의 주문에 접근하려는 경우(IDOR 방지).
      */
     private Order findOwnedOrder(Long id, Long requesterId, boolean admin) {
-        Order order = findOrder(id);
+        return ensureOwner(findOrder(id), requesterId, admin);
+    }
+
+    /** 소유권 검증 + 비관적 쓰기 락(취소 경로 — 상태 변경 직렬화). */
+    private Order findOwnedOrderForUpdate(Long id, Long requesterId, boolean admin) {
+        return ensureOwner(findOrderForUpdate(id), requesterId, admin);
+    }
+
+    private Order ensureOwner(Order order, Long requesterId, boolean admin) {
         if (!admin && !order.getMemberId().equals(requesterId)) {
             throw new BusinessException(HttpStatus.FORBIDDEN, "본인의 주문만 접근할 수 있습니다.");
         }

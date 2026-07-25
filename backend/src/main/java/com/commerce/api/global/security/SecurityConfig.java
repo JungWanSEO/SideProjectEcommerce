@@ -123,6 +123,9 @@ public class SecurityConfig {
                         //  (내 주문 GET /api/orders·POST 등은 아래 anyRequest().authenticated()로 본인 스코핑)
                         .requestMatchers(HttpMethod.GET, "/api/orders/admin").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PATCH, "/api/orders/*/status").hasRole("ADMIN")
+                        // 배송 건(shipment) 단위 전진(#1 c안) — 셀러별 개별/플랫폼 직매입 출고는 ADMIN.
+                        //   셀러 자기 출고는 별경로 PATCH /api/seller/me/shipments/*/status(SELLER). 이 ADMIN 매처를 완화 금지(IDOR).
+                        .requestMatchers(HttpMethod.PATCH, "/api/orders/*/shipments/*/status").hasRole("ADMIN")
                         // 어드민 회원 관리(목록·검색·권한 변경) → ADMIN
                         //  (회원가입 POST /api/members는 위에서 공개, 본인 조회·수정 /me는 아래 authenticated)
                         .requestMatchers(HttpMethod.GET, "/api/members/admin").hasRole("ADMIN")

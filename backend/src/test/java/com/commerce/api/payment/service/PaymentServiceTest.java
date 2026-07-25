@@ -60,15 +60,22 @@ class PaymentServiceTest {
     private PaymentService paymentService;
 
     private OrderResponse order(Long id, Long memberId, OrderStatus status, long total) {
-        // 쿠폰 없음: discountAmount=0, payableAmount=total. PaymentService는 payableAmount로 결제한다.
-        return new OrderResponse(id, memberId, status, total, 0L, total, null, List.of(), null,
-                null, null, List.of(), LocalDateTime.now());
+        // 쿠폰 없음: discountAmount=0. payableAmount = Σ활성항목 실효가 — 전체 취소면 활성 항목이 0이라 0,
+        //   그 외엔 total. cancelOrder는 이 잔여 활성액을 빼 "이번에 취소된 몫"만 환불한다(#1 P4).
+        long payable = (status == OrderStatus.CANCELLED) ? 0L : total;
+        return order(id, memberId, status, total, payable);
+    }
+
+    /** 취소 후 남은 활성 실효가(payable)를 명시 — 부분 취소(출고분 잔존) 시나리오용. */
+    private OrderResponse order(Long id, Long memberId, OrderStatus status, long total, long payable) {
+        return new OrderResponse(id, memberId, status, total, 0L, payable, null, List.of(), null,
+                List.of(), List.of(), LocalDateTime.now());
     }
 
     /** 쿠폰 할인이 적용된 주문(gross=total, 할인=discount → payable=total-discount). */
     private OrderResponse discountedOrder(Long id, Long memberId, OrderStatus status, long total, long discount) {
         return new OrderResponse(id, memberId, status, total, discount, total - discount, "WELCOME5000",
-                List.of(), null, null, null, List.of(), LocalDateTime.now());
+                List.of(), null, List.of(), List.of(), LocalDateTime.now());
     }
 
     private PaymentRequest request() {
@@ -255,7 +262,7 @@ class PaymentServiceTest {
                 OrderItemStatus.CANCELLED);
         return new OrderResponse(1L, 100L, status, subtotal, discountShare, subtotal - discountShare,
                 discountShare > 0 ? "WELCOME5000" : null, List.of(item), null,
-                null, null, List.of(), LocalDateTime.now());
+                List.of(), List.of(), LocalDateTime.now());
     }
 
     @Test
@@ -346,6 +353,31 @@ class PaymentServiceTest {
         assertThat(cmd.getValue().amount()).isEqualTo(20000L);   // 전액 30000이 아니라 잔여 20000만
         assertThat(paid.getStatus()).isEqualTo(PaymentStatus.CANCELLED);   // 잔여까지 환불돼 전액 도달
         assertThat(paid.getRefundedAmount()).isEqualTo(30000L);
+    }
+
+    @Test
+    @DisplayName("취소(부분·#1 P4) - 멀티셀러 일부 출고 시 취소된 미출고 몫만 환불하고 쿠폰은 복원 안 함")
+    void cancelOrder_partial_refundsOnlyCancelledPortion() {
+        // 결제 30000(셀러A 20000 + 셀러B 10000). 셀러B 출고 → 셀러A 항목만 취소(부분).
+        //   주문은 SHIPPING 유지, 취소 후 남은 활성 실효가(payable)=10000.
+        given(orderService.cancel(1L, 100L, false))
+                .willReturn(order(1L, 100L, OrderStatus.SHIPPING, 30000L, 10000L));
+        Payment paid = Payment.ready(1L, 30000L, "MOCK_CARD", "TOSS", "key-1");
+        paid.markPaid("MOCK-tx-1");
+        given(paymentRepository.findByOrderIdAndStatus(1L, PaymentStatus.PAID)).willReturn(Optional.of(paid));
+        given(paymentGatewayRouter.resolve("TOSS")).willReturn(paymentGateway);
+        given(paymentGateway.refund(any())).willReturn(PaymentRefund.refunded("MOCK-REFUND-3"));
+        given(paymentRepository.save(any(Payment.class))).willAnswer(inv -> inv.getArgument(0));
+
+        paymentService.cancelOrder(100L, 1L, false);
+
+        ArgumentCaptor<PaymentGateway.PaymentRefundCommand> cmd =
+                ArgumentCaptor.forClass(PaymentGateway.PaymentRefundCommand.class);
+        verify(paymentGateway).refund(cmd.capture());
+        assertThat(cmd.getValue().amount()).isEqualTo(20000L);   // 전액 30000이 아니라 취소된 셀러A 몫만
+        assertThat(paid.getRefundedAmount()).isEqualTo(20000L);
+        assertThat(paid.getStatus()).isEqualTo(PaymentStatus.PAID);   // 출고분(10000) 남아 아직 PAID
+        verify(memberCouponService, never()).release(any(), any());   // 부분 취소 → 쿠폰 복원 안 함
     }
 
     @Test

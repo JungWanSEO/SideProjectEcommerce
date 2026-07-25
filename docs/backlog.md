@@ -19,7 +19,7 @@
 ## 결정 필요 (외부 무관이나 결정 미정 — 정하면 READY로)
 > 2026-07-20 기능 스캔에서 나온 것들. **자율 진행 금지**(범위·정책·UX 결정) — 사용자가 고르면 READY로 내려온다.
 
-1. **멀티셀러 주문의 상태 단위** ⭐가장 아키텍처적 — 셀러 출고 기능들의 선행 결정. 한 주문에 여러 셀러 상품이 섞이는데 `advanceShipping`은 **Order 전체** status를 움직인다. → (a) 현행 유지·셀러는 조회만(ADMIN이 출고) / (b) 단일셀러 주문에만 셀러 전이 권한 / (c) 상태를 **item·shipment 단위로 내림**(정답에 가깝지만 정산·환불·대사까지 파급).
+1. ✅ **멀티셀러 주문의 상태 단위** — **완료(07-23, c안: shipment 축, 6-phase)** → DONE. 셀러 스코프 #3 반품의 전제 해소.
 2. ✅ **재고 예약 — 오버셀 구간 제거** — **완료(07-22~23, c안: `stock_reservation` TTL + reserved 카운터, V43/V44)** → DONE.
 3. **반품/교환** — DELIVERED가 막다른 길. 반품창 기간·반품 배송비 부담자·교환=취소후재주문 vs 진짜 스왑·자동승인 vs 셀러승인, 4개가 정해져야 상태머신이 그려진다.
 4. **배송비** (`shippingFee` 레포 전체 0회) — `payable = totalPrice - discount`라 PG 금액에 배송비가 **구조적으로 없다**. 나중에 넣으면 결제·환불·정산·대사를 동시에 건드린다. → (a) 도입 안 함(명시) / (b) 정액+무료임계 / (c) 셀러별. + 부분취소 시 환불 여부.
@@ -32,6 +32,7 @@
 > 그 외 정책 대기: 회원 탈퇴(보존기간·PII 마스킹)·적립금/등급·상품 일괄작업 부분실패 정책·셀러 자가수정 범위·`next/image` 도입(이미지 호스팅처).
 
 ## DONE (완료 — 기록)
+- [x] (07-23) **#1 멀티셀러 주문 상태 단위 = shipment 축(c안)** — `feature/multiseller-shipment`(dev 미병합·오너 리뷰 대기), 583→**612 tests**. 6-phase: P1 Shipment 엔티티/V45 → P2 결제 팬아웃+백필 → P3 rollup 파생+동시성(FORCE_INCREMENT+재시도) → P4 취소 shipment-grain+재고 예약판정+부분환불 교정(HIGH-1·함정#7) → P5 셀러/ADMIN 전이 라우트+shipments[]+IDOR → P6 courier/tracking DROP(V46·게이트). 설계=3워크플로(understand→design 적대적비평→구현). 불변식(Σ실효가=결제액·정산 무접촉·PURCHASED 리더) 유지. ⚠️V45/V46 MySQL 스모크·데모 seeder 셀러귀속=복귀 후.
 - [x] (07-23) **#9 대시보드 매출 KPI = 순매출(환불 차감)** — `feature/dashboard-net-revenue`→dev `c68696b` (583 유지·FE 0). "완료 매출"이 주문 gross라 부분취소를 과다계상하던 것을 **b안(순매출)**으로: `PaymentRepository.sumNetRevenueByStatus(PAID)` = `sum(amount−refundedAmount)` **순수 SQL**(refundedAmount가 이미 net 담음 → 엔티티 순회/파생컬럼 불요). 추이도 payment net. OrderRepository 구쿼리 제거·DTO netRevenue·FE 라벨. DashboardServiceTest가 부분환불·전액환불 제외·합 검증.
 - [x] (07-22~23) **#2 재고 예약(TTL) — 오버셀 구간 제거** — `feature/stock-reservation`→dev `d700daa` (570→**583 tests**·**V43/V44**·FE 0). c안(정석: `stock_reservation` 테이블 + `product_option.reserved` 카운터). 주문 생성 시 **원자적 조건부 UPDATE**(reserved+=q WHERE stock-reserved>=q, 선착순 쿠폰과 동형)로 예약→오버셀 0(동시성 IT 30→10 실증). 결제=소진(결정적)·만료/취소=해제·PAID취소=실재고복원. **4렌즈 적대적 리뷰 → 동시성 엣지 6종 수정**: 원자 UPDATE version+1(관리자 lost-update)·consume 0행 409+stock가드·**Order @Version(V44)**+만료 배치 per-order 워커(pay↔만료 경합)·optionId 락순서+데드락 재시도·PLP 필터 available 기준·@DataJpaTest 슬라이스. ⚠️V43/V44 MySQL 스모크=복귀 후.
 - [x] (07-22) **#5 상품 할인가 (정가 originalPrice·%OFF·SALE·할인율 정렬)** — `feature/product-discount-price`→dev `3f45a49` (565→**570 tests**·**V42**·FE 0). 결정필요 #5의 a안(정가 필드 하나). **불변식=결제·정산·환불·대사는 price 기준 그대로, originalPrice는 표시/정렬 전용**(적대적 리뷰 돈경로 격리 렌즈로 확인). BE=필드·V42·정가≥판매가 guard(3경로)·onSale 필터·discountRate 정렬·데모시드 3종. FE=재사용 PriceTag(%OFF+취소선)·할인율순 정렬·세일 필터(URL·SSR)·어드민 폼. **4렌즈 적대적 리뷰**(돈경로·백엔드 클린, low 2건 수정). ⚠️V42 EXPLAIN=MySQL 복귀 후. 후속=b안 기간형 promotion.

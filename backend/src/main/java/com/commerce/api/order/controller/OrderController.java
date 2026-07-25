@@ -12,7 +12,9 @@ import com.commerce.api.order.dto.OrderResponse;
 import com.commerce.api.order.dto.OrderSearchCondition;
 import com.commerce.api.order.dto.OrderStatusUpdateRequest;
 import com.commerce.api.order.dto.OrderSummaryResponse;
+import com.commerce.api.order.dto.ShipmentStatusUpdateRequest;
 import com.commerce.api.order.service.OrderService;
+import com.commerce.api.order.service.ShipmentService;
 import com.commerce.api.payment.service.PaymentService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -49,6 +51,7 @@ public class OrderController {
 
     private final OrderService orderService;
     private final PaymentService paymentService;   // 취소+환불 오케스트레이션은 결제 측에 위임(순환 의존 회피)
+    private final ShipmentService shipmentService;   // 배송 건(shipment) 단위 전진(#1 c안)
 
     @Operation(summary = "주문 생성", description = "상품 ID·수량 목록으로 주문한다. 주문자는 로그인 사용자. 주문은 결제 대기(PENDING)로 생성되며 주문 시점 가격을 스냅샷한다. 재고 차감은 결제 승인 시점에 일어난다.")
     @PostMapping
@@ -162,5 +165,20 @@ public class OrderController {
                 id, request.status(), SecurityUtil.getCurrentMemberId(),
                 request.courier(), request.trackingNumber());
         return ResponseEntity.ok(ApiResponse.success("주문 상태가 변경되었습니다.", response));
+    }
+
+    @Operation(summary = "배송 건 상태 전진 (ADMIN)",
+            description = "멀티셀러 주문의 특정 배송 건(shipment)을 다음 단계로 전진한다(PAID→SHIPPING→DELIVERED). "
+                    + "셀러별로 개별 출고할 때·플랫폼 직매입(셀러 미귀속) 배송을 운영자가 처리할 때 쓴다. "
+                    + "주문 전체 일괄 전진은 PATCH /{id}/status. 경로의 주문과 배송 건이 안 맞으면 404, 잘못된 전이면 409.")
+    @Auditable(action = "SHIPMENT_ADVANCE", targetType = "SHIPMENT", targetId = "#shipmentId")
+    @PatchMapping("/{orderId}/shipments/{shipmentId}/status")
+    public ResponseEntity<ApiResponse<OrderResponse>> advanceShipment(
+            @PathVariable Long orderId, @PathVariable Long shipmentId,
+            @Valid @RequestBody ShipmentStatusUpdateRequest request) {
+        OrderResponse response = shipmentService.advanceForAdmin(
+                orderId, shipmentId, request.status(), SecurityUtil.getCurrentMemberId(),
+                request.courier(), request.trackingNumber());
+        return ResponseEntity.ok(ApiResponse.success("배송 상태가 변경되었습니다.", response));
     }
 }
