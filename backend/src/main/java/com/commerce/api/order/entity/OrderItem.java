@@ -81,12 +81,20 @@ public class OrderItem extends BaseEntity {
         this.status = OrderItemStatus.ACTIVE;
     }
 
-    /** 항목 취소(부분환불). 이미 취소면 409. */
+    /** 항목 취소(부분환불). ACTIVE에서만 — 이미 취소·반품된 항목이면 409(이중 원장 차단). */
     public void cancel() {
-        if (this.status == OrderItemStatus.CANCELLED) {
-            throw new BusinessException(HttpStatus.CONFLICT, "이미 취소된 주문 항목입니다.");
+        if (this.status != OrderItemStatus.ACTIVE) {
+            throw new BusinessException(HttpStatus.CONFLICT, "취소할 수 없는 주문 항목입니다. (현재: " + this.status + ")");
         }
         this.status = OrderItemStatus.CANCELLED;
+    }
+
+    /** 항목 반품 확정(#3). ACTIVE에서만 RETURNED로 — 취소된 항목 반품·이중 반품을 구조적으로 차단. */
+    public void markReturned() {
+        if (this.status != OrderItemStatus.ACTIVE) {
+            throw new BusinessException(HttpStatus.CONFLICT, "반품할 수 없는 주문 항목입니다. (현재: " + this.status + ")");
+        }
+        this.status = OrderItemStatus.RETURNED;
     }
 
     public boolean isActive() {

@@ -72,6 +72,15 @@ public class Shipment extends BaseEntity {
     @Column(name = "tracking_number", length = 60)
     private String trackingNumber;
 
+    /** 배송 완료 시각 (DELIVERED 전이 시 세팅) — 반품 기한(DELIVERED+N일) O(1) 판정용 비정규화(이력 스캔 회피, #3). */
+    @Column(name = "delivered_at")
+    private java.time.LocalDateTime deliveredAt;
+
+    /** 원배송(ORIGINAL) vs 교환 재출고(EXCHANGE, #3). EXCHANGE는 주문 rollup·항목 배송 판정에서 제외된다. */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private ShipmentKind kind;
+
     /**
      * 상태 이력 (애그리거트 내부 — 전이마다 append). append-only라 정렬은 id 오름차순(발생 순).
      * 전이 메서드가 스스로 기록하므로 "이력 없이 상태만 바뀌는" 일이 구조적으로 불가능하다({@link Order#statusHistory}와 동형).
@@ -80,10 +89,11 @@ public class Shipment extends BaseEntity {
     @jakarta.persistence.OrderBy("id asc")
     private List<ShipmentStatusHistory> statusHistory = new ArrayList<>();
 
-    private Shipment(Order order, Long sellerId, ShipmentStatus initialStatus, String memo) {
+    private Shipment(Order order, Long sellerId, ShipmentStatus initialStatus, ShipmentKind kind, String memo) {
         this.order = order;
         this.sellerId = sellerId;
         this.status = initialStatus;
+        this.kind = kind;
         recordHistory(null, initialStatus, null, memo);
     }
 
@@ -92,7 +102,7 @@ public class Shipment extends BaseEntity {
      * {@link Order#markPaid()}가 셀러별로 호출한다(P2).
      */
     public static Shipment forPayment(Order order, Long sellerId) {
-        return new Shipment(order, sellerId, ShipmentStatus.PAID, "결제 완료 · 출고 대기");
+        return new Shipment(order, sellerId, ShipmentStatus.PAID, ShipmentKind.ORIGINAL, "결제 완료 · 출고 대기");
     }
 
     /**
@@ -101,7 +111,7 @@ public class Shipment extends BaseEntity {
      * 개별 송장 정보가 없으므로 courier/tracking은 비운다(orders의 단일 송장 컬럼은 P6에서 DROP).
      */
     public static Shipment forBackfill(Order order, Long sellerId, ShipmentStatus status) {
-        return new Shipment(order, sellerId, status, "백필(기존 주문 상태 소급)");
+        return new Shipment(order, sellerId, status, ShipmentKind.ORIGINAL, "백필(기존 주문 상태 소급)");
     }
 
     /** 상태 이력 1건 append — 모든 전이 메서드가 상태를 바꾼 뒤 이걸 호출한다(불변식). */
@@ -135,6 +145,8 @@ public class Shipment extends BaseEntity {
                 memo = ((courier == null ? "" : courier)
                         + (trackingNumber == null ? "" : " " + trackingNumber)).trim();
             }
+        } else if (next == ShipmentStatus.DELIVERED) {
+            this.deliveredAt = java.time.LocalDateTime.now();   // 반품 기한 기산점(#3)
         }
         recordHistory(from, next, changedBy, memo);
     }
@@ -158,6 +170,11 @@ public class Shipment extends BaseEntity {
     /** 취소되지 않은 shipment인지 — 주문 상태 rollup에서 "비취소 shipment 기준" 판정에 쓴다(P3). */
     public boolean isActive() {
         return this.status != ShipmentStatus.CANCELLED;
+    }
+
+    /** 원배송(교환 재출고가 아님)인지 — rollup·항목 배송 판정·일괄 전진이 원배송만 보게 한다(#3). */
+    public boolean isOriginal() {
+        return this.kind == ShipmentKind.ORIGINAL;
     }
 
     /** 이 shipment가 주어진 셀러 것인지 — null(플랫폼 버킷) null-safe 매칭. */

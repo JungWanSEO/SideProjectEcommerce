@@ -320,9 +320,10 @@ public class Order extends BaseEntity {
         return shipment == null || shipment.getStatus() == ShipmentStatus.PAID;
     }
 
-    /** 이 항목이 속한 셀러의 shipment(없으면 null — PENDING). null(플랫폼 버킷) null-safe 매칭. */
+    /** 이 항목이 속한 셀러의 <b>원배송</b> shipment(없으면 null — PENDING). 교환 재출고(EXCHANGE)는 제외(#3). null-safe 매칭. */
     private Shipment shipmentForItem(OrderItem item) {
         return shipments.stream()
+                .filter(Shipment::isOriginal)
                 .filter(s -> s.belongsToSeller(item.getSellerId()))
                 .findFirst()
                 .orElse(null);
@@ -413,7 +414,8 @@ public class Order extends BaseEntity {
 
         int advanced = 0;
         for (Shipment s : shipments) {
-            if (s.isActive() && s.getStatus() == prereq) {
+            // 교환 재출고(EXCHANGE)는 ADMIN 일괄 전진에서 제외 — 재출고건은 shipmentId 직접 경로로만 전이한다(#3).
+            if (s.isOriginal() && s.isActive() && s.getStatus() == prereq) {
                 s.advanceShipping(target, changedBy, courier, trackingNumber);
                 advanced++;
             }
@@ -460,9 +462,11 @@ public class Order extends BaseEntity {
     }
 
     private OrderStatus rollupStatus() {
-        List<Shipment> active = shipments.stream().filter(Shipment::isActive).toList();
+        // 교환 재출고(EXCHANGE)는 주문 상태 rollup에서 제외 — 안 그러면 DELIVERED 주문이 재출고로 SHIPPING 후퇴(#3).
+        List<Shipment> active = shipments.stream()
+                .filter(Shipment::isOriginal).filter(Shipment::isActive).toList();
         if (active.isEmpty()) {
-            return OrderStatus.CANCELLED;   // 모든 shipment 취소 → 주문 취소
+            return OrderStatus.CANCELLED;   // 모든 원배송 shipment 취소 → 주문 취소
         }
         if (active.stream().allMatch(s -> s.getStatus() == ShipmentStatus.DELIVERED)) {
             return OrderStatus.DELIVERED;

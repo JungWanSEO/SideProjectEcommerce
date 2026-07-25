@@ -59,6 +59,20 @@ class ShipmentTest {
     }
 
     @Test
+    @DisplayName("kind - forPayment은 ORIGINAL 기본, DELIVERED 전이 시 deliveredAt 세팅(#3 반품 기한 기산)")
+    void kindAndDeliveredAt() {
+        Shipment s = shipment(1L);
+        assertThat(s.getKind()).isEqualTo(ShipmentKind.ORIGINAL);
+        assertThat(s.isOriginal()).isTrue();
+        assertThat(s.getDeliveredAt()).isNull();   // 아직 배송 전
+
+        s.advanceShipping(ShipmentStatus.SHIPPING, null, "CJ", "1");
+        assertThat(s.getDeliveredAt()).isNull();   // SHIPPING엔 미설정
+        s.advanceShipping(ShipmentStatus.DELIVERED, null, null, null);
+        assertThat(s.getDeliveredAt()).isNotNull();   // DELIVERED에 기산점 세팅
+    }
+
+    @Test
     @DisplayName("전이 위반 - 건너뛰기/되돌리기/CANCELLED 출발은 409")
     void illegalTransitions() {
         assertThatThrownBy(() -> shipment(1L).advanceShipping(ShipmentStatus.DELIVERED, null, null, null))
