@@ -38,12 +38,20 @@ public interface OrderRepository extends JpaRepository<Order, Long>, OrderReposi
     Page<Order> findByStatus(OrderStatus status, Pageable pageable);
 
     /**
-     * 이 회원이 해당 상품을 주어진 상태들 중 하나로 주문한 적이 있는지 — 리뷰 "구매자만 작성" 검증용.
-     * {@link OrderStatus#PURCHASED}를 넘겨 결제 후 배송 중/완료까지 구매로 인정한다.
-     * 주문 항목(orderItems) 컬렉션을 조인해 productId를 본다(파생 쿼리의 _ 는 연관 경로 탐색 표시).
+     * 이 회원이 해당 상품을 주어진 상태들 중 하나로 <b>ACTIVE 항목으로</b> 구매한 적이 있는지 — 리뷰 "구매자만 작성" 검증용.
+     * {@link OrderStatus#PURCHASED}를 넘겨 결제 후 배송 중/완료까지 구매로 인정하되, 해당 상품 항목이
+     * <b>ACTIVE(취소·반품되지 않음)</b>일 때만 자격을 준다(#3 교정 — 반품/취소한 상품엔 리뷰 불가). 항목 상태를
+     * 조인 조건에 함께 걸어야 하므로 파생 쿼리 대신 JPQL로 명시한다(같은 조인의 동일 항목에 두 조건 적용).
      */
-    boolean existsByMemberIdAndStatusInAndOrderItems_ProductId(
-            Long memberId, Collection<OrderStatus> statuses, Long productId);
+    @Query("""
+            select case when count(oi) > 0 then true else false end
+            from Order o join o.orderItems oi
+            where o.memberId = :memberId
+              and o.status in :statuses
+              and oi.productId = :productId
+              and oi.status = com.commerce.api.order.entity.OrderItemStatus.ACTIVE
+            """)
+    boolean hasActivePurchase(Long memberId, Collection<OrderStatus> statuses, Long productId);
 
     // === 어드민 대시보드 집계 (읽기 전용) =========================================
     //   매출 KPI·추이는 주문 gross(totalPrice−discount)가 부분취소를 과다계상해 결제·정산 net과 어긋나므로,

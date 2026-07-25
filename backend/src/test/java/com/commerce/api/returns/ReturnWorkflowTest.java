@@ -146,17 +146,17 @@ class ReturnWorkflowTest {
     }
 
     @Test
-    @DisplayName("교환 확정(COMPLETE)은 아직 409(P6에서 배선)")
-    void completeNotYet() {
+    @DisplayName("교환 확정 - 존재하지 않는 교환 옵션이면 404(옵션 스왑 정합, 스왑·재출고 성립 테스트는 ReturnExchangeTest)")
+    void completeUnknownOption() {
         Order order = deliveredOrder();
         long itemId = order.getOrderItems().get(0).getId();
         ReturnResponse req = returnService.create(100L, false, order.getId(),
-                new ReturnCreateRequest(itemId, ReturnType.EXCHANGE, "사이즈 교환", 22L));
+                new ReturnCreateRequest(itemId, ReturnType.EXCHANGE, "사이즈 교환", 999_999L));   // 없는 옵션
         returnService.advanceForSeller(req.id(), 1L, action(ReturnAction.APPROVE), 1L);
         returnService.advanceForSeller(req.id(), 1L, action(ReturnAction.PICK_UP), 1L);
         returnService.advanceForSeller(req.id(), 1L, action(ReturnAction.INSPECT), 1L);
 
         assertThatThrownBy(() -> returnService.advanceForSeller(req.id(), 1L, action(ReturnAction.COMPLETE), 1L))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(BusinessException.class).extracting("status").isEqualTo(HttpStatus.NOT_FOUND);
     }
 }
