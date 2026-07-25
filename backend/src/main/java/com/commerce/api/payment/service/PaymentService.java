@@ -216,4 +216,15 @@ public class PaymentService {
                 .map(PaymentResponse::from)
                 .toList();
     }
+
+    /**
+     * 정산 <b>역분개</b> 후보 — PAID + CANCELLED(#3 P5). 반품 전액환불로 CANCELLED된 결제까지 포함해야
+     * reverseRefunds가 역분개를 놓치지 않는다(PAID만 스캔하면 셀러 과다정산). run()(정방향)은 계속 PAID만 쓴다.
+     */
+    @Transactional(readOnly = true)
+    public List<PaymentResponse> getSettlementReversalCandidates() {
+        return paymentRepository.findByStatusIn(List.of(PaymentStatus.PAID, PaymentStatus.CANCELLED)).stream()
+                .map(PaymentResponse::from)
+                .toList();
+    }
 }

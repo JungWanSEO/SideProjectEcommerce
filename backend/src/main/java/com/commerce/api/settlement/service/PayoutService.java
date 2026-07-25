@@ -55,6 +55,12 @@ public class PayoutService {
             platformFee += e.getPlatformFee();
             net += e.getNetAmount();
         }
+        // 음수 순액 가드(#3 P5) — 반품 역분개로 이 기간 net이 음수면 "음수 송금"이 되므로 지급을 만들지 않는다.
+        //   음수 SCHEDULED 항목은 payoutId=null로 남아 다음 정산 기간(넓은 범위)에서 양수와 상계·이월된다.
+        if (net < 0) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST,
+                    "정산 순액이 음수입니다(환불이 매출을 초과). 다음 정산 기간에 이월 상계됩니다.");
+        }
         Payout payout = payoutRepository.save(Payout.create(
                 request.sellerId(), request.from(), request.to(), gross, fee, platformFee, net, entries.size()));
         entries.forEach(e -> e.assignPayout(payout.getId()));   // 묶음에 편입(영속 → dirty checking)

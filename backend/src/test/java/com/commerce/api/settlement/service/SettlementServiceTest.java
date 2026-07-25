@@ -318,7 +318,7 @@ class SettlementServiceTest {
     @Test
     @DisplayName("환불 상계 - 정산 후 항목 취소되면 음수 역분개 항목 생성")
     void reverseRefunds_offsetsCancelledSeller() {
-        given(paymentService.getPaidPayments()).willReturn(List.of(paidPayment(1L, 11L, 30000L, "TOSS")));
+        given(paymentService.getSettlementReversalCandidates()).willReturn(List.of(paidPayment(1L, 11L, 30000L, "TOSS")));
         // 기존 정산: 셀러1(10000) + 셀러2(20000)
         given(settlementRepository.findByPaymentId(1L)).willReturn(List.of(
                 settled(1L, 10000L, 250L, 1000L), settled(2L, 20000L, 500L, 2000L)));
@@ -347,7 +347,7 @@ class SettlementServiceTest {
                 5400, 135, 0.025, 540, 0.10, 600, "PLATFORM", LocalDate.now().plusDays(2));
         SettlementEntry s2 = SettlementEntry.scheduled(1L, 11L, "tx", "TOSS", 2L,
                 3600, 90, 0.025, 180, 0.05, 400, "PLATFORM", LocalDate.now().plusDays(2));
-        given(paymentService.getPaidPayments()).willReturn(List.of(paidPayment(1L, 11L, 9000L, "TOSS")));
+        given(paymentService.getSettlementReversalCandidates()).willReturn(List.of(paidPayment(1L, 11L, 9000L, "TOSS")));
         given(settlementRepository.findByPaymentId(1L)).willReturn(List.of(s1, s2));
         given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);
         // 셀러2 항목 취소 → 활성=셀러1만(gross6000·share600). 취소된 셀러2 항목(share400)은 정산에서 제외.

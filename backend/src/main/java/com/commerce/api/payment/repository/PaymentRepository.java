@@ -18,6 +18,13 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
     List<Payment> findByStatus(PaymentStatus status);
 
     /**
+     * 여러 상태의 결제 조회 — 정산 <b>역분개</b> 후보(PAID + CANCELLED, #3 P5). 반품 전액환불은 Payment를
+     * CANCELLED로 넘기므로 PAID만 스캔하면 역분개가 누락돼 셀러 과다정산이 난다. 정산된 모든 결제를 후보로 둔다
+     * (이미 상계된 건은 diff 0이라 멱등). 정방향 정산 run()은 계속 PAID만(findByStatus).
+     */
+    List<Payment> findByStatusIn(java.util.Collection<PaymentStatus> statuses);
+
+    /**
      * 주문의 특정 상태 결제 조회 — 환불 시 PAID 한 건을 찾는 데 쓴다.
      * (한 주문에 결제 시도가 여러 번이어도 PAID는 최대 1건 → Optional로 안전.)
      */
