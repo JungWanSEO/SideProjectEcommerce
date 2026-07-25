@@ -21,4 +21,7 @@ public interface StockReservationRepository extends JpaRepository<StockReservati
      * 가르는 데 쓴다(#1 P4). 전체 Order.status가 아니라 항목별 실차감 여부로 판정해 멀티셀러 재고 누락을 막는다.
      */
     List<StockReservation> findByOrderItemId(Long orderItemId);
+
+    /** 이 주문 항목의 특정 옵션 예약 — 교환(#3 P6)에서 원 옵션만 골라 복원할 때(옵션 스왑 후 이중복원 회피). */
+    List<StockReservation> findByOrderItemIdAndOptionId(Long orderItemId, Long optionId);
 }

@@ -114,6 +114,14 @@ public class Shipment extends BaseEntity {
         return new Shipment(order, sellerId, status, ShipmentKind.ORIGINAL, "백필(기존 주문 상태 소급)");
     }
 
+    /**
+     * 교환 재출고(#3 P6) — 대체품을 셀러가 다시 보내는 shipment(kind=EXCHANGE, status=PAID 출고 대기).
+     * kind=EXCHANGE라 주문 rollup·항목 배송 판정·일괄 전진에서 제외된다(DELIVERED 주문 후퇴 방지). shipmentId 직접 경로로 전이.
+     */
+    public static Shipment forExchange(Order order, Long sellerId) {
+        return new Shipment(order, sellerId, ShipmentStatus.PAID, ShipmentKind.EXCHANGE, "교환 재출고 · 출고 대기");
+    }
+
     /** 상태 이력 1건 append — 모든 전이 메서드가 상태를 바꾼 뒤 이걸 호출한다(불변식). */
     private void recordHistory(ShipmentStatus from, ShipmentStatus to, Long changedBy, String memo) {
         this.statusHistory.add(ShipmentStatusHistory.of(this, from, to, changedBy, memo));

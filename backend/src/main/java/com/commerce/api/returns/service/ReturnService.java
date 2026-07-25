@@ -3,8 +3,11 @@ package com.commerce.api.returns.service;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.order.entity.Order;
 import com.commerce.api.order.entity.OrderItem;
+import com.commerce.api.order.entity.Shipment;
 import com.commerce.api.order.repository.OrderRepository;
 import com.commerce.api.payment.service.PaymentService;
+import com.commerce.api.product.entity.ProductOption;
+import com.commerce.api.product.repository.ProductOptionRepository;
 import com.commerce.api.product.service.StockReservationService;
 import com.commerce.api.returns.dto.ReturnAction;
 import com.commerce.api.returns.dto.ReturnCreateRequest;
@@ -43,7 +46,8 @@ public class ReturnService {
     private final OrderRepository orderRepository;
     private final ReturnRequestRepository returnRequestRepository;
     private final PaymentService paymentService;              // 반품 환불(#3 P4) — returns→payment 단방향
-    private final StockReservationService stockReservationService;   // 반품 재입고(#3 P4) — returns→product
+    private final StockReservationService stockReservationService;   // 반품 재입고·교환 재고(#3 P4/P6) — returns→product
+    private final ProductOptionRepository productOptionRepository;   // 교환 대체 옵션 검증(#3 P6)
 
     /**
      * 구매자 반품/교환 요청 생성. 부모 주문 비관락으로 중복요청을 직렬화하고, 대상 항목 자격(ACTIVE·배송완료·기한)을
@@ -107,8 +111,7 @@ public class ReturnService {
             case PICK_UP -> r.pickUp(changedBy);
             case INSPECT -> r.inspect(changedBy);
             case REFUND -> refund(locked.order(), r, changedBy);
-            case COMPLETE -> throw new BusinessException(HttpStatus.CONFLICT,
-                    "교환 확정은 아직 처리할 수 없습니다.");   // P6에서 옵션 스왑+재출고로 배선
+            case COMPLETE -> exchange(locked.order(), r, changedBy);
         }
     }
 
@@ -130,6 +133,41 @@ public class ReturnService {
         if (r.isRestock()) {
             stockReservationService.undoForOrderItem(r.getOrderItemId());   // 재입고(CONSUMED→실재고 복원). 검수확정 시점에만.
         }
+    }
+
+    /**
+     * 교환 검수확정(INSPECTED→COMPLETED, EXCHANGE 전용) — <b>옵션 스왑 + 대체품 재출고</b>. 환불 없음·동일가라
+     * revenue-neutral(원 OrderItem을 ACTIVE 유지해 getSubtotal 불변 → discountShares·정산 델타 0).
+     *
+     * <p>순서: 상태·타입 검증(부작용 전) → 대체품 소진(품절이면 409로 전체 롤백, 자동 환불 전환 금지) → 원품 복원 →
+     * 옵션 스왑 → 교환 재출고 shipment(kind=EXCHANGE, rollup 제외라 DELIVERED 주문 후퇴 없음) → COMPLETED.
+     */
+    private void exchange(Order order, ReturnRequest r, Long changedBy) {
+        if (r.getType() != com.commerce.api.returns.entity.ReturnType.EXCHANGE) {
+            throw new BusinessException(HttpStatus.CONFLICT, "교환(EXCHANGE) 요청만 교환 확정할 수 있습니다.");
+        }
+        if (r.getStatus() != com.commerce.api.returns.entity.ReturnStatus.INSPECTED) {
+            throw new BusinessException(HttpStatus.CONFLICT, "검수 완료 후에만 교환을 확정할 수 있습니다.");
+        }
+        OrderItem item = order.requireItem(r.getOrderItemId());
+        Long oldOptionId = item.getOptionId();
+        Long newOptionId = r.getExchangeOptionId();
+        ProductOption newOption = productOptionRepository.findById(newOptionId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "교환 대상 옵션을 찾을 수 없습니다."));
+        if (!newOption.getProduct().getId().equals(item.getProductId())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "같은 상품의 다른 옵션으로만 교환할 수 있습니다.");
+        }
+        if (newOptionId.equals(oldOptionId)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "같은 옵션으로는 교환할 수 없습니다.");
+        }
+        // 대체품 소진 먼저(품절이면 409로 롤백 — 아직 원품·아이템 미변경). expiresAt은 CONSUMED라 무의미.
+        stockReservationService.consumeForExchange(order.getId(), r.getOrderItemId(), newOptionId, item.getQuantity(),
+                java.time.LocalDateTime.now().plusMinutes(30));
+        stockReservationService.restoreOption(r.getOrderItemId(), oldOptionId, item.getQuantity());   // 반환된 원품 재입고
+        item.swapOption(newOptionId, newOption.getSize());   // 원 항목 ACTIVE 유지·optionId/size만 교체(revenue-neutral)
+        Shipment exchangeShipment = order.addExchangeShipment(item.getSellerId());
+        orderRepository.saveAndFlush(order);   // cascade로 교환 shipment id 부여
+        r.markExchanged(exchangeShipment.getId(), changedBy);
     }
 
     private record Locked(Order order, ReturnRequest returnRequest) {

@@ -358,6 +358,16 @@ public class Order extends BaseEntity {
     public record ReturnableItem(Long shipmentId, Long sellerId, int quantity) {
     }
 
+    /**
+     * 교환 재출고 shipment를 추가한다(#3 P6, kind=EXCHANGE). rollup·항목 배송 판정에서 제외되므로 DELIVERED 주문이
+     * 후퇴하지 않는다. 반환한 shipment의 id는 cascade flush 후 채워진다(호출자가 flush 후 사용).
+     */
+    public Shipment addExchangeShipment(Long sellerId) {
+        Shipment exchange = Shipment.forExchange(this, sellerId);
+        this.shipments.add(exchange);
+        return exchange;
+    }
+
     /** 주문 항목 조회 — 없으면 404(#3 반품 확정 등). */
     public OrderItem requireItem(Long orderItemId) {
         return orderItems.stream()

@@ -101,6 +101,19 @@ public class OrderItem extends BaseEntity {
         return this.status == OrderItemStatus.ACTIVE;
     }
 
+    /**
+     * 교환(#3 P6) — 대체 옵션으로 스왑. 원 항목을 ACTIVE로 유지하고 optionId/size만 바꾼다(가격·수량·셀러·id 불변).
+     * getSubtotal 불변이라 discountShares·payable·정산이 무변경 정합(동일가 교환=돈/정산 델타 0, revenue-neutral).
+     * 새 OrderItem을 만들면 discountShares basis가 이중계상되므로 스왑 방식을 쓴다. ACTIVE에서만.
+     */
+    public void swapOption(Long newOptionId, String newSize) {
+        if (this.status != OrderItemStatus.ACTIVE) {
+            throw new BusinessException(HttpStatus.CONFLICT, "교환할 수 없는 주문 항목입니다. (현재: " + this.status + ")");
+        }
+        this.optionId = newOptionId;
+        this.size = newSize;
+    }
+
     /** 양방향 연관 설정 (Order.addItem에서 호출) */
     void assignOrder(Order order) {
         this.order = order;
