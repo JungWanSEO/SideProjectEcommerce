@@ -181,6 +181,29 @@ public class PaymentService {
     }
 
     /**
+     * 반품 검수확정 환불(#3 P4) — cancelOrderItem의 환불 블록과 동형. 호출자(ReturnService)가 <b>이미 부모 주문
+     * 비관락을 잡은 트랜잭션 안에서</b> 호출하므로 여기선 락을 다시 잡지 않는다(그 락이 Payment.refundedAmount
+     * lost-update도 보호). 실효가 0(100% 할인) 라인은 PG·누적 스킵. 이 메서드는 반드시 OrderItem flip 이후에 호출한다
+     * (flip이 먼저 검증돼야 환불이 롤백 없이 나간다 — 리뷰 HIGH 교정).
+     */
+    public void refundForReturn(Long orderId, long refundAmount) {
+        if (refundAmount <= 0) {
+            return;
+        }
+        paymentRepository.findByOrderIdAndStatus(orderId, PaymentStatus.PAID)
+                .ifPresent(payment -> {
+                    PaymentRefund refund = paymentGatewayRouter.resolve(payment.getProvider())
+                            .refund(new PaymentRefundCommand(orderId, refundAmount, payment.getPgTransactionId()));
+                    if (!refund.refunded()) {
+                        throw new BusinessException(HttpStatus.BAD_GATEWAY,
+                                "환불에 실패했습니다. (" + refund.failureReason() + ")");
+                    }
+                    payment.partialRefund(refundAmount);   // 누적 → 전액 도달 시 CANCELLED
+                    paymentRepository.save(payment);
+                });
+    }
+
+    /**
      * 결제 완료(PAID) 건 전체를 DTO로 반환한다 — 정산 도메인이 정산 대상 결제를 가져갈 때 쓴다.
      *
      * <p>settlement → payment 의존을 서비스 계층 + DTO로만 노출해(엔티티·리포지토리를 직접 안 넘김)

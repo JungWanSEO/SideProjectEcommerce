@@ -358,6 +358,22 @@ public class Order extends BaseEntity {
     public record ReturnableItem(Long shipmentId, Long sellerId, int quantity) {
     }
 
+    /** 주문 항목 조회 — 없으면 404(#3 반품 확정 등). */
+    public OrderItem requireItem(Long orderItemId) {
+        return orderItems.stream()
+                .filter(i -> orderItemId.equals(i.getId()))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "주문 항목을 찾을 수 없습니다."));
+    }
+
+    /**
+     * 항목 실효가 = 소계 − 안분 할인({@link #discountShares} 단일 출처). 환불액의 단일 출처 — 취소·반품이 같은 값을 써야
+     * "Σ실효가=결제액" 불변식이 유지된다(과다환불·대사 불일치 방지).
+     */
+    public long effectivePriceOf(OrderItem item) {
+        return item.getSubtotal() - discountShares().getOrDefault(item, 0L);
+    }
+
     /** 결제 완료 처리 (PENDING → PAID). 결제 대기 상태가 아니면 예외. 결제 시점에 셀러별 shipment를 팬아웃 생성한다(#1 P2). */
     public void markPaid() {
         if (this.status != OrderStatus.PENDING) {

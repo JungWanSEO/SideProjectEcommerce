@@ -146,17 +146,17 @@ class ReturnWorkflowTest {
     }
 
     @Test
-    @DisplayName("P3 범위 - REFUND/COMPLETE 액션은 아직 409(P4/P6에서 배선)")
-    void refundNotYet() {
+    @DisplayName("교환 확정(COMPLETE)은 아직 409(P6에서 배선)")
+    void completeNotYet() {
         Order order = deliveredOrder();
         long itemId = order.getOrderItems().get(0).getId();
         ReturnResponse req = returnService.create(100L, false, order.getId(),
-                new ReturnCreateRequest(itemId, ReturnType.RETURN, "x", null));
+                new ReturnCreateRequest(itemId, ReturnType.EXCHANGE, "사이즈 교환", 22L));
         returnService.advanceForSeller(req.id(), 1L, action(ReturnAction.APPROVE), 1L);
         returnService.advanceForSeller(req.id(), 1L, action(ReturnAction.PICK_UP), 1L);
         returnService.advanceForSeller(req.id(), 1L, action(ReturnAction.INSPECT), 1L);
 
-        assertThatThrownBy(() -> returnService.advanceForSeller(req.id(), 1L, action(ReturnAction.REFUND), 1L))
+        assertThatThrownBy(() -> returnService.advanceForSeller(req.id(), 1L, action(ReturnAction.COMPLETE), 1L))
                 .isInstanceOf(BusinessException.class);
     }
 }
