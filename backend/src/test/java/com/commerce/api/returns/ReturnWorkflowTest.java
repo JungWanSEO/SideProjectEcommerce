@@ -146,6 +146,18 @@ class ReturnWorkflowTest {
     }
 
     @Test
+    @DisplayName("ADMIN 대행 생성 - 소유자는 대행자(ADMIN)가 아니라 실제 구매자로 귀속(적대적리뷰 LOW)")
+    void adminCreate_ownedByBuyer() {
+        Order order = deliveredOrder();   // 구매자 memberId=100
+        long itemId = order.getOrderItems().get(0).getId();
+
+        // ADMIN(id=1)이 admin=true로 대행 생성 → 소유자는 caller(1)가 아니라 구매자(100)여야 /returns/me로 조회 가능
+        ReturnResponse req = returnService.create(1L, true, order.getId(),
+                new ReturnCreateRequest(itemId, ReturnType.RETURN, "대행 접수", null));
+        assertThat(req.memberId()).isEqualTo(100L);
+    }
+
+    @Test
     @DisplayName("교환 확정 - 존재하지 않는 교환 옵션이면 404(옵션 스왑 정합, 스왑·재출고 성립 테스트는 ReturnExchangeTest)")
     void completeUnknownOption() {
         Order order = deliveredOrder();

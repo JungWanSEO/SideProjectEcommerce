@@ -2,6 +2,7 @@ package com.commerce.api.returns.repository;
 
 import com.commerce.api.returns.entity.ReturnRequest;
 import com.commerce.api.returns.entity.ReturnStatus;
+import com.commerce.api.returns.entity.ReturnType;
 import jakarta.persistence.LockModeType;
 import java.util.Collection;
 import java.util.List;
@@ -29,6 +30,13 @@ public interface ReturnRequestRepository extends JpaRepository<ReturnRequest, Lo
 
     /** 이 주문 항목에 진행 중(미종료) 반품이 있는가 — 중복 요청 가드. */
     List<ReturnRequest> findByOrderItemIdAndStatusIn(Long orderItemId, Collection<ReturnStatus> statuses);
+
+    /**
+     * 이 항목에 특정 타입·상태의 반품이 있는가 — 교환 완료(EXCHANGE·COMPLETED) 항목의 재-반품 차단용(#3 적대적리뷰 교정).
+     * 교환 후 원 항목은 ACTIVE로 남고 자격 게이트는 원배송(DELIVERED)만 보므로, 이 가드가 없으면 교환품을 받고도
+     * 다시 환불받는 이중지급이 뚫린다.
+     */
+    boolean existsByOrderItemIdAndTypeAndStatus(Long orderItemId, ReturnType type, ReturnStatus status);
 
     /** 셀러 콘솔: 내 셀러의 반품 목록(상태 필터). */
     Page<ReturnRequest> findBySellerId(Long sellerId, Pageable pageable);

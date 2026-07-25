@@ -1,7 +1,10 @@
 package com.commerce.api.product.repository;
 
 import com.commerce.api.product.entity.ProductOption;
+import jakarta.persistence.LockModeType;
+import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -49,4 +52,13 @@ public interface ProductOptionRepository extends JpaRepository<ProductOption, Lo
     @Query("update ProductOption o set o.stock = o.stock + :qty, o.version = o.version + 1 "
             + "where o.id = :optionId")
     int restore(@Param("optionId") Long optionId, @Param("qty") int qty);
+
+    /**
+     * 옵션 행 비관적 락(#3 교환 데드락 예방) — 교환은 원/새 옵션 두 행을 순차 UPDATE하므로, 미러 교환(서로 다른
+     * 주문이 같은 두 옵션을 반대 방향으로) 사이에 락 순서가 역전돼 데드락 창이 열린다. 호출자가 두 옵션을
+     * <b>id 오름차순</b>으로 먼저 이 락을 잡아 획득 순서를 통일한다(OrderProcessor의 "행 락 동일 순서" 철학과 동형).
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select o from ProductOption o where o.id = :optionId")
+    Optional<ProductOption> findByIdForUpdate(@Param("optionId") Long optionId);
 }

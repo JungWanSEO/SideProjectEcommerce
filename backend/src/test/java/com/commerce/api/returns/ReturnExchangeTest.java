@@ -134,6 +134,20 @@ class ReturnExchangeTest {
     }
 
     @Test
+    @DisplayName("교환 완료 후 같은 항목 재-반품 차단(409) - 교환품 수령+환불 이중지급 방지(적대적리뷰 MED)")
+    void exchange_thenReturn_blocked() {
+        long[] ids = setup(5, 5);
+        long orderId = ids[0], itemId = ids[1], optionL = ids[3];
+        ReturnResponse req = toInspectedExchange(orderId, itemId, optionL);
+        returnService.advanceForSeller(req.id(), 1L, act(ReturnAction.COMPLETE), 1L);   // 교환 COMPLETED
+
+        // 원 항목은 ACTIVE·원배송 DELIVERED라 자격 게이트는 통과하지만, 교환완료 가드가 재-반품을 막아야 한다
+        assertThatThrownBy(() -> returnService.create(100L, false, orderId,
+                new ReturnCreateRequest(itemId, ReturnType.RETURN, "재반품 시도", null)))
+                .isInstanceOf(BusinessException.class).extracting("status").isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
     @DisplayName("교환 검증 - 다른 상품 옵션으로는 교환 불가(400)")
     void exchange_differentProduct() {
         long[] ids = setup(5, 5);

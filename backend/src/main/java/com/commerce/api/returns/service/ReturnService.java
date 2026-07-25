@@ -64,8 +64,16 @@ public class ReturnService {
         if (!returnRequestRepository.findByOrderItemIdAndStatusIn(req.orderItemId(), NON_TERMINAL).isEmpty()) {
             throw new BusinessException(HttpStatus.CONFLICT, "이미 진행 중인 반품/교환이 있습니다.");
         }
+        // 교환 완료 항목의 재-반품 차단(적대적리뷰 MED) — 교환 후 원 항목은 ACTIVE로 남고 자격 게이트는 원배송
+        // (DELIVERED)만 보므로, 이 가드가 없으면 교환품을 받고도 다시 환불받는 이중지급이 뚫린다. 교환품 반품은 v1 미지원.
+        if (returnRequestRepository.existsByOrderItemIdAndTypeAndStatus(
+                req.orderItemId(), com.commerce.api.returns.entity.ReturnType.EXCHANGE, ReturnStatus.COMPLETED)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "이미 교환 완료된 항목입니다. 교환품 반품은 고객센터로 문의해 주세요.");
+        }
+        // 소유권은 실제 구매자(order.memberId)로 귀속 — ADMIN 대행(admin=true) 생성 시에도 구매자가 자기 반품을
+        // /returns/me로 조회·추적할 수 있게 한다(적대적리뷰 LOW: caller(admin) id로 귀속되던 문제 교정).
         ReturnRequest r = ReturnRequest.create(orderId, req.orderItemId(), ctx.shipmentId(), ctx.sellerId(),
-                memberId, req.type(), req.reason(), ctx.quantity(), req.exchangeOptionId());
+                order.getMemberId(), req.type(), req.reason(), ctx.quantity(), req.exchangeOptionId());
         returnRequestRepository.save(r);
         return ReturnResponse.from(r);
     }
@@ -160,6 +168,10 @@ public class ReturnService {
         if (newOptionId.equals(oldOptionId)) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "같은 옵션으로는 교환할 수 없습니다.");
         }
+        // 두 옵션 행을 id 오름차순으로 먼저 비관락 → 미러 교환(다른 주문이 같은 두 옵션을 반대 방향) 간 데드락 예방
+        // (적대적리뷰 LOW). 부모 주문 락은 '같은 주문'만 직렬화하므로 공유 product_option 락 순서를 여기서 통일한다.
+        productOptionRepository.findByIdForUpdate(Math.min(oldOptionId, newOptionId));
+        productOptionRepository.findByIdForUpdate(Math.max(oldOptionId, newOptionId));
         // 대체품 소진 먼저(품절이면 409로 롤백 — 아직 원품·아이템 미변경). expiresAt은 CONSUMED라 무의미.
         stockReservationService.consumeForExchange(order.getId(), r.getOrderItemId(), newOptionId, item.getQuantity(),
                 java.time.LocalDateTime.now().plusMinutes(30));
