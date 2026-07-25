@@ -23,6 +23,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -157,11 +158,12 @@ public class OrderService {
      * 배송 상태 전진(ADMIN): PAID → SHIPPING → DELIVERED (forward-only). 없으면 404,
      * 잘못된 전이(건너뛰기·되돌리기·취소/대기 상태)면 409(Order.advanceShipping이 강제).
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public OrderResponse advanceShipping(Long id, OrderStatus next, Long changedBy,
             String courier, String trackingNumber) {
-        Order order = findOrder(id);
-        order.advanceShipping(next, changedBy, courier, trackingNumber);   // 이력·송장 기록 + dirty checking flush
+        // 부모 주문을 비관적 락으로 — shipment 단위 전진(worker)·동시 취소와 같은 락으로 직렬화(#1 리뷰 교정).
+        Order order = findOrderForUpdate(id);
+        order.advanceShipping(next, changedBy, courier, trackingNumber);   // shipment 일괄 전진 + rollup
         return OrderResponse.from(order);
     }
 
@@ -172,7 +174,9 @@ public class OrderService {
      */
     @Transactional
     public OrderResponse cancel(Long id, Long requesterId, boolean admin) {
-        Order order = findOwnedOrder(id, requesterId, admin);
+        // 부모 주문 비관적 락 — shipment 전진·동시 취소와 직렬화(#1 리뷰 교정, PG 환불 이전에). 격리는 호출자
+        //   PaymentService.cancelOrder(READ_COMMITTED)가 정한다 → 락 이후 형제 shipment를 fresh로 읽는다.
+        Order order = findOwnedOrderForUpdate(id, requesterId, admin);
         // 취소된 항목만 정확히 되돌린다(이미 취소됐거나 출고된 항목은 대상 아님 — 이중 복원 방지).
         for (OrderItem item : order.cancel(requesterId, admin ? "관리자 취소" : "주문자 취소")) {
             stockReservationService.undoForOrderItem(item.getId());
@@ -188,7 +192,9 @@ public class OrderService {
      */
     @Transactional
     public OrderResponse cancelItem(Long orderId, Long orderItemId, Long requesterId, boolean admin) {
-        Order order = findOwnedOrder(orderId, requesterId, admin);
+        // 부모 주문 비관적 락(#1 리뷰 교정) — 동시 항목취소/전진과 직렬화. 이 락이 결제 원장 읽기·갱신도 보호해
+        //   Payment.refundedAmount lost update(리뷰 #2)를 함께 막는다(PaymentService가 이 락을 잡은 뒤 결제를 만진다).
+        Order order = findOwnedOrderForUpdate(orderId, requesterId, admin);
         OrderItem cancelled = order.cancelItem(orderItemId, requesterId);   // shipment-grain 취소 가능 판정 + rollup
         stockReservationService.undoForOrderItem(cancelled.getId());
         return OrderResponse.from(order);
@@ -199,12 +205,26 @@ public class OrderService {
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "주문을 찾을 수 없습니다."));
     }
 
+    /** 주문을 <b>비관적 쓰기 락</b>으로 찾는다 — 상태/원장 변경 경로가 부모 주문에서 직렬화되도록(#1 리뷰 교정). */
+    private Order findOrderForUpdate(Long id) {
+        return orderRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "주문을 찾을 수 없습니다."));
+    }
+
     /**
      * 주문을 찾고, 요청자가 소유자이거나 ADMIN인지 검증한다.
      * 둘 다 아니면 403 — 인증은 됐지만 남의 주문에 접근하려는 경우(IDOR 방지).
      */
     private Order findOwnedOrder(Long id, Long requesterId, boolean admin) {
-        Order order = findOrder(id);
+        return ensureOwner(findOrder(id), requesterId, admin);
+    }
+
+    /** 소유권 검증 + 비관적 쓰기 락(취소 경로 — 상태 변경 직렬화). */
+    private Order findOwnedOrderForUpdate(Long id, Long requesterId, boolean admin) {
+        return ensureOwner(findOrderForUpdate(id), requesterId, admin);
+    }
+
+    private Order ensureOwner(Order order, Long requesterId, boolean admin) {
         if (!admin && !order.getMemberId().equals(requesterId)) {
             throw new BusinessException(HttpStatus.FORBIDDEN, "본인의 주문만 접근할 수 있습니다.");
         }

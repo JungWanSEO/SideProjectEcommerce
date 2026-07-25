@@ -70,7 +70,7 @@ class OrderServiceTest {
         Order order = orderWithId(1L, 100L, line);
         order.markPaid();
         ReflectionTestUtils.setField(line, "id", 500L);
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         OrderResponse response = orderService.cancel(1L, 100L, false);   // 주문 주인(100번) 본인
 
@@ -84,7 +84,7 @@ class OrderServiceTest {
     void cancel_alreadyCancelled() {
         Order order = orderWithId(1L, 100L, item(3));
         order.cancel();
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         assertThatThrownBy(() -> orderService.cancel(1L, 100L, false))
                 .isInstanceOf(BusinessException.class)
@@ -97,7 +97,7 @@ class OrderServiceTest {
         OrderItem line = item(3);
         Order order = orderWithId(1L, 100L, line);   // PENDING (결제 전)
         ReflectionTestUtils.setField(line, "id", 500L);
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         OrderResponse response = orderService.cancel(1L, 100L, false);
 
@@ -122,7 +122,7 @@ class OrderServiceTest {
         ReflectionTestUtils.setField(activeLine, "id", 501L);
         order.cancelItem(500L, 100L);   // 500 라인 비활성(주문은 rollup PAID 유지)
 
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         OrderResponse response = orderService.cancel(1L, 100L, false);
 
@@ -145,7 +145,7 @@ class OrderServiceTest {
         Order order = orderWithId(1L, 100L, line1, line2);   // PENDING, 항목 2개
         ReflectionTestUtils.setField(line1, "id", 500L);
         ReflectionTestUtils.setField(line2, "id", 501L);
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         orderService.cancelItem(1L, 500L, 100L, false);
 
@@ -162,7 +162,7 @@ class OrderServiceTest {
         order.markPaid();
         ReflectionTestUtils.setField(line1, "id", 500L);
         ReflectionTestUtils.setField(line2, "id", 501L);
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         orderService.cancelItem(1L, 500L, 100L, false);
 
@@ -235,7 +235,7 @@ class OrderServiceTest {
     @DisplayName("주문 취소 - 남의 주문이면 403, 취소·재고복원 일어나지 않음")
     void cancel_nonOwnerForbidden() {
         Order order = orderWithId(1L, 100L, item(3));
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         assertThatThrownBy(() -> orderService.cancel(1L, 999L, false))
                 .isInstanceOf(BusinessException.class)
@@ -271,7 +271,7 @@ class OrderServiceTest {
     @DisplayName("배송 상태 전진 - PAID→SHIPPING 성공")
     void advanceShipping_paidToShipping() {
         Order order = orderInStatus(1L, OrderStatus.PAID);
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         OrderResponse response = orderService.advanceShipping(1L, OrderStatus.SHIPPING, 1L, null, null);
 
@@ -283,7 +283,7 @@ class OrderServiceTest {
     @DisplayName("배송 상태 전진 - SHIPPING→DELIVERED 성공")
     void advanceShipping_shippingToDelivered() {
         Order order = orderInStatus(1L, OrderStatus.SHIPPING);
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         OrderResponse response = orderService.advanceShipping(1L, OrderStatus.DELIVERED, 1L, null, null);
 
@@ -294,7 +294,7 @@ class OrderServiceTest {
     @DisplayName("배송 상태 전진 - SHIPPING 전이 시 택배사·운송장을 주문에 저장하고 타임라인에 남긴다")
     void advanceShipping_recordsCourierAndHistory() {
         Order order = orderInStatus(1L, OrderStatus.PAID);
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         OrderResponse response = orderService.advanceShipping(
                 1L, OrderStatus.SHIPPING, 9L, "CJ대한통운", "1234567890");
@@ -316,7 +316,7 @@ class OrderServiceTest {
     @DisplayName("주문 취소 - 타임라인에 X→CANCELLED가 취소 주체와 함께 남는다")
     void cancel_recordsHistory() {
         Order order = orderInStatus(1L, OrderStatus.PAID);
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         OrderResponse response = orderService.cancel(1L, 100L, false);   // 주인=100
 
@@ -332,7 +332,7 @@ class OrderServiceTest {
     @DisplayName("배송 상태 전진 실패 - 건너뛰기(PAID→DELIVERED) 409, 상태 불변")
     void advanceShipping_skipForbidden() {
         Order order = orderInStatus(1L, OrderStatus.PAID);
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         assertThatThrownBy(() -> orderService.advanceShipping(1L, OrderStatus.DELIVERED, 1L, null, null))
                 .isInstanceOf(BusinessException.class)
@@ -344,7 +344,7 @@ class OrderServiceTest {
     @DisplayName("배송 상태 전진 실패 - 되돌리기(SHIPPING→PAID) 409")
     void advanceShipping_reverseForbidden() {
         Order order = orderInStatus(1L, OrderStatus.SHIPPING);
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         assertThatThrownBy(() -> orderService.advanceShipping(1L, OrderStatus.PAID, 1L, null, null))
                 .isInstanceOf(BusinessException.class)
@@ -355,7 +355,7 @@ class OrderServiceTest {
     @DisplayName("배송 상태 전진 실패 - PENDING(미결제)에서 전진 409")
     void advanceShipping_fromPendingForbidden() {
         Order order = orderInStatus(1L, OrderStatus.PENDING);
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         assertThatThrownBy(() -> orderService.advanceShipping(1L, OrderStatus.SHIPPING, 1L, null, null))
                 .isInstanceOf(BusinessException.class)
@@ -365,7 +365,7 @@ class OrderServiceTest {
     @Test
     @DisplayName("배송 상태 전진 실패 - 없는 주문 404")
     void advanceShipping_notFound() {
-        given(orderRepository.findById(99L)).willReturn(Optional.empty());
+        given(orderRepository.findByIdForUpdate(99L)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> orderService.advanceShipping(99L, OrderStatus.SHIPPING, 1L, null, null))
                 .isInstanceOf(BusinessException.class)
@@ -376,7 +376,7 @@ class OrderServiceTest {
     @DisplayName("주문 취소 실패 - 단일셀러 배송 시작(SHIPPING) 주문은 409, 재고 되돌리기 없음")
     void cancel_shippingBlocked() {
         Order order = orderInStatus(1L, OrderStatus.SHIPPING);   // 단일 항목·단일 shipment SHIPPING
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         assertThatThrownBy(() -> orderService.cancel(1L, 100L, false))
                 .isInstanceOf(BusinessException.class)

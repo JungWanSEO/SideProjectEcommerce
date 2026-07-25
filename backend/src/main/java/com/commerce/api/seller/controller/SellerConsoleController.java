@@ -4,9 +4,9 @@ import com.commerce.api.audit.aspect.Auditable;
 import com.commerce.api.global.common.ApiResponse;
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.security.SecurityUtil;
-import com.commerce.api.order.dto.OrderResponse;
 import com.commerce.api.order.dto.OrderSearchCondition;
 import com.commerce.api.order.dto.OrderSummaryResponse;
+import com.commerce.api.order.dto.SellerShipmentResponse;
 import com.commerce.api.order.dto.ShipmentStatusUpdateRequest;
 import com.commerce.api.seller.dto.SellerResponse;
 import com.commerce.api.seller.service.SellerConsoleService;
@@ -107,9 +107,9 @@ public class SellerConsoleController {
     // 📦 셀러가 자기 몫을 출고하는 지점 — 주체(셀러 회원)를 감사 이력에 남긴다.
     @Auditable(action = "SHIPMENT_ADVANCE", targetType = "SHIPMENT", targetId = "#shipmentId")
     @PatchMapping("/me/shipments/{shipmentId}/status")
-    public ResponseEntity<ApiResponse<OrderResponse>> advanceMyShipment(
+    public ResponseEntity<ApiResponse<SellerShipmentResponse>> advanceMyShipment(
             @PathVariable Long shipmentId, @Valid @RequestBody ShipmentStatusUpdateRequest request) {
-        OrderResponse response = sellerConsoleService.advanceMyShipment(
+        SellerShipmentResponse response = sellerConsoleService.advanceMyShipment(
                 SecurityUtil.getCurrentMemberId(), shipmentId,
                 request.status(), request.courier(), request.trackingNumber());
         return ResponseEntity.ok(ApiResponse.success("배송 상태가 변경되었습니다.", response));

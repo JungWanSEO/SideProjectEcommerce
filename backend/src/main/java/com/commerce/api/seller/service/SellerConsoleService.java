@@ -4,9 +4,9 @@ import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.member.entity.Member;
 import com.commerce.api.member.repository.MemberRepository;
-import com.commerce.api.order.dto.OrderResponse;
 import com.commerce.api.order.dto.OrderSearchCondition;
 import com.commerce.api.order.dto.OrderSummaryResponse;
+import com.commerce.api.order.dto.SellerShipmentResponse;
 import com.commerce.api.order.entity.ShipmentStatus;
 import com.commerce.api.order.service.OrderService;
 import com.commerce.api.order.service.ShipmentService;
@@ -91,7 +91,7 @@ public class SellerConsoleService {
      * 컨텍스트에 쓰기가 막히고, ShipmentService의 낙관락 재시도(새 트랜잭션)도 깨진다.
      */
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    public OrderResponse advanceMyShipment(Long memberId, Long shipmentId, ShipmentStatus next,
+    public SellerShipmentResponse advanceMyShipment(Long memberId, Long shipmentId, ShipmentStatus next,
             String courier, String trackingNumber) {
         Long sellerId = requireSellerId(memberId);
         return shipmentService.advanceForSeller(shipmentId, sellerId, next, memberId, courier, trackingNumber);

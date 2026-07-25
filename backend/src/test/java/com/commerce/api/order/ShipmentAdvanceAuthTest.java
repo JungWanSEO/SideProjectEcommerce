@@ -7,6 +7,7 @@ import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.order.entity.Order;
 import com.commerce.api.order.entity.OrderItem;
 import com.commerce.api.order.entity.OrderStatus;
+import com.commerce.api.order.dto.SellerShipmentResponse;
 import com.commerce.api.order.entity.Shipment;
 import com.commerce.api.order.entity.ShipmentStatus;
 import com.commerce.api.order.repository.OrderRepository;
@@ -40,8 +41,9 @@ class ShipmentAdvanceAuthTest {
     }
 
     private OrderItem item(Long sellerId) {
+        long productId = (sellerId == null) ? 99L : sellerId;   // 셀러별 상품 구분 → 스코프 필터 실검증
         return OrderItem.builder()
-                .productId(1L).optionId(1L).sellerId(sellerId)
+                .productId(productId).optionId(1L).sellerId(sellerId)
                 .productName("P").size("M").orderPrice(5000L).quantity(1).build();
     }
 
@@ -94,20 +96,21 @@ class ShipmentAdvanceAuthTest {
     }
 
     @Test
-    @DisplayName("셀러 부분 출고 → 주문 rollup SHIPPING + 응답에 셀러별 shipments[] 노출")
-    void seller_partialShip_orderRollsUpToShipping() {
+    @DisplayName("셀러 부분 출고 → 셀러 스코프 응답(내 shipment·항목만) + 주문 rollup SHIPPING")
+    void seller_partialShip_scopedResponseAndRollup() {
         Order order = persistThreeBucketOrder();
         Long orderId = order.getId();
 
         var response = shipmentService.advanceForSeller(
                 shipmentOf(orderId, 1L).getId(), 1L, ShipmentStatus.SHIPPING, 500L, "CJ", "1");
 
-        assertThat(response.status()).isEqualTo(OrderStatus.SHIPPING);   // 셀러1만 출고해도 주문 SHIPPING
-        // 응답 shipments[]: 셀러1 SHIPPING(송장), 셀러2·플랫폼(null) 아직 PAID
-        assertThat(response.shipments()).hasSize(3);
-        assertThat(response.shipments()).anyMatch(
-                s -> s.status() == ShipmentStatus.SHIPPING && "CJ".equals(s.courier()));
-        assertThat(response.shipments()).filteredOn(s -> s.status() == ShipmentStatus.PAID).hasSize(2);
+        // 셀러 스코프 응답: 내 shipment 상태·송장 + 내 항목만(타 셀러·구매자 memberId·주문총액 없음 — 리뷰 #5)
+        assertThat(response.sellerId()).isEqualTo(1L);
+        assertThat(response.status()).isEqualTo(ShipmentStatus.SHIPPING);
+        assertThat(response.courier()).isEqualTo("CJ");
+        assertThat(response.items()).extracting(SellerShipmentResponse.SellerLine::productId).containsOnly(1L);
+
+        // 주문 전체 rollup: 셀러1만 출고해도 SHIPPING
         assertThat(orderRepository.findById(orderId).orElseThrow().getStatus())
                 .isEqualTo(OrderStatus.SHIPPING);
     }

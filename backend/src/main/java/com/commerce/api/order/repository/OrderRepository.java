@@ -65,11 +65,27 @@ public interface OrderRepository extends JpaRepository<Order, Long>, OrderReposi
     List<Order> findPurchasedWithoutShipments();
 
     /**
-     * shipment 전이 시 부모 주문을 <b>낙관 버전 강제 증가</b>로 잡는다(#1 P3). 같은 주문의 서로 다른 shipment를
-     * 동시에 전진하면 둘 다 orders.version을 올리려다 충돌 → 늦은 쪽이 @Retryable로 재시도해 fresh 컨텍스트에서
-     * rollup을 다시 계산한다. (rollup write가 조건부라 낙관락만으론 stale sibling lost update가 나므로 강제 증가로 직렬화.)
+     * shipment 없는 PURCHASED 주문의 <b>ID만</b> — 백필을 주문별 개별 트랜잭션으로 처리하기 위한 후보 목록(#1 리뷰 #4·#6 교정).
+     * 대량 주문을 한 트랜잭션/힙에 다 올리지 않고, 주문마다 락+재확인 후 백필해 동시 취소와 직렬화하고 tx 크기를 제한한다.
      */
-    @Lock(LockModeType.OPTIMISTIC_FORCE_INCREMENT)
+    @Query("select o.id from Order o where o.status in "
+            + "(com.commerce.api.order.entity.OrderStatus.PAID, "
+            + "com.commerce.api.order.entity.OrderStatus.SHIPPING, "
+            + "com.commerce.api.order.entity.OrderStatus.DELIVERED) "
+            + "and not exists (select 1 from Shipment s where s.order = o)")
+    List<Long> findPurchasedWithoutShipmentIds();
+
+    /**
+     * 주문 상태/원장을 바꾸는 <b>모든 경로</b>가 부모 주문 행을 <b>비관적 쓰기 락</b>으로 먼저 잡는다(#1 리뷰 교정).
+     * shipment 전진·취소(cancel/cancelItem)·ADMIN 일괄 전진·백필이 이 락으로 <b>부작용(PG 환불) 이전에</b> 직렬화된다.
+     *
+     * <p>왜 비관락인가: {@link Order#status}는 shipment rollup 파생값이고 rollup write는 <b>조건부</b>(값이 바뀔 때만)라,
+     * 낙관락만으론 서로 다른 자식(shipment/항목)을 동시에 바꾸는 두 tx가 각자 형제를 stale로 읽어 둘 다 "변화 없음"으로
+     * 판단→충돌 없이 커밋되는 lost update가 난다(리뷰 확정). 부모 행을 락으로 잡으면 늦은 tx가 <b>로드 시점에</b> 막혀
+     * 앞 tx 커밋 후 형제의 최신 상태를 읽어 rollup을 정확히 재계산한다. 취소는 PG 환불 부작용이 있어 낙관락 재시도가
+     * 부적합(재시도=이중 환불)하므로, 부작용 전에 직렬화하는 비관락이 정답이다.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select o from Order o where o.id = :id")
-    Optional<Order> findByIdForShipmentRollup(@Param("id") Long id);
+    Optional<Order> findByIdForUpdate(@Param("id") Long id);
 }

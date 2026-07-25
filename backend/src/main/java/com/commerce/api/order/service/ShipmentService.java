@@ -30,12 +30,13 @@ public class ShipmentService {
         return worker.advance(shipmentId, next, changedBy, courier, trackingNumber);
     }
 
-    /** 셀러가 자기 shipment를 전진(소유권 검증 포함). */
+    /** 셀러가 자기 shipment를 전진(소유권 검증 포함). 응답은 셀러 스코프(타 셀러·구매자 정보 제외, 리뷰 #5). */
     @Retryable(
             retryFor = ConcurrencyFailureException.class,
             maxAttempts = 3,
             backoff = @Backoff(delay = 100))
-    public OrderResponse advanceForSeller(Long shipmentId, Long sellerId, ShipmentStatus next,
+    public com.commerce.api.order.dto.SellerShipmentResponse advanceForSeller(
+            Long shipmentId, Long sellerId, ShipmentStatus next,
             Long changedBy, String courier, String trackingNumber) {
         return worker.advanceForSeller(shipmentId, sellerId, next, changedBy, courier, trackingNumber);
     }

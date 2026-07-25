@@ -20,6 +20,7 @@ import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -103,7 +104,7 @@ public class PaymentService {
      * (모의 PG라 환불 호출이 즉시 끝난다. 실제 고지연 PG라면 환불을 트랜잭션 밖으로 빼고 이벤트/아웃박스로
      * 보강한다 — architecture.md §13.5.)
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public OrderResponse cancelOrder(Long memberId, Long orderId, boolean admin) {
         // 1) 주문 취소 위임 — 소유권(404/403) + 상태 가드 + 취소된 항목만 재고 되돌림. 멀티셀러(#1 c안)에선
         //    출고 전 항목만 취소되는 <b>부분 취소</b>일 수 있다(출고된 셀러 항목은 남는다).
@@ -146,7 +147,7 @@ public class PaymentService {
      * cancelOrder와 같이 @Transactional로 원자성 보장(환불 실패 시 항목 취소·재고 복원까지 롤백).
      * 정산 상계(역분개)는 settlement 도메인의 reverseRefunds 배치가 사후 처리한다(settlement → order/payment 단방향).
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public OrderResponse cancelOrderItem(Long memberId, Long orderId, Long orderItemId, boolean admin) {
         OrderResponse order = orderService.cancelItem(orderId, orderItemId, memberId, admin);
         OrderResponse.OrderItemResponse cancelledItem = order.items().stream()
