@@ -156,7 +156,8 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 | `product_image` | product(자식) | 이미지 갤러리 | FK→product · sort_order |
 | `cart`/`cart_item` | cart | 멤버당 장바구니 | cart.member_id UNIQUE · option_id |
 | `orders` | order(루트) | 주문 헤더: 상태머신·배송 스냅샷·쿠폰 스냅샷 | status(PENDING/PAID/SHIPPING/DELIVERED/CANCELLED) · 배송 컬럼 · discount/coupon 스냅샷 |
-| `order_item` | order(자식) | 라인: 가격·이름·사이즈 + brand/seller **스냅샷** | FK→orders · status(ACTIVE/CANCELLED) |
+| `order_item` | order(자식) | 라인: 가격·이름·사이즈 + brand/seller **스냅샷** | FK→orders · status(ACTIVE/CANCELLED, 부분환불축) |
+| `shipment` / `shipment_status_history` | order(자식, #1) | **셀러별 배송 단위**(상태·송장) + 전이 이력 | order_id · seller_id(null=플랫폼) · status(PAID/SHIPPING/DELIVERED/CANCELLED) · `version` · courier/tracking. `orders.status`는 이들의 rollup 파생 |
 | `address` | member | 저장 배송지 | member_id · is_default |
 | `payment` | payment | 주문당 결제(다중 PG·부분환불) | order_id(ID참조) · idempotency_key UNIQUE · provider · refunded_amount |
 | `settlement_entry` | settlement | **(결제 × 셀러)** 정산: 수수료·플랫폼수수료·할인 배분·지급 연결 | payment_id · seller_id · payout_id · gross/fee/net/platform_fee · fee_rate · provider |
@@ -172,7 +173,7 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 | `recommendation` | personalization | 멤버별 "나를위한" 사전계산 | member_id+product_id UNIQUE · score |
 | `product_cooccurrence` | personalization | "함께 산 상품" 사전계산 | reference_product_id+product_id UNIQUE · co_buy_count · score |
 
-### 5.3 스키마 진화 (Flyway 36개, 에포크별)
+### 5.3 스키마 진화 (Flyway 46개, 에포크별)
 
 | 에포크 | 마이그레이션 | 내용 |
 |---|---|---|
@@ -187,6 +188,9 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 | I 개인화 | V28~V31 | wishlist / activity_log / recommendation / product_cooccurrence |
 | J 어드민·카테고리·배송상태 | V32~V35 | product_image 갤러리 / category.parent_id / 배송 상태 enum / 쿠폰 한정수량 |
 | K 인덱스 | V36 | 애그리거트 FK 회피로 안 잡힌 필터 컬럼에 보조 인덱스 |
+| L 감사·이력 | V37~V41 | audit_log / 주문 멱등키 / order_status_history+송장 / 돈경로·정산일 인덱스 |
+| M 할인가·재고예약 | V42~V44 | product.original_price(#5) / stock_reservation+reserved(#2) / orders.version(낙관락) |
+| N 멀티셀러 배송(#1) | V45~V46 | shipment+shipment_status_history(셀러별 배송축) / orders 송장 컬럼 DROP(shipment로 이전) |
 
 ---
 
@@ -262,14 +266,40 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 - **나를 위한 추천**: 규칙 기반 배치(구매×3 / 위시×2 / 조회×1 → 카테고리·브랜드 선호 → top-10), `@Scheduled+@Transactional` 단일 메서드(self-invocation 회피), `recommendation` 사전계산.
 - **함께 산 상품**: PAID 주문의 상품쌍을 `COUNT(DISTINCT order)`로 집계 → `product_cooccurrence`. 추천→상품 단방향을 위해 `RecommendationController`에 배치(상품 컨트롤러 아님).
 
+### 6.8 멀티셀러 배송 — shipment 상태 축 (#1, ADR 흐름)
+
+**문제**: 한 주문에 여러 셀러 상품이 섞이는데 배송 상태가 **주문 전체**(`orders.status`) 단위라, 셀러별 개별 출고를 표현 못 했다(한 셀러 출고가 주문 전체를 SHIPPING으로 올려 미출고 셀러 항목 취소까지 막음). → 배송 상태축을 **셀러별 shipment**로 내렸다(정산 타이밍은 PAID 즉시 유지 — 정산/대사/멱등키 무접촉).
+
+**모델** (`shipment` = 셀러별 출고 묶음, V45):
+- **grain = (order, sellerId)**. `sellerId=null`은 플랫폼 직매입 버킷. 항목 연결은 FK가 아니라 **(order, sellerId) 매칭**(`Shipment.belongsToSeller`) — `order_item` 스키마 불변.
+- **생성 = 결제 팬아웃**: `Order.markPaid()`가 활성 항목을 sellerId로 묶어 shipment 1건씩(PAID) 생성. 전량취소 셀러는 활성 항목이 없어 shipment 없음(정산 활성-항목 기준과 정합).
+- **`Order.status` = 저장된 rollup 파생값**: 각 shipment 전이 후 `recomputeStatusFromShipments`로 재계산. 규칙(활성=비취소 기준, **forward-only 단조**): 전부 취소→CANCELLED / 전부 DELIVERED→DELIVERED / 하나라도 출고 시작→SHIPPING / 전부 PAID→PAID. **저장 컬럼을 유지**해 PURCHASED 리더(리뷰자격·추천·대시보드 `countGroupByStatus`)·인덱스가 무변경 생존.
+- **송장(courier/tracking)**은 주문이 아니라 각 shipment에(셀러별 개별 송장). `orders`의 잉여 컬럼은 V46에서 DROP(expand/contract).
+
+**취소/환불 불변식** (돈경로 무손상의 핵심):
+- **취소는 shipment-grain**: 출고 전(shipment PAID/미결제) 항목만 취소, 출고된 셀러 항목은 잔존(**부분 취소**). 셀러의 마지막 활성 항목이 취소되면 그 shipment도 CANCELLED → rollup.
+- **재고 되돌리기는 항목 예약상태로** 판정(`StockReservationService.undoForOrderItem`): `CONSUMED`(결제 실차감)→실재고 복원 / `ACTIVE`(예약만)→해제. 전체 `Order.status`가 아니라 항목별 실차감 여부로 봐, 다른 셀러 출고로 주문이 PAID를 벗어나도 재고가 정확히 복원(셀러 재고 영구누락 차단).
+- **부분환불 = 이번에 취소된 몫만**: `refundNow = (payment.amount − refundedAmount) − 취소후 남은 활성 실효가`. 출고된 셀러분 재환불 차단. 쿠폰 복원은 `status==CANCELLED`(전량취소)일 때만.
+- **정산 역분개 보존**: 취소는 반드시 `OrderItem.status=CANCELLED`를 경유(정산 `reverseRefunds`가 활성-항목 기준). shipment만 취소하고 항목을 안 건드리면 과지급 → 금지.
+
+**엔드포인트**:
+- 셀러 `PATCH /api/seller/me/shipments/{id}/status` — 자기 shipment 전진(소유권 트랜잭션 내 검증, 남의 셀러·null 버킷 403). 응답은 **셀러 스코프**(`SellerShipmentResponse`: 내 shipment·내 항목·배송지만 — 타 셀러 품목/송장·구매자 식별자 비노출).
+- ADMIN `PATCH /api/orders/{id}/shipments/{sid}/status`(셀러별/플랫폼 개별) + `PATCH /api/orders/{id}/status`(활성 shipment 일괄 전진, 기존 라우트 유지).
+- **백필**: P2 이전 주문에 shipment 소급 생성 — `ShipmentBackfillWorker`가 주문별 락+재확인·개별 트랜잭션(대량 안전 + 동시 취소와 직렬화).
+
+> 구현: 6-phase(스키마→팬아웃/백필→rollup/동시성→취소교차→인가→DROP) + **5렌즈 적대적 리뷰가 확정한 동시성 6종 교정(P7)**. 동시성 처방은 §7 참조. 검증: `ShipmentTest`·`ShipmentConcurrencyTest`(전진×취소·취소×취소 수렴)·`PaymentCancelConcurrencyTest`·`ShipmentAdvanceAuthTest`(IDOR).
+
 ---
 
-## 7. 동시성 제어 — 두 가지 전략
+## 7. 동시성 제어 — 세 가지 전략
 
 | 문제 | 전략 | 이유 |
 |---|---|---|
 | **재고 초과판매** (낮은 경합, 도메인 규칙·메시지 필요) | `@Version` **낙관적 락** + 새 트랜잭션 재시도 | 비관적 락의 처리량 손해 회피, 충돌은 드물고 재시도로 흡수 |
 | **선착순 쿠폰** (높은 경합, 단순 카운터) | **원자적 조건부 UPDATE** + UNIQUE | 한 문장으로 "한도 내에서만 발급" 직렬화 — 앱 락 불필요, DB가 펜싱 |
+| **shipment 상태 rollup** (#1, 파생 상태 + 부작용) | **비관적 쓰기 락**(부모 주문 `findByIdForUpdate`, PESSIMISTIC_WRITE + READ_COMMITTED) | `Order.status`가 shipment rollup 파생인데 rollup write가 **조건부**(값 바뀔 때만)라, 서로 다른 자식(shipment/항목)을 동시에 바꾸는 두 tx가 각자 형제를 stale로 읽어 둘 다 "변화 없음"으로 커밋되는 lost update가 난다. 상태/원장 변경 **모든 경로**(전진·취소·ADMIN 일괄·백필)가 부모 주문을 같은 락으로 잡아 **부작용(PG 환불) 이전에** 직렬화 — 늦은 tx는 로드 시점에 막혀 형제의 최신 상태로 rollup을 재계산. 취소는 PG 환불이 있어 낙관락 재시도가 부적합(재시도=이중환불)이라 비관락 채택 |
+
+> **왜 세 번째 전략인가**: 낙관락(재고)·원자 UPDATE(쿠폰)로 안 되는 케이스 — 파생 상태의 조건부 write + 외부 부작용(환불)이 겹친다. 적대적 리뷰가 "worker만 락, 취소·일괄·백필 무락"의 락 비대칭이 stale-sibling lost update를 냄을 확정 → 전 경로 비관락 통일로 교정. 검증: `ShipmentConcurrencyTest`(전진×취소→DELIVERED·취소×취소→CANCELLED 수렴)·`PaymentCancelConcurrencyTest`(두 환불 누적=결제액).
 
 **분산 락**(`global/lock`, ADR-0015)은 포트 + 어댑터로 토글한다: NoOp(기본) / Redis DIY(`SET NX PX` + Lua 원자 해제) / Redisson(`RLock` 워치독). 쿠폰 발급의 *정합*은 위 DB 원자 UPDATE가 이미 보장하므로 분산 락은 **멀티 인스턴스 직렬화를 위한 advisory**이고, DB가 펜싱 백스톱 역할을 한다. `MemberCouponClaimService`가 이 포트로 claim 트랜잭션을 감싼다.
 
@@ -332,10 +362,10 @@ push/PR(`dev`·`main`) 시 2잡: **backend**(JDK 21, `gradlew test`, H2 — 시�
 | **brand** | `GET`(public) · `POST·PUT·DELETE` · `PUT /{id}/seller`(ADMIN) |
 | **cart** | `POST·GET /api/carts/items|carts` · `PUT·DELETE /items/{optionId}`(auth) |
 | **address** | `GET·POST /api/addresses` · `PUT·DELETE /{id}` · `PUT /{id}/default`(auth) |
-| **order** | `POST /api/orders` · `/checkout` · `/coupon-preview` · `GET /api/orders`(내것) · `/{id}` · `POST /{id}/cancel` · `/items/{itemId}/cancel`(부분) · `GET /admin`·`PATCH /{id}/status`(ADMIN 배송) |
+| **order** | `POST /api/orders` · `/checkout` · `/coupon-preview` · `GET /api/orders`(내것) · `/{id}` · `POST /{id}/cancel` · `/items/{itemId}/cancel`(부분) · `GET /admin`·`PATCH /{id}/status`(ADMIN 일괄 배송) · `PATCH /{id}/shipments/{sid}/status`(ADMIN 셀러별/플랫폼 배송, #1) |
 | **payment** | `POST /api/payments`(auth, 멱등키) |
 | **coupon** | `POST /api/coupons` · `/{id}/issue` · `GET`(ADMIN) · `GET /api/member-coupons/me|claimable` · `POST /claim/{id}`(auth) |
-| **seller** | `GET·POST·PUT /api/sellers` · `suspend·activate·owner`(ADMIN) · `GET /api/seller/me|settlements|summary|payouts`(SELLER) |
+| **seller** | `GET·POST·PUT /api/sellers` · `suspend·activate·owner`(ADMIN) · `GET /api/seller/me|settlements|summary|payouts|orders`(SELLER) · `PATCH /api/seller/me/shipments/{id}/status`(SELLER 자기 출고, #1) |
 | **settlement** | `POST /run` · `GET` · `POST /reverse-refunds` · `GET /summary` · `POST /{id}/payout`(ADMIN) |
 | **payout** | `POST /api/payouts` · `/{id}/pay` · `GET`(ADMIN) |
 | **reconciliation** | `POST /run`(from/to) · `GET /mismatches` · `POST /{id}/resolve|ignore`(ADMIN) |
