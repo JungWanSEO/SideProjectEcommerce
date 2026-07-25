@@ -329,6 +329,35 @@ public class Order extends BaseEntity {
                 .orElse(null);
     }
 
+    /**
+     * 반품/교환 요청 자격 검증(#3 P3) — 통과하면 요청 생성에 필요한 스냅샷(shipmentId·sellerId·quantity)을 돌려준다.
+     * 게이트: 항목이 <b>ACTIVE</b>(이미 취소·반품된 항목 차단 — 과다환불 방지), 그 셀러 원배송이 <b>DELIVERED</b>,
+     * 배송완료 후 {@code windowDays}일 이내. deliveredAt이 null(레거시 이력 부재)이면 기한 판정 유예(허용).
+     */
+    public ReturnableItem ensureReturnable(Long orderItemId, int windowDays) {
+        OrderItem item = orderItems.stream()
+                .filter(i -> orderItemId.equals(i.getId()))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "주문 항목을 찾을 수 없습니다."));
+        if (!item.isActive()) {
+            throw new BusinessException(HttpStatus.CONFLICT,
+                    "반품할 수 없는 항목입니다. (현재: " + item.getStatus() + ")");
+        }
+        Shipment shipment = shipmentForItem(item);
+        if (shipment == null || shipment.getStatus() != ShipmentStatus.DELIVERED) {
+            throw new BusinessException(HttpStatus.CONFLICT, "배송 완료된 항목만 반품/교환할 수 있습니다.");
+        }
+        java.time.LocalDateTime deliveredAt = shipment.getDeliveredAt();
+        if (deliveredAt != null && deliveredAt.plusDays(windowDays).isBefore(java.time.LocalDateTime.now())) {
+            throw new BusinessException(HttpStatus.CONFLICT, "반품 기한(" + windowDays + "일)이 지났습니다.");
+        }
+        return new ReturnableItem(shipment.getId(), item.getSellerId(), item.getQuantity());
+    }
+
+    /** 반품 요청 생성에 필요한 주문 측 스냅샷(#3). sellerId는 여기서 서버가 도출(클라 입력 금지 — IDOR 방지). */
+    public record ReturnableItem(Long shipmentId, Long sellerId, int quantity) {
+    }
+
     /** 결제 완료 처리 (PENDING → PAID). 결제 대기 상태가 아니면 예외. 결제 시점에 셀러별 shipment를 팬아웃 생성한다(#1 P2). */
     public void markPaid() {
         if (this.status != OrderStatus.PENDING) {

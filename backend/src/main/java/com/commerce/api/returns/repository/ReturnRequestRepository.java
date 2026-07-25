@@ -23,6 +23,10 @@ public interface ReturnRequestRepository extends JpaRepository<ReturnRequest, Lo
     @Query("select r from ReturnRequest r where r.id = :id")
     Optional<ReturnRequest> findByIdForUpdate(@Param("id") Long id);
 
+    /** returnId → orderId 스칼라(엔티티 미로딩) — 부모 주문을 먼저 락으로 잡기 위해(락 순서 ORDER→RETURN 일관·1차 캐시 stale 회피). */
+    @Query("select r.orderId from ReturnRequest r where r.id = :id")
+    Optional<Long> findOrderIdById(@Param("id") Long id);
+
     /** 이 주문 항목에 진행 중(미종료) 반품이 있는가 — 중복 요청 가드. */
     List<ReturnRequest> findByOrderItemIdAndStatusIn(Long orderItemId, Collection<ReturnStatus> statuses);
 
