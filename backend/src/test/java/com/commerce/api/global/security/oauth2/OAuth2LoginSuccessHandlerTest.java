@@ -33,8 +33,13 @@ class OAuth2LoginSuccessHandlerTest {
     private final AuthService authService = mock(AuthService.class);
     private final AuthCookieManager cookieManager =
             new AuthCookieManager(false, "Lax", 1_800_000, 1_209_600_000);
+    private final com.commerce.api.cart.service.CartService cartService =
+            mock(com.commerce.api.cart.service.CartService.class);
+    private final com.commerce.api.cart.service.CartCookieManager cartCookieManager =
+            new com.commerce.api.cart.service.CartCookieManager(false, "Lax");
     private final OAuth2LoginSuccessHandler handler =
-            new OAuth2LoginSuccessHandler(memberService, authService, cookieManager, "http://localhost:3000");
+            new OAuth2LoginSuccessHandler(memberService, authService, cookieManager,
+                    cartService, cartCookieManager, "http://localhost:3000");
 
     private OAuth2AuthenticationToken token(Map<String, Object> attrs, String nameKey, String registrationId) {
         OAuth2User principal = new DefaultOAuth2User(
@@ -79,5 +84,25 @@ class OAuth2LoginSuccessHandlerTest {
 
         verify(memberService).findOrCreateSocialMember(AuthProvider.GOOGLE, "sub-123", "a@b.com", "Alice");
         assertThat(response.getRedirectedUrl()).isEqualTo("http://localhost:3000");
+    }
+
+    @Test
+    @DisplayName("소셜 로그인(#7): cart_token 쿠키가 있으면 게스트 카트를 회원 카트로 병합하고 쿠키를 지운다")
+    void mergesGuestCartOnSocialLogin() throws Exception {
+        Member member = mock(Member.class);
+        when(member.getId()).thenReturn(42L);
+        when(memberService.findOrCreateSocialMember(
+                eq(AuthProvider.GOOGLE), eq("sub-1"), eq("a@b.com"), eq("Al"))).thenReturn(member);
+        when(authService.issueTokens(member)).thenReturn(new AuthResult("access-tok", "refresh-tok", null));
+        var token = token(Map.of("sub", "sub-1", "email", "a@b.com", "name", "Al"), "sub", "google");
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setCookies(new jakarta.servlet.http.Cookie("cart_token", "g-tok"));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        handler.onAuthenticationSuccess(request, response, token);
+
+        verify(cartService).mergeGuestIntoMember("g-tok", 42L);   // 소셜 경로도 병합
+        assertThat(response.getHeaders("Set-Cookie")).anyMatch(h -> h.contains("cart_token=")); // 게스트 쿠키 정리
     }
 }

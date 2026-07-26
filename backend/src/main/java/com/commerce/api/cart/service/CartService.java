@@ -34,28 +34,27 @@ public class CartService {
     private final ProductRepository productRepository;
 
     /**
-     * 옵션(사이즈) 담기 (장바구니 없으면 생성). 같은 옵션이면 수량 증가.
+     * 옵션(사이즈) 담기 (장바구니 없으면 생성). 같은 옵션이면 수량 증가. 회원/게스트 공통(#7 — owner로 판별).
      * 재고는 여기서 막지 않는다(라이브/위시 성격) — 부족 검증은 주문 시점. 옵션 존재만 검증(없으면 404).
      */
     @Transactional
-    public CartResponse addItem(Long memberId, CartItemAddRequest request) {
+    public CartResponse addItem(CartOwner owner, CartItemAddRequest request) {
         // 옵션 ID로 소속 상품(애그리거트 루트)을 조회 — 옵션 존재 검증 + productId 확보 (주문과 동일 패턴)
         Product product = productRepository.findByOptionId(request.optionId())
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND,
                         "옵션을 찾을 수 없습니다. (id: " + request.optionId() + ")"));
 
-        Cart cart = cartRepository.findByMemberId(memberId)
-                .orElseGet(() -> Cart.create(memberId));
+        Cart cart = findCart(owner).orElseGet(() -> createCart(owner));
         cart.addItem(product.getId(), request.optionId(), request.quantity());
 
         return toResponse(cartRepository.save(cart));
     }
 
-    /** 장바구니 조회 (없으면 빈 장바구니로 응답) */
-    public CartResponse getCart(Long memberId) {
-        return cartRepository.findByMemberId(memberId)
+    /** 장바구니 조회 (없으면 빈 장바구니로 응답). 회원/게스트 공통. */
+    public CartResponse getCart(CartOwner owner) {
+        return findCart(owner)
                 .map(this::toResponse)
-                .orElseGet(() -> new CartResponse(memberId, List.of(), 0));
+                .orElseGet(() -> new CartResponse(owner.memberId(), List.of(), 0));
     }
 
     /**
@@ -64,8 +63,8 @@ public class CartService {
      * cart는 이미 영속 상태라 dirty checking으로 flush된다(save 불필요 — removeItem과 동일).
      */
     @Transactional
-    public CartResponse changeQuantity(Long memberId, Long optionId, CartItemUpdateRequest request) {
-        Cart cart = cartRepository.findByMemberId(memberId)
+    public CartResponse changeQuantity(CartOwner owner, Long optionId, CartItemUpdateRequest request) {
+        Cart cart = findCart(owner)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "장바구니가 없습니다."));
         cart.updateItemQuantity(optionId, request.quantity());
         return toResponse(cart);
@@ -73,11 +72,43 @@ public class CartService {
 
     /** 항목 제거 (옵션 단위) */
     @Transactional
-    public CartResponse removeItem(Long memberId, Long optionId) {
-        Cart cart = cartRepository.findByMemberId(memberId)
+    public CartResponse removeItem(CartOwner owner, Long optionId) {
+        Cart cart = findCart(owner)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "장바구니가 없습니다."));
         cart.removeItem(optionId);
         return toResponse(cart);
+    }
+
+    /**
+     * 게스트 → 회원 장바구니 병합(#7, 로그인 시). 게스트 카트 항목을 회원 카트로 <b>합산</b>(같은 옵션이면 수량 더함)한 뒤
+     * 게스트 카트를 삭제한다. 게스트 카트가 없으면 no-op. 로그인 흐름(AuthController.login)이 쿠키 토큰으로 호출한다.
+     */
+    @Transactional
+    public void mergeGuestIntoMember(String guestToken, Long memberId) {
+        Cart guest = cartRepository.findByCartToken(guestToken).orElse(null);
+        if (guest == null || guest.getCartItems().isEmpty()) {
+            if (guest != null) {
+                cartRepository.delete(guest);   // 빈 게스트 카트도 정리(토큰 재사용 방지)
+            }
+            return;
+        }
+        Cart member = cartRepository.findByMemberId(memberId).orElseGet(() -> Cart.create(memberId));
+        guest.getCartItems().forEach(gi ->
+                member.addItem(gi.getProductId(), gi.getOptionId(), gi.getQuantity()));   // 같은 옵션이면 합산
+        cartRepository.save(member);
+        cartRepository.delete(guest);   // 병합 완료 → 게스트 카트 제거
+    }
+
+    /** 소유자로 장바구니 조회 — 회원이면 memberId, 게스트면 cartToken. */
+    private java.util.Optional<Cart> findCart(CartOwner owner) {
+        return owner.isMember()
+                ? cartRepository.findByMemberId(owner.memberId())
+                : cartRepository.findByCartToken(owner.token());
+    }
+
+    /** 소유자로 새 장바구니 생성. */
+    private Cart createCart(CartOwner owner) {
+        return owner.isMember() ? Cart.create(owner.memberId()) : Cart.createForGuest(owner.token());
     }
 
     /** 항목들을 현재 상품/옵션 정보로 채워 응답 생성. 상품은 한 번에 조회(N+1 회피). */

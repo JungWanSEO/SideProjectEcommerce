@@ -10,4 +10,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface CartRepository extends JpaRepository<Cart, Long> {
 
     Optional<Cart> findByMemberId(Long memberId);
+
+    /** 게스트 장바구니 조회(쿠키 토큰, #7). */
+    Optional<Cart> findByCartToken(String cartToken);
 }

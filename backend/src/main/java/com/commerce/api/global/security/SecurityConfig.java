@@ -106,6 +106,9 @@ public class SecurityConfig {
                                 "/v3/api-docs/**", "/actuator/health", "/actuator/prometheus").permitAll()
                         // 소셜 로그인 시작(/oauth2/authorization/**)·콜백(/login/oauth2/code/**)은 인증 전 접근 필요
                         .requestMatchers("/oauth2/**", "/login/oauth2/**").permitAll()
+                        // 장바구니는 비로그인 게스트도 사용(#7) — 소유는 서비스가 판별(로그인=memberId / 게스트=cart_token 쿠키).
+                        //   JWT 필터는 permitAll이어도 토큰이 있으면 SecurityContext를 채우므로 회원 카트는 정상 스코핑된다.
+                        .requestMatchers("/api/carts/**").permitAll()
                         // 관리자
                         .requestMatchers(HttpMethod.POST, "/api/products").hasRole("ADMIN")
                         // 상품 기본정보 수정(단건 PUT /api/products/{id}) — ADMIN (옵션 PUT은 아래 별도 매처)

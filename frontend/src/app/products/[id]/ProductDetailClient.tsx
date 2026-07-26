@@ -99,10 +99,7 @@ export default function ProductDetailClient() {
   }, [user, id]);
 
   const addToCart = async () => {
-    if (!user) {
-      router.push(loginHref(`/products/${id}`)); // 비로그인 → 로그인 후 이 상품으로 복귀
-      return;
-    }
+    // #7 게스트 장바구니: 비로그인도 담을 수 있다(서버가 cart_token 쿠키를 발급, 로그인 시 회원 카트로 병합).
     if (selectedOptionId === null) {
       setCartMsg("사이즈를 선택하세요.");
       return;

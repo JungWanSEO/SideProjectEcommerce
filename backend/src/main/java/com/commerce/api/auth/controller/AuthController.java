@@ -3,6 +3,8 @@ package com.commerce.api.auth.controller;
 import com.commerce.api.auth.dto.AuthResult;
 import com.commerce.api.auth.dto.LoginRequest;
 import com.commerce.api.auth.service.AuthService;
+import com.commerce.api.cart.service.CartCookieManager;
+import com.commerce.api.cart.service.CartService;
 import com.commerce.api.global.common.ApiResponse;
 import com.commerce.api.global.ratelimit.RateLimit;
 import com.commerce.api.global.security.AuthCookieManager;
@@ -13,8 +15,10 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -30,6 +34,7 @@ import org.springframework.web.bind.annotation.RestController;
  * - GET  /api/auth/me       현재 로그인 유저 (쿠키의 access로 인증)
  */
 @Tag(name = "인증(Auth)", description = "로그인 / 토큰 재발급 / 로그아웃 / 내 정보 API (httpOnly 쿠키 기반)")
+@Slf4j
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
@@ -38,16 +43,30 @@ public class AuthController {
     private final AuthService authService;
     private final MemberService memberService;
     private final AuthCookieManager cookieManager;
+    private final CartService cartService;                 // 로그인 시 게스트 카트 병합(#7)
+    private final CartCookieManager cartCookieManager;     // 병합 후 게스트 카트 쿠키 정리(#7)
 
     @Operation(summary = "로그인", description = "이메일/비밀번호로 로그인. access·refresh 토큰을 httpOnly 쿠키로 내려주고 body엔 유저 정보. 실패 시 401.")
     @RateLimit(key = "login", limit = 5, by = "#request.email()")   // 무차별 대입 방지: 이메일당 1분 5회
     @PostMapping("/login")
-    public ResponseEntity<ApiResponse<MemberResponse>> login(@Valid @RequestBody LoginRequest request) {
+    public ResponseEntity<ApiResponse<MemberResponse>> login(
+            @Valid @RequestBody LoginRequest request,
+            @CookieValue(name = CartCookieManager.CART_TOKEN_COOKIE, required = false) String cartToken) {
         AuthResult result = authService.login(request);
-        return ResponseEntity.ok()
+        ResponseEntity.BodyBuilder builder = ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookieManager.accessCookie(result.accessToken()).toString())
-                .header(HttpHeaders.SET_COOKIE, cookieManager.refreshCookie(result.refreshToken()).toString())
-                .body(ApiResponse.success("로그인 성공", result.user()));
+                .header(HttpHeaders.SET_COOKIE, cookieManager.refreshCookie(result.refreshToken()).toString());
+        // 게스트 장바구니가 있으면 회원 카트로 병합(합산)하고 게스트 쿠키를 지운다(#7). 병합 실패는 로그인을 막지
+        //   않는다(best-effort — 게스트 카트는 남아 다음 로그인에 재시도 가능). 로그인 자체는 이미 성립.
+        if (StringUtils.hasText(cartToken)) {
+            try {
+                cartService.mergeGuestIntoMember(cartToken, result.user().id());
+                builder.header(HttpHeaders.SET_COOKIE, cartCookieManager.clear().toString());
+            } catch (RuntimeException e) {
+                log.warn("게스트 장바구니 병합 실패(memberId={}): {}", result.user().id(), e.getMessage());
+            }
+        }
+        return builder.body(ApiResponse.success("로그인 성공", result.user()));
     }
 
     @Operation(summary = "토큰 재발급", description = "refresh 쿠키로 새 access·refresh 토큰을 발급(회전)해 쿠키로 내려준다. 유효하지 않으면 401.")

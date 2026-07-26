@@ -2,14 +2,18 @@ package com.commerce.api.global.security.oauth2;
 
 import com.commerce.api.auth.dto.AuthResult;
 import com.commerce.api.auth.service.AuthService;
+import com.commerce.api.cart.service.CartCookieManager;
+import com.commerce.api.cart.service.CartService;
 import com.commerce.api.global.security.AuthCookieManager;
 import com.commerce.api.member.entity.AuthProvider;
 import com.commerce.api.member.entity.Member;
 import com.commerce.api.member.service.MemberService;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.Map;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.core.Authentication;
@@ -17,6 +21,7 @@ import org.springframework.security.oauth2.client.authentication.OAuth2Authentic
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 /**
  * 소셜 로그인 성공 핸들러 — 인증 "주체"만 IdP로 갈아끼우고, 그 이후는 로컬 로그인과 동일하다(architecture.md §12).
@@ -25,20 +30,25 @@ import org.springframework.stereotype.Component;
  * 기존 발급 파이프라인({@link AuthService#issueTokens})으로 우리 JWT(access·refresh)를 httpOnly 쿠키에 심고 →
  * 프론트로 리다이렉트. 프론트는 로드 시 {@code /api/auth/me}로 로그인 상태를 인지한다.
  */
+@Slf4j
 @Component
 public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
 
     private final MemberService memberService;
     private final AuthService authService;
     private final AuthCookieManager cookieManager;
+    private final CartService cartService;                 // 소셜 로그인 시 게스트 카트 병합(#7)
+    private final CartCookieManager cartCookieManager;     // 병합 후 게스트 카트 쿠키 정리(#7)
     private final String successRedirectUrl;
 
     public OAuth2LoginSuccessHandler(MemberService memberService, AuthService authService,
-            AuthCookieManager cookieManager,
+            AuthCookieManager cookieManager, CartService cartService, CartCookieManager cartCookieManager,
             @Value("${app.oauth2.success-redirect-url:http://localhost:3000}") String successRedirectUrl) {
         this.memberService = memberService;
         this.authService = authService;
         this.cookieManager = cookieManager;
+        this.cartService = cartService;
+        this.cartCookieManager = cartCookieManager;
         this.successRedirectUrl = successRedirectUrl;
     }
 
@@ -56,7 +66,31 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
 
         response.addHeader(HttpHeaders.SET_COOKIE, cookieManager.accessCookie(result.accessToken()).toString());
         response.addHeader(HttpHeaders.SET_COOKIE, cookieManager.refreshCookie(result.refreshToken()).toString());
+        // 게스트 장바구니 병합(#7) — 폼 로그인(AuthController.login)과 동형. 소셜 경로 누락 결함 교정(적대적리뷰 LOW).
+        //   best-effort: 병합 실패가 로그인을 막지 않는다(게스트 카트 잔존 → 다음 로그인에 재시도).
+        String cartToken = readCookie(request, CartCookieManager.CART_TOKEN_COOKIE);
+        if (StringUtils.hasText(cartToken)) {
+            try {
+                cartService.mergeGuestIntoMember(cartToken, member.getId());
+                response.addHeader(HttpHeaders.SET_COOKIE, cartCookieManager.clear().toString());
+            } catch (RuntimeException e) {
+                log.warn("소셜 로그인 게스트 장바구니 병합 실패(memberId={}): {}", member.getId(), e.getMessage());
+            }
+        }
         response.sendRedirect(successRedirectUrl);
+    }
+
+    /** 요청 쿠키에서 이름으로 값 조회(없으면 null). */
+    private static String readCookie(HttpServletRequest request, String name) {
+        if (request.getCookies() == null) {
+            return null;
+        }
+        for (Cookie cookie : request.getCookies()) {
+            if (name.equals(cookie.getName())) {
+                return cookie.getValue();
+            }
+        }
+        return null;
     }
 
     /** 제공자별 속성 구조가 달라 분기 추출한다(구글 OIDC 평면 vs 카카오 중첩). */
