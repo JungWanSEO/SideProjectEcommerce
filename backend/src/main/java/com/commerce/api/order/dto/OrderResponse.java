@@ -119,7 +119,8 @@ public record OrderResponse(
             int quantity,
             long subtotal,
             long discountShare,      // 이 항목에 안분된 쿠폰 할인액(원). 실효가 = subtotal - discountShare
-            OrderItemStatus status   // ACTIVE / CANCELLED(부분환불)
+            OrderItemStatus status,  // ACTIVE / CANCELLED(부분환불) / RETURNED
+            com.commerce.api.global.common.CancelReason cancelReason   // 취소 사유(#8, 취소된 항목만·없으면 null)
     ) {
         public static OrderItemResponse from(OrderItem item, long discountShare) {
             return new OrderItemResponse(
@@ -134,7 +135,8 @@ public record OrderResponse(
                     item.getQuantity(),
                     item.getSubtotal(),
                     discountShare,
-                    item.getStatus()
+                    item.getStatus(),
+                    item.getCancelReason()
             );
         }
     }

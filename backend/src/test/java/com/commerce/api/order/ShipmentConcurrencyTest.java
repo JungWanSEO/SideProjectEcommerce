@@ -116,7 +116,7 @@ class ShipmentConcurrencyTest {
         // 동시: 셀러B 배송완료(전진 경로) + 셀러A 항목취소(취소 경로) — 서로 다른 경로가 같은 주문 락으로 직렬화돼야 한다.
         runConcurrently(
                 () -> shipmentService.advance(shipB, ShipmentStatus.DELIVERED, 2L, null, null),
-                () -> orderService.cancelItem(orderId, itemA, 100L, false));
+                () -> orderService.cancelItem(orderId, itemA, 100L, false, null));
 
         // 활성(비취소) shipment는 셀러B(DELIVERED)뿐 → 주문 DELIVERED. 락 없으면 SHIPPING에 영구 고착(리뷰 #1).
         assertThat(statusOf(orderId)).isEqualTo(OrderStatus.DELIVERED);
@@ -131,8 +131,8 @@ class ShipmentConcurrencyTest {
         long itemB = itemIdOf(order, 2L);
 
         runConcurrently(
-                () -> orderService.cancelItem(orderId, itemA, 100L, false),
-                () -> orderService.cancelItem(orderId, itemB, 100L, false));
+                () -> orderService.cancelItem(orderId, itemA, 100L, false, null),
+                () -> orderService.cancelItem(orderId, itemB, 100L, false, null));
 
         // 두 항목·두 shipment 모두 취소 → 주문 CANCELLED. 락 없으면 PAID에 고착(쿠폰 미복원·구매 오집계, 리뷰 #3).
         assertThat(statusOf(orderId)).isEqualTo(OrderStatus.CANCELLED);

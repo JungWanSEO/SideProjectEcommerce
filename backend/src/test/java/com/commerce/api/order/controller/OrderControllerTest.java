@@ -81,7 +81,7 @@ class OrderControllerTest {
         return new OrderResponse(1L, 1L, status, 30000L,
                 0L, 0L, 30000L, null,   // discountAmount, shippingFee, payableAmount, couponCode (쿠폰 없음)
                 List.of(new OrderItemResponse(
-                        100L, 1L, 10L, 7L, 3L, "반팔티셔츠", "M", 10000L, 3, 30000L, 0L, OrderItemStatus.ACTIVE)),
+                        100L, 1L, 10L, 7L, 3L, "반팔티셔츠", "M", 10000L, 3, 30000L, 0L, OrderItemStatus.ACTIVE, null)),
                 null,   // shipping (배송지 없음 — 컨트롤러 슬라이스 테스트엔 불필요)
                 List.of(), List.of(),   // statusHistory, shipments (송장은 shipments에)
                 LocalDateTime.now());
@@ -159,7 +159,7 @@ class OrderControllerTest {
     @DisplayName("POST /api/orders/{id}/cancel - 취소 성공 시 200, 상태 CANCELLED")
     void cancel_success() throws Exception {
         // 컨트롤러는 취소+환불을 PaymentService.cancelOrder(memberId, orderId, admin)에 위임한다.
-        given(paymentService.cancelOrder(eq(1L), eq(1L), eq(false))).willReturn(sampleOrder(OrderStatus.CANCELLED));
+        given(paymentService.cancelOrder(eq(1L), eq(1L), eq(false), any())).willReturn(sampleOrder(OrderStatus.CANCELLED));
 
         mockMvc.perform(post("/api/orders/1/cancel"))
                 .andExpect(status().isOk())
@@ -167,9 +167,27 @@ class OrderControllerTest {
     }
 
     @Test
+    @DisplayName("POST /api/orders/{id}/cancel - 본문의 취소 사유(#8)가 서비스로 전달된다")
+    void cancel_passesReason() throws Exception {
+        given(paymentService.cancelOrder(eq(1L), eq(1L), eq(false),
+                eq(com.commerce.api.global.common.CancelReason.CHANGE_OF_MIND)))
+                .willReturn(sampleOrder(OrderStatus.CANCELLED));
+
+        mockMvc.perform(post("/api/orders/1/cancel")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"reason":"CHANGE_OF_MIND"}
+                                """))
+                .andExpect(status().isOk());
+
+        verify(paymentService).cancelOrder(1L, 1L, false,
+                com.commerce.api.global.common.CancelReason.CHANGE_OF_MIND);
+    }
+
+    @Test
     @DisplayName("POST /api/orders/{orderId}/items/{itemId}/cancel - 항목 부분취소 200")
     void cancelItem_success() throws Exception {
-        given(paymentService.cancelOrderItem(eq(1L), eq(1L), eq(100L), eq(false)))
+        given(paymentService.cancelOrderItem(eq(1L), eq(1L), eq(100L), eq(false), any()))
                 .willReturn(sampleOrder(OrderStatus.PAID));   // 부분취소라 주문은 PAID 유지
 
         mockMvc.perform(post("/api/orders/1/items/100/cancel"))

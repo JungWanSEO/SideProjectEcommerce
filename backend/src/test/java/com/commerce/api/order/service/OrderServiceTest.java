@@ -72,7 +72,7 @@ class OrderServiceTest {
         ReflectionTestUtils.setField(line, "id", 500L);
         given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
-        OrderResponse response = orderService.cancel(1L, 100L, false);   // 주문 주인(100번) 본인
+        OrderResponse response = orderService.cancel(1L, 100L, false, null);   // 주문 주인(100번) 본인
 
         assertThat(response.status()).isEqualTo(OrderStatus.CANCELLED);
         // 재고 되돌리기는 항목별로 위임 — 복원/해제 판정(예약 상태)은 StockReservationService가 담당.
@@ -86,7 +86,7 @@ class OrderServiceTest {
         order.cancel();
         given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
-        assertThatThrownBy(() -> orderService.cancel(1L, 100L, false))
+        assertThatThrownBy(() -> orderService.cancel(1L, 100L, false, null))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("이미 취소된 주문");
     }
@@ -99,7 +99,7 @@ class OrderServiceTest {
         ReflectionTestUtils.setField(line, "id", 500L);
         given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
-        OrderResponse response = orderService.cancel(1L, 100L, false);
+        OrderResponse response = orderService.cancel(1L, 100L, false, null);
 
         assertThat(response.status()).isEqualTo(OrderStatus.CANCELLED);
         verify(stockReservationService).undoForOrderItem(500L);
@@ -124,7 +124,7 @@ class OrderServiceTest {
 
         given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
-        OrderResponse response = orderService.cancel(1L, 100L, false);
+        OrderResponse response = orderService.cancel(1L, 100L, false, null);
 
         assertThat(response.status()).isEqualTo(OrderStatus.CANCELLED);
         verify(stockReservationService).undoForOrderItem(501L);              // 이번에 취소된 항목만
@@ -147,7 +147,7 @@ class OrderServiceTest {
         ReflectionTestUtils.setField(line2, "id", 501L);
         given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
-        orderService.cancelItem(1L, 500L, 100L, false);
+        orderService.cancelItem(1L, 500L, 100L, false, null);
 
         verify(stockReservationService).undoForOrderItem(500L);              // 그 항목만
         verify(stockReservationService, never()).undoForOrderItem(501L);
@@ -164,7 +164,7 @@ class OrderServiceTest {
         ReflectionTestUtils.setField(line2, "id", 501L);
         given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
-        orderService.cancelItem(1L, 500L, 100L, false);
+        orderService.cancelItem(1L, 500L, 100L, false, null);
 
         verify(stockReservationService).undoForOrderItem(500L);
         verify(stockReservationService, never()).undoForOrderItem(501L);
@@ -237,7 +237,7 @@ class OrderServiceTest {
         Order order = orderWithId(1L, 100L, item(3));
         given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
-        assertThatThrownBy(() -> orderService.cancel(1L, 999L, false))
+        assertThatThrownBy(() -> orderService.cancel(1L, 999L, false, null))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("본인의 주문");
         assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);   // 취소 막힘 → 상태 그대로
@@ -318,7 +318,7 @@ class OrderServiceTest {
         Order order = orderInStatus(1L, OrderStatus.PAID);
         given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
-        OrderResponse response = orderService.cancel(1L, 100L, false);   // 주인=100
+        OrderResponse response = orderService.cancel(1L, 100L, false, null);   // 주인=100
 
         assertThat(response.status()).isEqualTo(OrderStatus.CANCELLED);
         var last = response.statusHistory().get(response.statusHistory().size() - 1);
@@ -378,7 +378,7 @@ class OrderServiceTest {
         Order order = orderInStatus(1L, OrderStatus.SHIPPING);   // 단일 항목·단일 shipment SHIPPING
         given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
-        assertThatThrownBy(() -> orderService.cancel(1L, 100L, false))
+        assertThatThrownBy(() -> orderService.cancel(1L, 100L, false, null))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("배송이 시작");
         assertThat(order.getStatus()).isEqualTo(OrderStatus.SHIPPING);

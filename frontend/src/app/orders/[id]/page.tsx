@@ -11,6 +11,15 @@ import { loginHref } from "@/lib/useRequireAuth";
 import { buttonClass } from "@/components/ui/Button";
 import Skeleton from "@/components/ui/Skeleton";
 
+/** 취소 사유 선택지(#8) — 값은 서버 CancelReason enum, 라벨은 구매자용. */
+const CANCEL_REASONS = [
+  { code: "CHANGE_OF_MIND", label: "단순 변심" },
+  { code: "WRONG_ORDER", label: "주문 실수" },
+  { code: "DELIVERY_DELAY", label: "배송 지연" },
+  { code: "OUT_OF_STOCK", label: "품절" },
+  { code: "OTHER", label: "기타" },
+];
+
 /** 주문 상세 (/orders/[id]). 본인 주문만(서버가 403으로 차단). PENDING=결제/취소, PAID=취소(환불). */
 export default function OrderDetailPage() {
   const params = useParams();
@@ -22,6 +31,7 @@ export default function OrderDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [cancelReason, setCancelReason] = useState("CHANGE_OF_MIND"); // 취소 사유(#8, 기록·집계)
 
   useEffect(() => {
     if (!authLoading && !user) router.replace(loginHref(window.location.pathname + window.location.search));
@@ -42,7 +52,7 @@ export default function OrderDetailPage() {
     setCancelling(true);
     setError(null);
     try {
-      const updated = await apiPost<Order>(`/api/orders/${id}/cancel`);
+      const updated = await apiPost<Order>(`/api/orders/${id}/cancel`, { reason: cancelReason });
       setOrder(updated); // 취소 API가 갱신된 주문(CANCELLED)을 돌려줌
     } catch (e) {
       setError((e as Error).message);
@@ -57,7 +67,7 @@ export default function OrderDetailPage() {
     setCancelling(true);
     setError(null);
     try {
-      const updated = await apiPost<Order>(`/api/orders/${id}/items/${itemId}/cancel`);
+      const updated = await apiPost<Order>(`/api/orders/${id}/items/${itemId}/cancel`, { reason: cancelReason });
       setOrder(updated);
     } catch (e) {
       setError((e as Error).message);
@@ -264,7 +274,7 @@ export default function OrderDetailPage() {
 
       {error && <p className="mt-4 text-sm text-danger">{error}</p>}
 
-      <div className="mt-7 flex gap-3">
+      <div className="mt-7 flex flex-wrap items-center gap-3">
         {/* PENDING(결제대기): 결제하기 + 취소 / PAID(결제완료): 취소=환불 / CANCELLED: 버튼 없음 */}
         {order.status === "PENDING" && (
           <Link href={`/orders/${order.id}/pay`} className={buttonClass("primary", "md")}>
@@ -272,13 +282,27 @@ export default function OrderDetailPage() {
           </Link>
         )}
         {(order.status === "PENDING" || order.status === "PAID") && (
-          <button
-            onClick={cancel}
-            disabled={cancelling}
-            className="rounded-full border border-line px-5 py-2.5 text-sm text-muted transition hover:border-danger hover:text-danger disabled:opacity-50"
-          >
-            {cancelling ? "취소 처리 중…" : "주문 취소"}
-          </button>
+          <>
+            {/* 취소 사유(#8) — 항목 부분취소에도 같은 사유가 적용된다 */}
+            <select
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              disabled={cancelling}
+              aria-label="취소 사유"
+              className="rounded-full border border-line px-3 py-2.5 text-sm text-ink"
+            >
+              {CANCEL_REASONS.map((r) => (
+                <option key={r.code} value={r.code}>{r.label}</option>
+              ))}
+            </select>
+            <button
+              onClick={cancel}
+              disabled={cancelling}
+              className="rounded-full border border-line px-5 py-2.5 text-sm text-muted transition hover:border-danger hover:text-danger disabled:opacity-50"
+            >
+              {cancelling ? "취소 처리 중…" : "주문 취소"}
+            </button>
+          </>
         )}
       </div>
     </main>

@@ -3,6 +3,7 @@ package com.commerce.api.order.entity;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.commerce.api.global.common.CancelReason;
 import com.commerce.api.global.exception.BusinessException;
 import java.util.List;
 import java.util.Map;
@@ -162,6 +163,35 @@ class OrderTest {
         Order order = orderWith(item(1L, 10000L));
         assertThatThrownBy(() -> order.assignShippingFee(-1L))
                 .isInstanceOf(BusinessException.class);
+    }
+
+    // === #8 취소 사유 ============================================================
+
+    @Test
+    @DisplayName("취소 사유 - 주문 취소 시 각 항목에 사유 기록(기록·집계 전용)")
+    void cancel_recordsReason() {
+        OrderItem a = item(1L, 10000L);
+        OrderItem b = item(2L, 20000L);
+        Order order = orderWith(a, b);   // PENDING(출고 전) — 전량 취소 가능
+
+        order.cancel(100L, "주문자 취소", CancelReason.CHANGE_OF_MIND);
+
+        assertThat(a.getStatus()).isEqualTo(OrderItemStatus.CANCELLED);
+        assertThat(a.getCancelReason()).isEqualTo(CancelReason.CHANGE_OF_MIND);
+        assertThat(b.getCancelReason()).isEqualTo(CancelReason.CHANGE_OF_MIND);
+    }
+
+    @Test
+    @DisplayName("취소 사유 - OrderItem.cancel(reason)이 사유 기록, 사유 없는 취소는 null")
+    void itemCancel_recordsReason() {
+        OrderItem a = item(1L, 10000L);
+        a.cancel(CancelReason.DEFECTIVE);
+        assertThat(a.getStatus()).isEqualTo(OrderItemStatus.CANCELLED);
+        assertThat(a.getCancelReason()).isEqualTo(CancelReason.DEFECTIVE);
+
+        OrderItem b = item(2L, 20000L);
+        b.cancel();   // 사유 미상(시스템)
+        assertThat(b.getCancelReason()).isNull();
     }
 
     // === #1 P2: 결제 팬아웃 · 백필 =====================================================

@@ -76,7 +76,7 @@ class ReturnRefundTest {
 
     private ReturnResponse advanceToInspected(long orderId, long itemId, ReturnType type, Long exchangeOptionId) {
         ReturnResponse req = returnService.create(100L, false, orderId,
-                new ReturnCreateRequest(itemId, type, "변심", exchangeOptionId));
+                new ReturnCreateRequest(itemId, type, "변심", null, exchangeOptionId));
         returnService.advanceForSeller(req.id(), 1L, act(ReturnAction.APPROVE), 1L);
         returnService.advanceForSeller(req.id(), 1L, act(ReturnAction.PICK_UP), 1L);
         returnService.advanceForSeller(req.id(), 1L, act(ReturnAction.INSPECT), 1L);

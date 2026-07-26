@@ -7,6 +7,7 @@ import com.commerce.api.global.security.SecurityUtil;
 import com.commerce.api.order.dto.CheckoutRequest;
 import com.commerce.api.order.dto.CouponPreviewRequest;
 import com.commerce.api.order.dto.CouponPreviewResponse;
+import com.commerce.api.order.dto.OrderCancelRequest;
 import com.commerce.api.order.dto.OrderCreateRequest;
 import com.commerce.api.order.dto.OrderResponse;
 import com.commerce.api.order.dto.OrderSearchCondition;
@@ -148,9 +149,11 @@ public class OrderController {
     // 💸 돈이 되돌아가는 지점(환불) — 본인/ADMIN 누가 실행했든 감사 이력을 남긴다.
     @Auditable(action = "ORDER_CANCEL", targetType = "ORDER", targetId = "#id")
     @PostMapping("/{id}/cancel")
-    public ResponseEntity<ApiResponse<OrderResponse>> cancel(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<OrderResponse>> cancel(
+            @PathVariable Long id,
+            @RequestBody(required = false) OrderCancelRequest request) {
         OrderResponse response = paymentService.cancelOrder(
-                SecurityUtil.getCurrentMemberId(), id, SecurityUtil.isAdmin());
+                SecurityUtil.getCurrentMemberId(), id, SecurityUtil.isAdmin(), reasonOf(request));
         return ResponseEntity.ok(ApiResponse.success("주문이 취소되었습니다.", response));
     }
 
@@ -160,10 +163,16 @@ public class OrderController {
     @Auditable(action = "ORDER_ITEM_CANCEL", targetType = "ORDER", targetId = "#orderId")
     @PostMapping("/{orderId}/items/{itemId}/cancel")
     public ResponseEntity<ApiResponse<OrderResponse>> cancelItem(
-            @PathVariable Long orderId, @PathVariable Long itemId) {
+            @PathVariable Long orderId, @PathVariable Long itemId,
+            @RequestBody(required = false) OrderCancelRequest request) {
         OrderResponse response = paymentService.cancelOrderItem(
-                SecurityUtil.getCurrentMemberId(), orderId, itemId, SecurityUtil.isAdmin());
+                SecurityUtil.getCurrentMemberId(), orderId, itemId, SecurityUtil.isAdmin(), reasonOf(request));
         return ResponseEntity.ok(ApiResponse.success("주문 항목이 취소(환불)되었습니다.", response));
+    }
+
+    /** 취소 요청 본문에서 사유 추출(본문·사유 없으면 null — 사유 없는 취소 허용, #8). */
+    private static com.commerce.api.global.common.CancelReason reasonOf(OrderCancelRequest request) {
+        return request == null ? null : request.reason();
     }
 
     @Operation(summary = "주문 배송 상태 전진 (ADMIN)",

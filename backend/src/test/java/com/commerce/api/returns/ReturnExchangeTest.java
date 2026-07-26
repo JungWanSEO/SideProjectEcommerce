@@ -85,7 +85,7 @@ class ReturnExchangeTest {
 
     private ReturnResponse toInspectedExchange(long orderId, long itemId, long exchangeOptionId) {
         ReturnResponse req = returnService.create(100L, false, orderId,
-                new ReturnCreateRequest(itemId, ReturnType.EXCHANGE, "사이즈 교환", exchangeOptionId));
+                new ReturnCreateRequest(itemId, ReturnType.EXCHANGE, "사이즈 교환", null, exchangeOptionId));
         returnService.advanceForSeller(req.id(), 1L, act(ReturnAction.APPROVE), 1L);
         returnService.advanceForSeller(req.id(), 1L, act(ReturnAction.PICK_UP), 1L);
         returnService.advanceForSeller(req.id(), 1L, act(ReturnAction.INSPECT), 1L);
@@ -143,7 +143,7 @@ class ReturnExchangeTest {
 
         // 원 항목은 ACTIVE·원배송 DELIVERED라 자격 게이트는 통과하지만, 교환완료 가드가 재-반품을 막아야 한다
         assertThatThrownBy(() -> returnService.create(100L, false, orderId,
-                new ReturnCreateRequest(itemId, ReturnType.RETURN, "재반품 시도", null)))
+                new ReturnCreateRequest(itemId, ReturnType.RETURN, "재반품 시도", null, null)))
                 .isInstanceOf(BusinessException.class).extracting("status").isEqualTo(HttpStatus.CONFLICT);
     }
 

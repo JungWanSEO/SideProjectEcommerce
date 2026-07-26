@@ -202,7 +202,7 @@ class PaymentServiceTest {
     @Test
     @DisplayName("취소 - PAID 주문이면 주문취소 위임 + PG환불 + 결제 CANCELLED")
     void cancelOrder_paidOrder_refunds() {
-        given(orderService.cancel(1L, 100L, false))
+        given(orderService.cancel(1L, 100L, false, null))
                 .willReturn(order(1L, 100L, OrderStatus.CANCELLED, 30000L));
         Payment paid = Payment.ready(1L, 30000L, "MOCK_CARD", "TOSS", "key-1");
         paid.markPaid("MOCK-tx-1");
@@ -211,10 +211,10 @@ class PaymentServiceTest {
         given(paymentGateway.refund(any())).willReturn(PaymentRefund.refunded("MOCK-REFUND-1"));
         given(paymentRepository.save(any(Payment.class))).willAnswer(inv -> inv.getArgument(0));
 
-        OrderResponse response = paymentService.cancelOrder(100L, 1L, false);
+        OrderResponse response = paymentService.cancelOrder(100L, 1L, false, null);
 
         assertThat(response.status()).isEqualTo(OrderStatus.CANCELLED);
-        verify(orderService).cancel(1L, 100L, false);   // 재고 복원 + 주문 CANCELLED 위임
+        verify(orderService).cancel(1L, 100L, false, null);   // 재고 복원 + 주문 CANCELLED 위임
         verify(paymentGatewayRouter).resolve("TOSS");    // 승인한 PG로 환불 라우팅
         verify(paymentGateway).refund(any());
         ArgumentCaptor<Payment> captor = ArgumentCaptor.forClass(Payment.class);
@@ -225,11 +225,11 @@ class PaymentServiceTest {
     @Test
     @DisplayName("취소 - PENDING 주문(결제 없음)이면 환불 없이 주문만 취소")
     void cancelOrder_pendingOrder_noRefund() {
-        given(orderService.cancel(1L, 100L, false))
+        given(orderService.cancel(1L, 100L, false, null))
                 .willReturn(order(1L, 100L, OrderStatus.CANCELLED, 30000L));
         given(paymentRepository.findByOrderIdAndStatus(1L, PaymentStatus.PAID)).willReturn(Optional.empty());
 
-        OrderResponse response = paymentService.cancelOrder(100L, 1L, false);
+        OrderResponse response = paymentService.cancelOrder(100L, 1L, false, null);
 
         assertThat(response.status()).isEqualTo(OrderStatus.CANCELLED);
         verify(paymentGatewayRouter, never()).resolve(any());   // 환불 대상 없음 → PG 라우팅 안 함
@@ -239,7 +239,7 @@ class PaymentServiceTest {
     @Test
     @DisplayName("취소 - PG 환불 실패면 502, 결제 CANCELLED 저장 안 함(트랜잭션 롤백 대상)")
     void cancelOrder_refundFails() {
-        given(orderService.cancel(1L, 100L, false))
+        given(orderService.cancel(1L, 100L, false, null))
                 .willReturn(order(1L, 100L, OrderStatus.CANCELLED, 30000L));
         Payment paid = Payment.ready(1L, 30000L, "MOCK_CARD", "TOSS", "key-1");
         paid.markPaid("MOCK-tx-1");
@@ -247,7 +247,7 @@ class PaymentServiceTest {
         given(paymentGatewayRouter.resolve("TOSS")).willReturn(paymentGateway);
         given(paymentGateway.refund(any())).willReturn(PaymentRefund.failed("PG 점검중"));
 
-        assertThatThrownBy(() -> paymentService.cancelOrder(100L, 1L, false))
+        assertThatThrownBy(() -> paymentService.cancelOrder(100L, 1L, false, null))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("환불에 실패");
         verify(paymentRepository, never()).save(any());
@@ -262,7 +262,7 @@ class PaymentServiceTest {
      */
     private OrderResponse afterItemCancel(OrderStatus status, long remainingPayable, boolean hasCoupon) {
         var item = new OrderResponse.OrderItemResponse(
-                100L, 1L, 10L, 7L, 3L, "반팔티셔츠", "M", 10000L, 3, 30000L, 0L, OrderItemStatus.CANCELLED);
+                100L, 1L, 10L, 7L, 3L, "반팔티셔츠", "M", 10000L, 3, 30000L, 0L, OrderItemStatus.CANCELLED, null);
         return new OrderResponse(1L, 100L, status, 30000L, 0L, 0L, remainingPayable,
                 hasCoupon ? "WELCOME5000" : null, List.of(item), null,
                 List.of(), List.of(), LocalDateTime.now());
@@ -272,7 +272,7 @@ class PaymentServiceTest {
     @DisplayName("항목 취소 - 잔여-활성 공식으로 이번에 취소된 몫(실효가)만 부분환불하고 결제에 누적한다")
     void cancelOrderItem_refundsEffectivePrice() {
         // 결제 50000 중 한 항목(실효가 25000) 취소 → 남은 활성 payable 25000 → 환불 = 50000 − 25000 = 25000
-        given(orderService.cancelItem(1L, 100L, 100L, false))
+        given(orderService.cancelItem(1L, 100L, 100L, false, null))
                 .willReturn(afterItemCancel(OrderStatus.PAID, 25000L, false));
         Payment paid = Payment.ready(1L, 50000L, "MOCK_CARD", "TOSS", "key-1");
         paid.markPaid("MOCK-tx-1");
@@ -280,7 +280,7 @@ class PaymentServiceTest {
         given(paymentGatewayRouter.resolve("TOSS")).willReturn(paymentGateway);
         given(paymentGateway.refund(any())).willReturn(PaymentRefund.refunded("MOCK-refund-1"));
 
-        paymentService.cancelOrderItem(100L, 1L, 100L, false);
+        paymentService.cancelOrderItem(100L, 1L, 100L, false, null);
 
         ArgumentCaptor<PaymentGateway.PaymentRefundCommand> cmd =
                 ArgumentCaptor.forClass(PaymentGateway.PaymentRefundCommand.class);
@@ -294,7 +294,7 @@ class PaymentServiceTest {
     @DisplayName("항목 취소 - 부분환불이 PG에서 실패하면 502, 결제 저장 안 함(롤백 대상)")
     void cancelOrderItem_refundFails() {
         // 남은 활성 0 → 환불 = 30000(전량). PG 실패 → 502
-        given(orderService.cancelItem(1L, 100L, 100L, false))
+        given(orderService.cancelItem(1L, 100L, 100L, false, null))
                 .willReturn(afterItemCancel(OrderStatus.CANCELLED, 0L, false));
         Payment paid = Payment.ready(1L, 30000L, "MOCK_CARD", "TOSS", "key-1");
         paid.markPaid("MOCK-tx-1");
@@ -302,7 +302,7 @@ class PaymentServiceTest {
         given(paymentGatewayRouter.resolve("TOSS")).willReturn(paymentGateway);
         given(paymentGateway.refund(any())).willReturn(PaymentRefund.failed("PG 점검중"));
 
-        assertThatThrownBy(() -> paymentService.cancelOrderItem(100L, 1L, 100L, false))
+        assertThatThrownBy(() -> paymentService.cancelOrderItem(100L, 1L, 100L, false, null))
                 .isInstanceOf(BusinessException.class)
                 .extracting("status").isEqualTo(HttpStatus.BAD_GATEWAY);
         verify(paymentRepository, never()).save(any());
@@ -312,11 +312,11 @@ class PaymentServiceTest {
     @DisplayName("항목 취소 - 마지막 항목 취소로 주문 전체가 CANCELLED면 발급형 쿠폰을 복원한다")
     void cancelOrderItem_wholeOrderCancelled_releasesCoupon() {
         // 항목 취소 결과 주문 status=CANCELLED (마지막 활성 항목이었음), 결제 없음
-        given(orderService.cancelItem(1L, 100L, 100L, false))
+        given(orderService.cancelItem(1L, 100L, 100L, false, null))
                 .willReturn(afterItemCancel(OrderStatus.CANCELLED, 0L, true));
         given(paymentRepository.findByOrderIdAndStatus(1L, PaymentStatus.PAID)).willReturn(Optional.empty());
 
-        paymentService.cancelOrderItem(100L, 1L, 100L, false);
+        paymentService.cancelOrderItem(100L, 1L, 100L, false, null);
 
         verify(memberCouponService).release(100L, "WELCOME5000");   // 취소된 주문의 쿠폰 복원
     }
@@ -324,11 +324,11 @@ class PaymentServiceTest {
     @Test
     @DisplayName("항목 취소 - PENDING 주문(결제 없음)이면 환불 없이 항목만 취소")
     void cancelOrderItem_pendingNoRefund() {
-        given(orderService.cancelItem(1L, 100L, 100L, false))
+        given(orderService.cancelItem(1L, 100L, 100L, false, null))
                 .willReturn(afterItemCancel(OrderStatus.PENDING, 0L, false));
         given(paymentRepository.findByOrderIdAndStatus(1L, PaymentStatus.PAID)).willReturn(Optional.empty());
 
-        paymentService.cancelOrderItem(100L, 1L, 100L, false);
+        paymentService.cancelOrderItem(100L, 1L, 100L, false, null);
 
         verify(paymentGateway, never()).refund(any());
         verify(paymentRepository, never()).save(any());
@@ -339,7 +339,7 @@ class PaymentServiceTest {
     @Test
     @DisplayName("회귀(과다환불 방지) - 부분환불이 있던 결제를 전체취소하면 '잔여'만 환불한다(전액 재환불 아님)")
     void cancelOrder_afterPartialRefund_refundsOnlyRemaining() {
-        given(orderService.cancel(1L, 100L, false))
+        given(orderService.cancel(1L, 100L, false, null))
                 .willReturn(order(1L, 100L, OrderStatus.CANCELLED, 30000L));
         // 결제 30000 중 이미 10000을 항목단위로 환불한 상태(refundedAmount=10000, 아직 PAID)
         Payment paid = Payment.ready(1L, 30000L, "MOCK_CARD", "TOSS", "key-1");
@@ -349,7 +349,7 @@ class PaymentServiceTest {
         given(paymentGatewayRouter.resolve("TOSS")).willReturn(paymentGateway);
         given(paymentGateway.refund(any())).willReturn(PaymentRefund.refunded("MOCK-REFUND-2"));
 
-        paymentService.cancelOrder(100L, 1L, false);
+        paymentService.cancelOrder(100L, 1L, false, null);
 
         ArgumentCaptor<PaymentGateway.PaymentRefundCommand> cmd =
                 ArgumentCaptor.forClass(PaymentGateway.PaymentRefundCommand.class);
@@ -364,7 +364,7 @@ class PaymentServiceTest {
     void cancelOrder_partial_refundsOnlyCancelledPortion() {
         // 결제 30000(셀러A 20000 + 셀러B 10000). 셀러B 출고 → 셀러A 항목만 취소(부분).
         //   주문은 SHIPPING 유지, 취소 후 남은 활성 실효가(payable)=10000.
-        given(orderService.cancel(1L, 100L, false))
+        given(orderService.cancel(1L, 100L, false, null))
                 .willReturn(order(1L, 100L, OrderStatus.SHIPPING, 30000L, 10000L));
         Payment paid = Payment.ready(1L, 30000L, "MOCK_CARD", "TOSS", "key-1");
         paid.markPaid("MOCK-tx-1");
@@ -373,7 +373,7 @@ class PaymentServiceTest {
         given(paymentGateway.refund(any())).willReturn(PaymentRefund.refunded("MOCK-REFUND-3"));
         given(paymentRepository.save(any(Payment.class))).willAnswer(inv -> inv.getArgument(0));
 
-        paymentService.cancelOrder(100L, 1L, false);
+        paymentService.cancelOrder(100L, 1L, false, null);
 
         ArgumentCaptor<PaymentGateway.PaymentRefundCommand> cmd =
                 ArgumentCaptor.forClass(PaymentGateway.PaymentRefundCommand.class);
@@ -387,7 +387,7 @@ class PaymentServiceTest {
     @Test
     @DisplayName("회귀(과다환불 방지) - 모든 항목이 이미 부분환불로 소진됐으면 전체취소 시 추가 환불 없음")
     void cancelOrder_alreadyFullyRefunded_noExtraRefund() {
-        given(orderService.cancel(1L, 100L, false))
+        given(orderService.cancel(1L, 100L, false, null))
                 .willReturn(order(1L, 100L, OrderStatus.CANCELLED, 30000L));
         Payment paid = Payment.ready(1L, 30000L, "MOCK_CARD", "TOSS", "key-1");
         paid.markPaid("MOCK-tx-1");
@@ -395,7 +395,7 @@ class PaymentServiceTest {
         // PAID로 조회되지 않으므로(이미 CANCELLED) 환불 시도 자체가 없다
         given(paymentRepository.findByOrderIdAndStatus(1L, PaymentStatus.PAID)).willReturn(Optional.empty());
 
-        paymentService.cancelOrder(100L, 1L, false);
+        paymentService.cancelOrder(100L, 1L, false, null);
 
         verify(paymentGateway, never()).refund(any());
     }
@@ -404,14 +404,14 @@ class PaymentServiceTest {
     @DisplayName("회귀(0원 환불) - 실효가 0인 라인(100% 할인) 취소는 refundNow<=0이라 PG 환불·누적 없이 통과(400 롤백 방지)")
     void cancelOrderItem_zeroEffectivePrice_skipsRefund() {
         // 실효가 0 항목 취소 → 남은 활성 payable이 결제액과 동일(30000) → refundNow = 30000 − 30000 = 0
-        given(orderService.cancelItem(1L, 100L, 100L, false))
+        given(orderService.cancelItem(1L, 100L, 100L, false, null))
                 .willReturn(afterItemCancel(OrderStatus.PAID, 30000L, false));
         Payment paid = Payment.ready(1L, 30000L, "MOCK_CARD", "TOSS", "key-1");
         paid.markPaid("MOCK-tx-1");
         given(paymentRepository.findByOrderIdAndStatus(1L, PaymentStatus.PAID)).willReturn(Optional.of(paid));
 
         // 예외 없이 통과해야 한다(partialRefund(0)이 400을 던지면 정당한 취소가 롤백됨)
-        paymentService.cancelOrderItem(100L, 1L, 100L, false);
+        paymentService.cancelOrderItem(100L, 1L, 100L, false, null);
 
         verify(paymentGateway, never()).refund(any());   // 돌려줄 돈 없음
         verify(paymentRepository, never()).save(any());
