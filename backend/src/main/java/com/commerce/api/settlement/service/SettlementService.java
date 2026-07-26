@@ -133,6 +133,24 @@ public class SettlementService {
                 byProvider.computeIfAbsent(provider, p -> new ProviderAccumulator(p, feeRate)).add(entry);
                 bySeller.computeIfAbsent(sellerId, SellerAccumulator::new).add(entry);
             }
+
+            // 6) 배송비(플랫폼 수익) 엔트리(#4): 활성 항목이 남아 배송비가 청구 중이면 sellerId=null·gross=배송비 엔트리
+            //    1건을 만들어 Σgross = payment.amount 로 복원한다(대사 MATCHED). PG수수료는 배송비 몫도 플랫폼이
+            //    부담(net = 배송비 − 수수료). 전량취소(활성 0)면 grossBySeller가 비어 배송비 엔트리도 안 만든다(배송비 환불과 정합).
+            long shippingFee = discount.shippingFee();
+            if (shippingFee > 0 && !grossBySeller.isEmpty()) {
+                long shippingPgFee = SettlementPolicy.calculateFee(feeRate, shippingFee);
+                SettlementEntry shipEntry = SettlementEntry.shippingScheduled(
+                        payment.id(), payment.orderId(), payment.pgTransactionId(), provider,
+                        shippingFee, shippingPgFee, feeRate, settledDate);
+                settlementRepository.save(shipEntry);
+                created++;
+                totalGross += shipEntry.getGrossAmount();
+                totalFee += shipEntry.getFee();
+                totalNet += shipEntry.getNetAmount();
+                byProvider.computeIfAbsent(provider, p -> new ProviderAccumulator(p, feeRate)).add(shipEntry);
+                bySeller.computeIfAbsent(null, SellerAccumulator::new).add(shipEntry);
+            }
         }
 
         List<ProviderBreakdown> providerBreakdown = new ArrayList<>();
@@ -189,10 +207,15 @@ public class SettlementService {
             long pgFeeTotal = SettlementPolicy.calculateFee(feeRate, payable);
             Map<Long, Long> pgFeeBySeller = proRate(reducedGrossBySeller, payable, pgFeeTotal);
 
-            // 기존 정산 합계(셀러별) [gross, fee, platformFee, discount] + 적용된 플랫폼 요율 보존
+            // 기존 정산 합계(셀러별) [gross, fee, platformFee, discount] + 적용된 플랫폼 요율 보존.
+            //   배송비 엔트리(shipping=true)는 셀러 집계에서 <b>분리</b>한다 — 안 그러면 null 버킷에 섞여
+            //   매 실행마다 -배송비로 역분개돼 멱등성이 깨진다(#4). 배송비는 아래에서 따로 상계한다.
             Map<Long, long[]> settledBySeller = new LinkedHashMap<>();
             Map<Long, Double> platformRateBySeller = new HashMap<>();
             for (SettlementEntry e : existing) {
+                if (e.isShipping()) {
+                    continue;
+                }
                 long[] agg = settledBySeller.computeIfAbsent(e.getSellerId(), k -> new long[4]);
                 agg[0] += e.getGrossAmount();
                 agg[1] += e.getFee();
@@ -223,6 +246,30 @@ public class SettlementService {
                 settlementRepository.save(rev);
                 reversed++;
                 totalReversedNet += rev.getNetAmount();
+            }
+
+            // 배송비 상계(#4): 배송비 엔트리를 따로 모아 목표(배송비 청구 중이면 shippingFee, 전량취소면 0)와의 차이를
+            //   역분개한다. 부분취소·반품은 활성 항목이 남아 targetShip=settled → diff 0(배송비 유지). 전체취소면 활성 0 →
+            //   target 0 → -배송비 상계. 상계 후 Σ배송비 엔트리=0=target이라 재실행에도 멱등.
+            long settledShipGross = 0, settledShipFee = 0;
+            for (SettlementEntry e : existing) {
+                if (e.isShipping()) {
+                    settledShipGross += e.getGrossAmount();
+                    settledShipFee += e.getFee();
+                }
+            }
+            boolean shippingCharged = !grossBySeller.isEmpty();   // 활성 항목이 남아 있으면 배송비 유지
+            long targetShipGross = shippingCharged ? discount.shippingFee() : 0L;
+            long targetShipFee = shippingCharged ? SettlementPolicy.calculateFee(feeRate, discount.shippingFee()) : 0L;
+            long dShipGross = targetShipGross - settledShipGross;
+            long dShipFee = targetShipFee - settledShipFee;
+            if (dShipGross != 0 || dShipFee != 0) {
+                SettlementEntry shipRev = SettlementEntry.shippingScheduled(
+                        payment.id(), payment.orderId(), payment.pgTransactionId(), provider,
+                        dShipGross, dShipFee, feeRate, settledDate);
+                settlementRepository.save(shipRev);
+                reversed++;
+                totalReversedNet += shipRev.getNetAmount();
             }
         }
         return new SettlementReverseResponse(reversed, totalReversedNet);

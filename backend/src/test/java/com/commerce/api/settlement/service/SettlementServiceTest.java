@@ -256,7 +256,7 @@ class SettlementServiceTest {
         // 주문이 할인을 항목별로 안분(매출 비례): 600(s1)·400(s2). 정산은 활성 항목의 share를 합산. 플랫폼 부담.
         given(orderService.getOrderItems(11L))
                 .willReturn(List.of(itemWithDiscount(1L, 6000L, 600L), itemWithDiscount(2L, 4000L, 400L)));
-        given(orderService.getOrderDiscount(11L)).willReturn(new OrderDiscountInfo(1000L, "PLATFORM", null));
+        given(orderService.getOrderDiscount(11L)).willReturn(new OrderDiscountInfo(1000L, "PLATFORM", null, 0L));
         given(sellerRepository.findById(1L)).willReturn(Optional.of(sellerWithRate(1L, 0.10)));
         given(sellerRepository.findById(2L)).willReturn(Optional.of(sellerWithRate(2L, 0.05)));
 
@@ -291,7 +291,7 @@ class SettlementServiceTest {
         // 셀러1 한정: 셀러1 항목에 전액 안분(1000), 셀러2는 0. 셀러 부담.
         given(orderService.getOrderItems(11L))
                 .willReturn(List.of(itemWithDiscount(1L, 6000L, 1000L), item(2L, 4000L)));
-        given(orderService.getOrderDiscount(11L)).willReturn(new OrderDiscountInfo(1000L, "SELLER", 1L));
+        given(orderService.getOrderDiscount(11L)).willReturn(new OrderDiscountInfo(1000L, "SELLER", 1L, 0L));
         given(sellerRepository.findById(1L)).willReturn(Optional.of(sellerWithRate(1L, 0.10)));
         given(sellerRepository.findById(2L)).willReturn(Optional.of(sellerWithRate(2L, 0.05)));
 
@@ -354,7 +354,7 @@ class SettlementServiceTest {
         given(orderService.getOrderItems(11L)).willReturn(List.of(
                 itemWithDiscount(1L, 6000L, 600L),
                 item(2L, 4000L, 400L, OrderItemStatus.CANCELLED)));
-        given(orderService.getOrderDiscount(11L)).willReturn(new OrderDiscountInfo(1000L, "PLATFORM", null));
+        given(orderService.getOrderDiscount(11L)).willReturn(new OrderDiscountInfo(1000L, "PLATFORM", null, 0L));
         given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
 
         SettlementReverseResponse result = settlementService.reverseRefunds();
@@ -368,6 +368,75 @@ class SettlementServiceTest {
         assertThat(rev.getDiscountAmount()).isEqualTo(-400L);          // 할인도 음수 상계
         assertThat(rev.getDiscountFundedBy()).isEqualTo("PLATFORM");
         assertThat(rev.getNetAmount()).isEqualTo(-3730L);             // 환원(subsidy)까지 선형 상계 = −원net
+    }
+
+    // === 배송비(#4) — 플랫폼 배송비 엔트리 · 대사 정합 · 전체취소 상계 ===
+
+    private SettlementEntry settledShipping(long gross, long fee) {
+        return SettlementEntry.shippingScheduled(1L, 11L, "tx", "TOSS", gross, fee, 0.025, LocalDate.now().plusDays(2));
+    }
+
+    @Test
+    @DisplayName("정산(배송비) - sellerId=null·shipping=true 엔트리로 Σgross=결제액 복원, net=배송비−PG수수료(플랫폼 부담)")
+    void run_createsShippingEntry() {
+        given(paymentService.getPaidPayments()).willReturn(List.of(paidPayment(1L, 11L, 23000L, "TOSS")));  // 20000 + 배송비 3000
+        given(settlementRepository.existsByPaymentId(anyLong())).willReturn(false);
+        given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
+        given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);
+        given(orderService.getOrderItems(11L)).willReturn(List.of(item(1L, 20000L)));
+        given(orderService.getOrderDiscount(11L)).willReturn(new OrderDiscountInfo(0L, null, null, 3000L));
+        given(sellerRepository.findById(1L)).willReturn(Optional.of(sellerWithRate(1L, 0.10)));
+
+        SettlementRunResponse summary = settlementService.run();
+
+        assertThat(summary.createdCount()).isEqualTo(2);              // 셀러1 + 배송비
+        assertThat(summary.totalGrossAmount()).isEqualTo(23000L);     // Σgross = 결제액 → 대사 MATCHED
+        SettlementEntry ship = captureSaved(2).stream()
+                .filter(SettlementEntry::isShipping).findFirst().orElseThrow();
+        assertThat(ship.getSellerId()).isNull();
+        assertThat(ship.getGrossAmount()).isEqualTo(3000L);
+        assertThat(ship.getFee()).isEqualTo(75L);                    // 3000 × 2.5%(플랫폼 부담)
+        assertThat(ship.getPlatformFee()).isZero();
+        assertThat(ship.getNetAmount()).isEqualTo(2925L);            // 배송비 − PG수수료
+    }
+
+    @Test
+    @DisplayName("환불 상계(배송비) - 전체취소(활성 0)면 배송비도 음수 역분개")
+    void reverseRefunds_fullCancel_reversesShipping() {
+        given(paymentService.getSettlementReversalCandidates()).willReturn(List.of(paidPayment(1L, 11L, 23000L, "TOSS")));
+        given(settlementRepository.findByPaymentId(1L)).willReturn(List.of(
+                settled(1L, 20000L, 500L, 2000L), settledShipping(3000L, 75L)));
+        given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);
+        given(orderService.getOrderItems(11L)).willReturn(List.of(item(1L, 20000L, OrderItemStatus.CANCELLED)));
+        given(orderService.getOrderDiscount(11L)).willReturn(new OrderDiscountInfo(0L, null, null, 3000L));
+        given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
+
+        settlementService.reverseRefunds();
+
+        SettlementEntry shipRev = captureSaved(2).stream()   // 셀러1 상계 + 배송비 상계
+                .filter(SettlementEntry::isShipping).findFirst().orElseThrow();
+        assertThat(shipRev.getGrossAmount()).isEqualTo(-3000L);
+        assertThat(shipRev.getFee()).isEqualTo(-75L);
+        assertThat(shipRev.getNetAmount()).isEqualTo(-2925L);
+    }
+
+    @Test
+    @DisplayName("환불 상계(배송비) - 부분취소(활성 잔존)면 배송비 유지(배송비 역분개 없음)")
+    void reverseRefunds_partialCancel_keepsShipping() {
+        given(paymentService.getSettlementReversalCandidates()).willReturn(List.of(paidPayment(1L, 11L, 23000L, "TOSS")));
+        given(settlementRepository.findByPaymentId(1L)).willReturn(List.of(
+                settled(1L, 10000L, 250L, 1000L), settled(2L, 10000L, 250L, 1000L), settledShipping(3000L, 75L)));
+        given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);
+        given(orderService.getOrderItems(11L)).willReturn(List.of(
+                item(1L, 10000L, OrderItemStatus.ACTIVE), item(2L, 10000L, OrderItemStatus.CANCELLED)));
+        given(orderService.getOrderDiscount(11L)).willReturn(new OrderDiscountInfo(0L, null, null, 3000L));
+        given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
+
+        settlementService.reverseRefunds();
+
+        List<SettlementEntry> saved = captureSaved(1);   // 셀러2만 상계, 배송비는 그대로
+        assertThat(saved).noneMatch(SettlementEntry::isShipping);
+        assertThat(saved.get(0).getSellerId()).isEqualTo(2L);
     }
 
     @Test
