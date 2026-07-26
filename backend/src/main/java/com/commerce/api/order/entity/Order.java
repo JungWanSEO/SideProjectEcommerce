@@ -201,10 +201,13 @@ public class Order extends BaseEntity {
      * 정산이 쓰는 "활성 항목 실효가" 불변식({@link #discountShares})과 한 출처로 맞춘다(대사 금액 불일치 방지).
      * 취소가 없는 정상 주문에선 {@code totalPrice − discountAmount + shippingFee}와 동일하다(모든 항목이 활성이므로).
      *
-     * <p><b>배송비 접기(#4)</b>: 활성 항목이 하나라도 있으면 배송비를 더하고, 전량취소(활성 0)면 더하지 않는다.
-     * 이 조건부가 취소 환불 공식(PaymentService {@code refundNow = (amount − refundedAmount) − 남은 payable})을
-     * <b>변경 없이</b> 오너 규칙에 맞춘다: 전체취소 → payable 0 → 배송비까지 전액 환불 / 부분취소 → 배송비가
-     * 남은 payable에 남아 환불에서 제외(유지). 반품은 항목 실효가로만 환불하므로 배송비는 자연히 유지된다.
+     * <p><b>배송비 접기(#4)</b>: 배송비는 <b>전량취소(모든 항목 CANCELLED)</b>에서만 환불된다 — 반품(RETURNED)은
+     * 배송을 이미 소비했으므로 유지(오너 규칙: 전체취소만 환불·부분취소·반품은 유지). 따라서 CANCELLED가 아닌
+     * 항목(ACTIVE 또는 RETURNED)이 하나라도 있으면 배송비를 payable에 유지한다. 이 조건부가 취소 환불 공식
+     * (PaymentService {@code refundNow = (amount − refundedAmount) − 남은 payable})을 <b>변경 없이</b> 오너 규칙에 맞춘다:
+     * 전량취소 → payable 0 → 배송비까지 전액 환불 / 부분취소 → 배송비가 남은 payable에 남아 유지 / 전량반품 →
+     * payable=배송비 → 반품 환불(실효가)에 배송비 미포함이라 유지(과거 '활성 0'만 보던 판정은 전량반품을 전량취소로
+     * 오인해 배송비를 잘못 환불·정산 상계했다 — 적대적리뷰 HIGH 교정).
      */
     public long getPayableAmount() {
         Map<OrderItem, Long> shares = discountShares();
@@ -212,8 +215,9 @@ public class Order extends BaseEntity {
                 .filter(OrderItem::isActive)
                 .mapToLong(item -> item.getSubtotal() - shares.getOrDefault(item, 0L))
                 .sum();
-        boolean hasActive = orderItems.stream().anyMatch(OrderItem::isActive);
-        return itemsPayable + (hasActive ? shippingFee : 0L);
+        boolean shippingRetained = orderItems.stream()
+                .anyMatch(item -> item.getStatus() != OrderItemStatus.CANCELLED);
+        return itemsPayable + (shippingRetained ? shippingFee : 0L);
     }
 
     /**

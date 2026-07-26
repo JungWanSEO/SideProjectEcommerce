@@ -135,6 +135,28 @@ class OrderTest {
     }
 
     @Test
+    @DisplayName("배송비 - 전량반품(RETURNED)이면 배송비 유지(payable=배송비), 전량취소와 구분(적대적리뷰 HIGH)")
+    void payable_retainsShippingWhenAllReturned() {
+        OrderItem only = item(1L, 10000L);
+        Order order = orderWith(only);
+        order.assignShippingFee(3000L);
+        only.markReturned();   // 활성 0이지만 RETURNED → 배송 이미 소비 → 배송비 유지
+        assertThat(order.getPayableAmount()).isEqualTo(3000L);
+    }
+
+    @Test
+    @DisplayName("배송비 - 반품 후 마지막 항목 취소해도 배송비 유지(RETURNED 있으면 전량취소 아님·순서 무관)")
+    void payable_returnThenCancelLast_retainsShipping() {
+        OrderItem a = item(1L, 20000L);
+        OrderItem b = item(2L, 20000L);
+        Order order = orderWith(a, b);
+        order.assignShippingFee(3000L);
+        a.markReturned();   // A 반품(배송비 유지)
+        b.cancel();         // B 취소 → 활성 0, 그러나 A=RETURNED라 전량취소 아님
+        assertThat(order.getPayableAmount()).isEqualTo(3000L);   // 배송비 유지(전량취소만 환불)
+    }
+
+    @Test
     @DisplayName("배송비 - 음수는 400")
     void assignShippingFee_negativeRejected() {
         Order order = orderWith(item(1L, 10000L));

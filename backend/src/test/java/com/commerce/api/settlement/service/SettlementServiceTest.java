@@ -421,6 +421,45 @@ class SettlementServiceTest {
     }
 
     @Test
+    @DisplayName("정산(배송비) - 전량반품(RETURNED)이면 활성 0이어도 배송비 엔트리 유지(플랫폼 배송매출 기록·HIGH 교정)")
+    void run_fullyReturned_keepsShippingEntry() {
+        given(paymentService.getPaidPayments()).willReturn(List.of(paidPayment(1L, 11L, 23000L, "TOSS")));
+        given(settlementRepository.existsByPaymentId(anyLong())).willReturn(false);
+        given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
+        given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);
+        given(orderService.getOrderItems(11L)).willReturn(List.of(item(1L, 20000L, OrderItemStatus.RETURNED)));
+        given(orderService.getOrderDiscount(11L)).willReturn(new OrderDiscountInfo(0L, null, null, 3000L));
+
+        SettlementRunResponse summary = settlementService.run();
+
+        assertThat(summary.createdCount()).isEqualTo(1);   // 셀러 엔트리 없음(활성 0), 배송비 엔트리만
+        SettlementEntry ship = captureSaved(1).get(0);
+        assertThat(ship.isShipping()).isTrue();
+        assertThat(ship.getGrossAmount()).isEqualTo(3000L);   // 플랫폼 배송매출 유지(소실 방지)
+        assertThat(ship.getNetAmount()).isEqualTo(2925L);
+    }
+
+    @Test
+    @DisplayName("환불 상계(배송비) - 전량반품(RETURNED)이면 배송비 유지(역분개 없음, 전량취소와 구분·HIGH 교정)")
+    void reverseRefunds_fullReturn_keepsShipping() {
+        given(paymentService.getSettlementReversalCandidates()).willReturn(List.of(paidPayment(1L, 11L, 23000L, "TOSS")));
+        given(settlementRepository.findByPaymentId(1L)).willReturn(List.of(
+                settled(1L, 20000L, 500L, 2000L), settledShipping(3000L, 75L)));
+        given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);
+        given(orderService.getOrderItems(11L)).willReturn(List.of(item(1L, 20000L, OrderItemStatus.RETURNED)));
+        given(orderService.getOrderDiscount(11L)).willReturn(new OrderDiscountInfo(0L, null, null, 3000L));
+        given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
+
+        settlementService.reverseRefunds();
+
+        // 반품된 셀러 항목은 -20000 상계되지만 배송비 엔트리는 유지(역분개 없음)
+        List<SettlementEntry> saved = captureSaved(1);
+        assertThat(saved).noneMatch(SettlementEntry::isShipping);
+        assertThat(saved.get(0).getSellerId()).isEqualTo(1L);
+        assertThat(saved.get(0).getGrossAmount()).isEqualTo(-20000L);
+    }
+
+    @Test
     @DisplayName("환불 상계(배송비) - 부분취소(활성 잔존)면 배송비 유지(배송비 역분개 없음)")
     void reverseRefunds_partialCancel_keepsShipping() {
         given(paymentService.getSettlementReversalCandidates()).willReturn(List.of(paidPayment(1L, 11L, 23000L, "TOSS")));

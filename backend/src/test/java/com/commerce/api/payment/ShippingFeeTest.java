@@ -102,6 +102,28 @@ class ShippingFeeTest {
         assertThat(orderRepository.findById(orderId).orElseThrow().getStatus()).isEqualTo(OrderStatus.CANCELLED);
     }
 
+    @Test
+    @DisplayName("반품 후 마지막 항목 취소 - 배송비 유지(전량취소 아님·순서 무관, 적대적리뷰 MED 교정)")
+    void returnThenCancelLast_retainsShipping() {
+        long[] ids = paidOrderWithShipping();
+        long orderId = ids[0], itemA = ids[1], itemB = ids[2], paymentId = ids[3];
+
+        // A(10000) 반품 시뮬레이션: 실효가만 환불(배송비 유지)·항목 RETURNED flip(ReturnService.refund와 동형)
+        Order order = orderRepository.findById(orderId).orElseThrow();
+        order.getOrderItems().stream().filter(i -> i.getId().equals(itemA)).findFirst().orElseThrow().markReturned();
+        Payment payment = paymentRepository.findById(paymentId).orElseThrow();
+        payment.partialRefund(10000L);
+        orderRepository.saveAndFlush(order);
+        paymentRepository.saveAndFlush(payment);
+
+        // 이제 마지막 활성 항목 B를 취소 — 활성은 0이 되지만 A가 RETURNED라 전량취소 아님 → 배송비 유지
+        paymentService.cancelOrderItem(100L, orderId, itemB, false);
+
+        Payment after = paymentRepository.findById(paymentId).orElseThrow();
+        assertThat(after.getRefundedAmount()).isEqualTo(30000L);            // A 10000 + B 20000, 배송비 3000 유지
+        assertThat(after.getStatus()).isEqualTo(PaymentStatus.PAID);        // 배송비 잔여라 CANCELLED 아님
+    }
+
     private long itemIdOf(Order order, Long sellerId) {
         return order.getOrderItems().stream()
                 .filter(i -> sellerId.equals(i.getSellerId())).findFirst().orElseThrow().getId();
