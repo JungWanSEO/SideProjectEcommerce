@@ -143,36 +143,36 @@ public class PaymentService {
      * 주문 항목 단위 취소(+부분 환불) 오케스트레이터.
      *
      * <p>흐름: 항목 취소 위임(OrderService.cancelItem — 소유권·상태 검증 + PAID였으면 그 항목 재고 복원) →
-     * 결제 완료(PAID) 건이 있으면 그 항목 금액만큼 PG 부분 환불 + Payment.refundedAmount 누적(전액 환불 시 CANCELLED).
+     * 결제 완료(PAID) 건이 있으면 <b>잔여-활성 공식</b>(cancelOrder와 동일)으로 이번에 취소된 몫만 PG 부분 환불 +
+     * Payment.refundedAmount 누적(전액 환불 시 CANCELLED). 마지막 항목 취소로 전체 취소되면 배송비까지 환불(#4).
      * cancelOrder와 같이 @Transactional로 원자성 보장(환불 실패 시 항목 취소·재고 복원까지 롤백).
      * 정산 상계(역분개)는 settlement 도메인의 reverseRefunds 배치가 사후 처리한다(settlement → order/payment 단방향).
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public OrderResponse cancelOrderItem(Long memberId, Long orderId, Long orderItemId, boolean admin) {
         OrderResponse order = orderService.cancelItem(orderId, orderItemId, memberId, admin);
-        OrderResponse.OrderItemResponse cancelledItem = order.items().stream()
-                .filter(i -> orderItemId.equals(i.id()))
-                .findFirst()
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "주문 항목을 찾을 수 없습니다."));
-        // 할인 주문이면 항목의 <b>실효가</b>(소계 − 안분 할인)만 환불한다 — 소계(gross)를 환불하면
-        // 고객이 실제 낸 금액(payable)보다 많이 돌려줘 과다환불이 되고 정산/대사도 깨진다. 할인 없으면 share=0이라 소계 그대로.
-        long refundAmount = cancelledItem.subtotal() - cancelledItem.discountShare();
 
-        // 실효가 0인 라인(100% 할인 등)은 돌려줄 돈이 없다 → PG 환불·누적을 건너뛴다.
-        //   안 그러면 partialRefund(0)이 400을 던져 정당한 항목 취소 자체가 롤백된다(재고·쿠폰 복원까지 무산).
-        if (refundAmount > 0) {
-            paymentRepository.findByOrderIdAndStatus(orderId, PaymentStatus.PAID)
-                    .ifPresent(payment -> {
-                        PaymentRefund refund = paymentGatewayRouter.resolve(payment.getProvider())
-                                .refund(new PaymentRefundCommand(orderId, refundAmount, payment.getPgTransactionId()));
-                        if (!refund.refunded()) {
-                            throw new BusinessException(HttpStatus.BAD_GATEWAY,
-                                    "환불에 실패했습니다. (" + refund.failureReason() + ")");
-                        }
-                        payment.partialRefund(refundAmount);   // 누적, 전액 도달 시 CANCELLED
-                        paymentRepository.save(payment);
-                    });
-        }
+        // 환불액 = (잔여 결제액) − (취소 후 남은 활성 payable). cancelOrder와 <b>같은 잔여-활성 공식으로 통일</b>한다(#4).
+        //   이 공식은 이번에 취소된 항목의 실효가와 같되(무배송 세계선 기존 항목-실효가와 수학적 동치), 마지막 활성
+        //   항목을 취소해 주문이 전체 취소되면 남은 payable이 0이 돼 <b>배송비까지 자동 환불</b>된다(오너 규칙: 전체취소만
+        //   배송비 환불). 부분취소면 배송비가 남은 payable에 남아 환불에서 제외(유지). 실효가 0(100% 할인) 라인은
+        //   refundNow<=0이라 PG·누적을 건너뛴다(partialRefund(0) 400 → 항목취소 롤백 회피).
+        paymentRepository.findByOrderIdAndStatus(orderId, PaymentStatus.PAID)
+                .ifPresent(payment -> {
+                    long remainingActive = order.payableAmount();   // 취소 후 남은 활성 실효가 + (활성 잔존 시)배송비
+                    long refundNow = (payment.getAmount() - payment.getRefundedAmount()) - remainingActive;
+                    if (refundNow <= 0) {
+                        return;
+                    }
+                    PaymentRefund refund = paymentGatewayRouter.resolve(payment.getProvider())
+                            .refund(new PaymentRefundCommand(orderId, refundNow, payment.getPgTransactionId()));
+                    if (!refund.refunded()) {
+                        throw new BusinessException(HttpStatus.BAD_GATEWAY,
+                                "환불에 실패했습니다. (" + refund.failureReason() + ")");
+                    }
+                    payment.partialRefund(refundNow);   // 누적, 전액 도달 시 CANCELLED
+                    paymentRepository.save(payment);
+                });
         // 마지막 항목 취소로 주문 전체가 취소되면 발급형 쿠폰도 복원.
         if (order.status() == OrderStatus.CANCELLED) {
             memberCouponService.release(order.memberId(), order.couponCode());

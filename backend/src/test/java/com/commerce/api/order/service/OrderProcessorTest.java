@@ -3,6 +3,7 @@ package com.commerce.api.order.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
@@ -215,6 +216,26 @@ class OrderProcessorTest {
         assertThat(response.payableAmount()).isEqualTo(15000L);  // 20000 - 5000 = 실제 결제액
         assertThat(response.couponCode()).isEqualTo("WELCOME5000");
         assertThat(response.items().get(0).subtotal()).isEqualTo(20000L);   // 항목 원가는 안 깎임(정산 Step 2 기준)
+    }
+
+    @Test
+    @DisplayName("체크아웃 - 배송비 정책(#4)을 할인 후 금액으로 계산해 스냅샷, payable=소계−할인+배송비")
+    void checkout_snapshotsShippingFee() {
+        Product product = productWithOption(1L, 10L, "반팔티셔츠", 10000L, 10);
+        Cart cart = Cart.create(100L);
+        cart.addItem(1L, 10L, 2);   // 총액 20000(임계 미만)
+        given(cartRepository.findByMemberId(100L)).willReturn(Optional.of(cart));
+        given(productRepository.findByOptionId(10L)).willReturn(Optional.of(product));
+        given(orderRepository.save(any(Order.class))).willAnswer(inv -> inv.getArgument(0));
+        given(addressService.getOwnedAddress(100L, 5L)).willReturn(
+                new AddressResponse(5L, "홍길동", "010-1234-5678", "06236", "서울 강남구", "4층", true, null));
+        // 정책이 할인 후 금액(20000)으로 배송비 3000을 돌려준다.
+        given(shippingPolicy.feeFor(20000L)).willReturn(3000L);
+
+        OrderResponse response = orderProcessor.checkout(100L, new CheckoutRequest(5L, null, null, null));
+
+        assertThat(response.shippingFee()).isEqualTo(3000L);         // 스냅샷됨
+        assertThat(response.payableAmount()).isEqualTo(23000L);      // 20000 + 배송비 3000
     }
 
     // === 멱등키(중복 주문 방지) ===
