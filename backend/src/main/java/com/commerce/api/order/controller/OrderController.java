@@ -13,6 +13,7 @@ import com.commerce.api.order.dto.OrderSearchCondition;
 import com.commerce.api.order.dto.OrderStatusUpdateRequest;
 import com.commerce.api.order.dto.OrderSummaryResponse;
 import com.commerce.api.order.dto.ShipmentStatusUpdateRequest;
+import com.commerce.api.order.dto.ShippingPolicyResponse;
 import com.commerce.api.order.service.OrderService;
 import com.commerce.api.order.service.ShipmentService;
 import com.commerce.api.payment.service.PaymentService;
@@ -90,6 +91,14 @@ public class OrderController {
         CouponPreviewResponse response =
                 orderService.previewCoupon(SecurityUtil.getCurrentMemberId(), request.couponCode());
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @Operation(summary = "배송비 정책 조회",
+            description = "정액 배송비·무료배송 임계액을 반환한다(#4). FE 장바구니·체크아웃이 쿠폰 없이도 "
+                    + "배송비·무료배송 진행바를 그릴 때 쓴다.")
+    @GetMapping("/shipping-policy")
+    public ResponseEntity<ApiResponse<ShippingPolicyResponse>> getShippingPolicy() {
+        return ResponseEntity.ok(ApiResponse.success(orderService.getShippingPolicy()));
     }
 
     @Operation(summary = "내 주문 목록 조회 (요약)",

@@ -232,7 +232,8 @@ export interface Order {
   status: OrderStatus;
   totalPrice: number; // 할인 전 총액(gross)
   discountAmount: number; // 쿠폰 할인액 (없으면 0)
-  payableAmount: number; // 실제 결제액 = totalPrice - discountAmount
+  shippingFee: number; // 배송비(#4, 없으면 0). 플랫폼 수익 — 셀러 정산엔 미포함
+  payableAmount: number; // 실제 결제액 = totalPrice - discountAmount + shippingFee
   couponCode: string | null; // 적용된 쿠폰 코드 (없으면 null)
   items: OrderItem[];
   shipping: ShippingInfo | null;
@@ -509,7 +510,14 @@ export interface CouponPreview {
   couponCode: string;
   totalPrice: number;
   discountAmount: number;
+  shippingFee: number; // 배송비(#4). 할인 후 상품금액이 무료임계 이상이면 0
   payableAmount: number;
+}
+
+/** 배송비 정책 (ShippingPolicyResponse, #4) — 장바구니·체크아웃 무료배송 진행바 표시용 */
+export interface ShippingPolicy {
+  flatFee: number; // 정액 배송비(원)
+  freeThreshold: number; // 무료배송 임계액(원, 할인 후 상품금액 기준)
 }
 
 // ─── 어드민 대시보드 (DashboardResponse) ───────────────────────────────

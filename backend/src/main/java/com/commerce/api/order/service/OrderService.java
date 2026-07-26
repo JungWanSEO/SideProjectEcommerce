@@ -9,6 +9,7 @@ import com.commerce.api.order.dto.OrderDiscountInfo;
 import com.commerce.api.order.dto.OrderResponse;
 import com.commerce.api.order.dto.OrderSearchCondition;
 import com.commerce.api.order.dto.OrderSummaryResponse;
+import com.commerce.api.order.dto.ShippingPolicyResponse;
 import com.commerce.api.order.entity.Order;
 import com.commerce.api.order.entity.OrderItem;
 import com.commerce.api.order.entity.OrderStatus;
@@ -39,6 +40,7 @@ public class OrderService {
     private final OrderProcessor orderProcessor;
     private final OrderRepository orderRepository;
     private final StockReservationService stockReservationService;   // 예약 해제·항목별 재고 되돌리기(#2·#1)
+    private final ShippingPolicy shippingPolicy;   // 배송비 정책값 노출(#4, FE 표시용)
 
     /**
      * 주문 생성. 동시 재고 차감으로 낙관적 락 충돌이 나면 최대 3회까지 (새 트랜잭션으로) 재시도.
@@ -76,6 +78,11 @@ public class OrderService {
     /** 쿠폰 미리보기(주문 생성 없음) — 현재 장바구니 기준 할인·예상 결제액. 읽기 전용이라 재시도 불필요. */
     public CouponPreviewResponse previewCoupon(Long memberId, String couponCode) {
         return orderProcessor.previewCoupon(memberId, couponCode);
+    }
+
+    /** 배송비 정책(#4) — FE 장바구니·체크아웃의 배송비·무료배송 진행바 표시용(정액·무료임계). */
+    public ShippingPolicyResponse getShippingPolicy() {
+        return new ShippingPolicyResponse(shippingPolicy.getFlatFee(), shippingPolicy.getFreeThreshold());
     }
 
     /**

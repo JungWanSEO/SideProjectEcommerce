@@ -79,6 +79,14 @@ public class SettlementEntry extends BaseEntity {
     @Column(nullable = false)
     private long netAmount;          // 셀러 실수령(원). "매출 ≠ 실수령"
 
+    /**
+     * 배송비(플랫폼 수익) 엔트리 표시(#4). true면 sellerId=null·gross=배송비·platformFee=0인 <b>플랫폼 배송비</b> 항목이다.
+     * 대사는 Σgross에 이걸 포함해 PG 금액과 맞추고(MATCHED), reverseRefunds는 이걸 셀러 집계에서 분리해
+     * 전체취소 때만 역분개한다(부분취소·반품은 배송비 유지). 셀러 net에는 절대 섞이지 않는다.
+     */
+    @Column(nullable = false)
+    private boolean shipping;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private SettlementStatus status;
@@ -95,7 +103,7 @@ public class SettlementEntry extends BaseEntity {
     private SettlementEntry(Long paymentId, Long orderId, String pgTransactionId, String provider,
                             Long sellerId, long grossAmount, long fee, double feeRate,
                             long platformFee, double platformFeeRate,
-                            long discountAmount, String discountFundedBy, LocalDate settledDate) {
+                            long discountAmount, String discountFundedBy, boolean shipping, LocalDate settledDate) {
         this.paymentId = paymentId;
         this.orderId = orderId;
         this.pgTransactionId = pgTransactionId;
@@ -108,9 +116,10 @@ public class SettlementEntry extends BaseEntity {
         this.platformFeeRate = platformFeeRate;
         this.discountAmount = discountAmount;
         this.discountFundedBy = discountFundedBy;
+        this.shipping = shipping;
         // 셀러 실수령은 파생값(엔티티가 스스로 계산). gross(할인 후 몫)에서 PG·플랫폼 수수료를 떼되,
         // 플랫폼 부담 할인이면 그만큼 셀러에게 환원(subsidy) — 셀러는 할인 없이 받은 것과 같아지고 플랫폼이 부담.
-        // 셀러 부담 할인이면 환원 없음(gross가 이미 줄어 셀러가 부담).
+        // 셀러 부담 할인이면 환원 없음(gross가 이미 줄어 셀러가 부담). 배송비 엔트리는 할인 없음(net = 배송비 − PG수수료).
         long subsidy = FUNDED_BY_PLATFORM.equals(discountFundedBy) ? discountAmount : 0L;
         this.netAmount = grossAmount - fee - platformFee + subsidy;
         this.settledDate = settledDate;
@@ -132,7 +141,19 @@ public class SettlementEntry extends BaseEntity {
                                             long discountAmount, String discountFundedBy, LocalDate settledDate) {
         return new SettlementEntry(paymentId, orderId, pgTransactionId, provider, sellerId,
                 grossAmount, fee, feeRate, platformFee, platformFeeRate,
-                discountAmount, discountFundedBy, settledDate);
+                discountAmount, discountFundedBy, false, settledDate);
+    }
+
+    /**
+     * 배송비(플랫폼 수익) 정산 항목 생성(#4) — sellerId=null·platformFee=0·할인 0·shipping=true.
+     * gross=배송비, fee=배송비에 붙는 PG수수료(플랫폼 부담) → net = 배송비 − PG수수료. 대사 Σgross 복원용이자
+     * 플랫폼 배송 매출 원장. 역분개 시 grossAmount·fee에 음수가 올 수 있다(전체취소 상계).
+     */
+    public static SettlementEntry shippingScheduled(Long paymentId, Long orderId, String pgTransactionId,
+                                                    String provider, long grossAmount, long fee, double feeRate,
+                                                    LocalDate settledDate) {
+        return new SettlementEntry(paymentId, orderId, pgTransactionId, provider, null,
+                grossAmount, fee, feeRate, 0L, 0.0, 0L, null, true, settledDate);
     }
 
     /** 지급 묶음(Payout)에 편입. */

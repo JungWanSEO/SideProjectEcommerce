@@ -164,7 +164,8 @@
 - **#2 재고 예약 TTL(07-22~23)** — `stock_reservation`+`product_option.reserved` 카운터·**원자적 조건부 UPDATE**로 오버셀 0(동시성 IT 실증). 4렌즈 적대적 리뷰→동시성 엣지 6종. **V43/V44**. `d700daa`.
 - **#9 대시보드 순매출(07-23)** — "완료 매출" gross 과다계상을 `sum(amount−refundedAmount)` 순수 SQL로. `c68696b`.
 - **#1 멀티셀러 shipment 축(07-23~24)** — 상태축을 주문 전체→**셀러별 shipment**로 내림(c안, 6-phase). rollup 파생 status·결제 팬아웃·shipment별 @Version. **적대적 리뷰→락 비대칭 결함 6종**=상태/원장 모든 경로 **부모 주문 비관락 통일**. **V45/V46**. **583→615 tests**. **dev 병합됨**(dev HEAD `25dc108`).
-- **#3 반품/교환(07-25~26)** — DELIVERED 막다른 길을 역방향 워크플로로(7-phase). `ReturnRequest` 애그리거트+상태머신·부모주문 비관락(ORDER→RETURN)·환불=검수확정 후 실효가·정산 클로백 누수 fix·교환=옵션 스왑(revenue-neutral)·리뷰자격 ACTIVE만. **적대적 리뷰(6차원→회의론 3인)→확정결함 3종**(교환후 이중지급·ADMIN 귀속·교환 데드락). **V47/V48**. **615→644 tests**. 피처 `feature/returns-exchange`(dev 미병합·오너 리뷰 대기 — 병합 대기는 이것 하나).
+- **#3 반품/교환(07-25~26)** — DELIVERED 막다른 길을 역방향 워크플로로(7-phase). `ReturnRequest` 애그리거트+상태머신·부모주문 비관락(ORDER→RETURN)·환불=검수확정 후 실효가·정산 클로백 누수 fix·교환=옵션 스왑(revenue-neutral)·리뷰자격 ACTIVE만. **적대적 리뷰(6차원→회의론 3인)→확정결함 3종**(교환후 이중지급·ADMIN 귀속·교환 데드락). **V47/V48**. **615→644 tests**. dev 병합됨(`df91f0f`).
+- **#4 배송비(07-26)** — `payable=소계−할인`에 배송비가 구조적으로 없던 것을 정액+무료임계로(5-phase). 핵심=`getPayableAmount` **배송비 접기**로 취소 환불 공식 무변경 충족. 배송비=플랫폼 수익(정산 자동 격리)·대사는 **플랫폼 배송비 SettlementEntry**로 Σgross 복원. **적대적 리뷰→HIGH 2·MED 2(단일 뿌리: "활성 0=배송비 환불"이 반품엔 거짓)** 교정=판정을 shippingRetained로 통일. **V49/V50**. **644→665 tests**. 피처 `feature/shipping-fee`.
 
 **07-20~22 (자율 세션 + 기록/코드 정리)**
 - **기능 전수 스캔 → 자율 배치 9건 + 커버리지 3종 (07-20~21)** — 검색 확장·체크아웃 멱등키(V38)·PENDING 만료 배치·주문 상태 이력+송장(V39)·어드민/셀러 주문 검색·쿠폰 중단·FE 3종·PLP 필터 URL화 + JaCoCo 0% 구멍/PaymentService·MemberCoupon 보강. **518→542 tests**. 상세는 `dev-log/2026-07.md`.

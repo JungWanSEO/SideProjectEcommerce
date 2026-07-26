@@ -176,22 +176,30 @@ export default function OrderDetailPage() {
       </ul>
 
       <div className="mt-6 border-t border-line pt-5">
+        {(order.discountAmount > 0 || order.shippingFee > 0) && (
+          <div className="flex justify-between text-sm">
+            <span className="text-muted">상품 합계</span>
+            <span className="text-ink">{order.totalPrice.toLocaleString()}원</span>
+          </div>
+        )}
         {order.discountAmount > 0 && (
-          <>
-            <div className="flex justify-between text-sm">
-              <span className="text-muted">상품 합계</span>
-              <span className="text-ink">{order.totalPrice.toLocaleString()}원</span>
-            </div>
-            <div className="mt-1 flex justify-between text-sm">
-              <span className="text-sage-600">
-                쿠폰 할인{order.couponCode ? ` (${order.couponCode})` : ""}
-              </span>
-              <span className="font-medium text-sage-600">−{order.discountAmount.toLocaleString()}원</span>
-            </div>
-          </>
+          <div className="mt-1 flex justify-between text-sm">
+            <span className="text-sage-600">
+              쿠폰 할인{order.couponCode ? ` (${order.couponCode})` : ""}
+            </span>
+            <span className="font-medium text-sage-600">−{order.discountAmount.toLocaleString()}원</span>
+          </div>
+        )}
+        {order.shippingFee > 0 && (
+          <div className="mt-1 flex justify-between text-sm">
+            <span className="text-muted">배송비</span>
+            <span className="text-ink">{order.shippingFee.toLocaleString()}원</span>
+          </div>
         )}
         <div className="mt-2 flex items-center justify-between">
-          <span className="text-muted">{order.discountAmount > 0 ? "결제 금액" : "합계"}</span>
+          <span className="text-muted">
+            {order.discountAmount > 0 || order.shippingFee > 0 ? "결제 금액" : "합계"}
+          </span>
           <span className="text-2xl font-bold text-ink">{order.payableAmount.toLocaleString()}원</span>
         </div>
       </div>

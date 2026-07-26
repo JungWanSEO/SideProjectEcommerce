@@ -10,20 +10,23 @@ import com.commerce.api.order.entity.Order;
  * @param discountAmount 쿠폰 할인액(원, 없으면 0)
  * @param fundedBy       부담 주체("PLATFORM"/"SELLER", 없으면 null) — 정산 net 분담에 사용
  * @param sellerId       셀러 한정 쿠폰이면 그 셀러 ID(플랫폼 와이드면 null) — 할인 귀속에 사용
+ * @param shippingFee    배송비 스냅샷(원, #4). 정산이 플랫폼 배송비 엔트리를 만들 때 읽는다(셀러 net엔 미포함).
  */
 public record OrderDiscountInfo(
         long discountAmount,
         String fundedBy,
-        Long sellerId
+        Long sellerId,
+        long shippingFee
 ) {
     /** 할인 없음(쿠폰 미적용 주문). */
     public static OrderDiscountInfo none() {
-        return new OrderDiscountInfo(0L, null, null);
+        return new OrderDiscountInfo(0L, null, null, 0L);
     }
 
     public static OrderDiscountInfo from(Order order) {
         return new OrderDiscountInfo(
-                order.getDiscountAmount(), order.getCouponFundedBy(), order.getCouponSellerId());
+                order.getDiscountAmount(), order.getCouponFundedBy(), order.getCouponSellerId(),
+                order.getShippingFee());
     }
 
     /** 적용된 할인이 있는지. */

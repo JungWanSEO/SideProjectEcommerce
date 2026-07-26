@@ -205,6 +205,22 @@ class ReconciliationServiceTest {
         verify(mismatchRepository, never()).save(any());
     }
 
+    @Test
+    @DisplayName("배송비(#4) - 플랫폼 배송비 엔트리가 같은 pgTx에 더해져 Σgross=PG 결제액(배송비 포함) → MATCHED")
+    void shippingEntry_sameTx_summedForReconcile() {
+        given(settlementRepository.findAll()).willReturn(List.of(
+                ourSeller("tx1", "TOSS", 1L, 20000),   // 셀러 매출 20000
+                our("tx1", "TOSS", 3000)));            // 배송비 엔트리(sellerId=null) 3000 → 합 23000
+        given(paymentGatewayRouter.fetchAllSettlements())
+                .willReturn(List.of(pg("tx1", 23000, PgSettlementStatus.PAID)));   // PG 결제액=상품+배송비
+
+        ReconciliationResult r = reconciliationService.reconcile();
+
+        assertThat(r.matched()).isEqualTo(1);           // 23000 == 23000 → 배송비 있어도 대사 정합
+        assertThat(r.totalMismatches()).isZero();
+        verify(mismatchRepository, never()).save(any());
+    }
+
     // ---------- PG별 분해·표시 (MPG-2) ----------
 
     @Test

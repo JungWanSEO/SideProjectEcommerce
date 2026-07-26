@@ -155,13 +155,13 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 | `product_option` | product(자식) | **SKU**(사이즈+재고) + 낙관적 락 | FK→product · `version` |
 | `product_image` | product(자식) | 이미지 갤러리 | FK→product · sort_order |
 | `cart`/`cart_item` | cart | 멤버당 장바구니 | cart.member_id UNIQUE · option_id |
-| `orders` | order(루트) | 주문 헤더: 상태머신·배송 스냅샷·쿠폰 스냅샷 | status(PENDING/PAID/SHIPPING/DELIVERED/CANCELLED) · 배송 컬럼 · discount/coupon 스냅샷 |
+| `orders` | order(루트) | 주문 헤더: 상태머신·배송 스냅샷·쿠폰 스냅샷 | status(PENDING/PAID/SHIPPING/DELIVERED/CANCELLED) · 배송 컬럼 · discount/coupon 스냅샷 · `shipping_fee`(#4, 플랫폼 수익) |
 | `order_item` | order(자식) | 라인: 가격·이름·사이즈 + brand/seller **스냅샷** | FK→orders · status(ACTIVE/CANCELLED/**RETURNED**, 부분환불·반품축) |
 | `shipment` / `shipment_status_history` | order(자식, #1·#3) | **셀러별 배송 단위**(상태·송장) + 전이 이력 | order_id · seller_id(null=플랫폼) · status(PAID/SHIPPING/DELIVERED/CANCELLED) · `version` · courier/tracking · `delivered_at`(반품 기한 기산) · `kind`(ORIGINAL/**EXCHANGE**, EXCHANGE는 rollup 제외). `orders.status`는 ORIGINAL rollup 파생 |
 | `return_request` / `return_status_history` | returns(루트, #3) | **반품/교환 워크플로**(역방향 상태머신) + 전이 이력 | order_id·order_item_id·shipment_id·seller_id·member_id(ID참조) · type(RETURN/EXCHANGE) · status(REQUESTED→APPROVED→PICKED_UP→INSPECTED→REFUNDED/COMPLETED, REJECTED) · refund_amount·restock·exchange_option_id·exchange_shipment_id · `version` |
 | `address` | member | 저장 배송지 | member_id · is_default |
 | `payment` | payment | 주문당 결제(다중 PG·부분환불) | order_id(ID참조) · idempotency_key UNIQUE · provider · refunded_amount |
-| `settlement_entry` | settlement | **(결제 × 셀러)** 정산: 수수료·플랫폼수수료·할인 배분·지급 연결 | payment_id · seller_id · payout_id · gross/fee/net/platform_fee · fee_rate · provider |
+| `settlement_entry` | settlement | **(결제 × 셀러)** 정산: 수수료·플랫폼수수료·할인 배분·지급 연결 | payment_id · seller_id · payout_id · gross/fee/net/platform_fee · fee_rate · provider · `shipping`(#4, 플랫폼 배송비 엔트리 표시) |
 | `mismatch` | reconciliation | PG↔우리 대사 불일치 + 예외 큐 | pg_transaction_id · type · status(OPEN/RESOLVED/IGNORED) · provider |
 | `outbox_event` | global/events | 트랜잭셔널 아웃박스(at-least-once) | status(PENDING/PUBLISHED/FAILED) · retry_count · next_attempt_at |
 | `notification_log` | events | 멱등 소비 로그 | event_id UNIQUE |
@@ -174,7 +174,7 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 | `recommendation` | personalization | 멤버별 "나를위한" 사전계산 | member_id+product_id UNIQUE · score |
 | `product_cooccurrence` | personalization | "함께 산 상품" 사전계산 | reference_product_id+product_id UNIQUE · co_buy_count · score |
 
-### 5.3 스키마 진화 (Flyway 48개, 에포크별)
+### 5.3 스키마 진화 (Flyway 50개, 에포크별)
 
 | 에포크 | 마이그레이션 | 내용 |
 |---|---|---|
@@ -193,6 +193,7 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 | M 할인가·재고예약 | V42~V44 | product.original_price(#5) / stock_reservation+reserved(#2) / orders.version(낙관락) |
 | N 멀티셀러 배송(#1) | V45~V46 | shipment+shipment_status_history(셀러별 배송축) / orders 송장 컬럼 DROP(shipment로 이전) |
 | O 반품·교환(#3) | V47~V48 | order_item.RETURNED·shipment.delivered_at/kind(add-only) / return_request+return_status_history(역방향 워크플로) |
+| P 배송비(#4) | V49~V50 | orders.shipping_fee(스냅샷·플랫폼 수익) / settlement_entry.shipping(플랫폼 배송비 엔트리 플래그) |
 
 ---
 
@@ -316,6 +317,28 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 
 ---
 
+### 6.10 배송비 — 정액 + 무료임계 (#4)
+
+**문제**: `payable = 소계 − 할인` 이라 PG 금액에 배송비가 **구조적으로 없었다**. 넣으면 결제·환불·정산·대사를 동시에 건드린다. 오너 결정: **정액 + 무료배송 임계**(주문 단위, 셀러별 아님), **배송비 = 플랫폼 수익**(셀러 정산 net 제외), **부분취소·반품은 배송비 유지·전체취소(출고 전)만 환불**, 무료임계 기준 = **할인 후 상품금액**.
+
+**핵심 설계 — payable 접기 하나로 취소 규칙을 무변경 충족**:
+- `Order.shippingFee`는 체크아웃 시점 **스냅샷**(V49, `ShippingPolicy.feeFor(소계−할인)`). 이후 정책이 바뀌어도 과거 주문 결제액 불변(discountAmount 동형).
+- **`getPayableAmount()` = Σ활성 실효가 + (배송비 유지 시 shippingFee)**. "배송비 유지"의 정확한 판정은 **전량취소(모든 항목 CANCELLED)가 아님** = CANCELLED 아닌 항목(ACTIVE/RETURNED)이 하나라도 존재. 이 단일 조건이 기존 취소 환불 공식(`refundNow = (amount − refundedAmount) − 남은 payable`)을 **한 줄도 안 고치고** 오너 규칙에 맞춘다: 전량취소 → payable 0 → 배송비까지 환불 / 부분취소 → 배송비가 남은 payable에 유지 / **전량반품 → payable=배송비**(반품은 실효가만 환불하므로 배송비 유지).
+- `cancelOrderItem`도 `cancelOrder`와 **같은 잔여-활성 공식으로 통일** → 마지막 항목 취소 시 배송비까지 자동 환불 + Payment CANCELLED 도달(항목-실효가 방식의 배송비 stranded 결함 해소).
+
+**셀러 정산 격리 + 대사 정합**:
+- 정산은 payment.amount가 아니라 **항목 실효가로 셀러 net을 재구성**하므로 배송비가 셀러에게 새지 않는다(구조적 격리).
+- 대사는 `Σ SettlementEntry.grossAmount` vs PG 금액을 비교하는데 배송비가 payment.amount에 들어가면 전 주문이 AMOUNT_MISMATCH가 된다 → `run()`이 **플랫폼 배송비 엔트리**(sellerId=null·`shipping=true`·gross=배송비·PG수수료는 플랫폼 부담·net=배송비−수수료, V50 플래그)를 1건 만들어 `Σgross = payment.amount` 복원(대사 코드 무변경).
+- `reverseRefunds()`는 배송비 엔트리를 셀러 집계에서 **분리**(멱등성 보존)하고, 배송비 유지 여부를 **전량취소 여부**로 판정해 전량취소면 −배송비 역분개, 부분취소·반품(전량반품 포함)이면 유지.
+
+**적대적 리뷰 교정(HIGH 2·MED 2, 단일 뿌리)**: 최초 구현은 "활성 항목 0 = 배송비 환불됨"으로 판정했는데, 이는 취소엔 맞지만 **반품엔 틀리다**(반품은 배송비 유지). 전량반품 시 활성 0인데 배송비는 플랫폼이 보유하므로, 오판정이 배송비를 정산에서 −상계(HIGH)하거나 반품 후 마지막 항목 취소 시 환불(MED, 순서 의존)해 플랫폼 배송매출을 유실·대사를 깨뜨렸다 → 판정을 **shippingRetained(CANCELLED 아닌 항목 존재)**로 통일해 세 지점(payable·run·reverseRefunds) 교정.
+
+**엔드포인트**: `GET /api/orders/shipping-policy`(정액·무료임계 — FE 무료배송 진행바). FE=체크아웃/장바구니/주문상세 배송비 라인 + "N원 더 담으면 무료배송".
+
+> 구현: 5-phase(payable 접기+정책 V49 → 취소/환불 통일 → 정산/대사 플랫폼 엔트리 V50 → FE → 적대적리뷰 교정). 검증: `OrderTest`(payable 접기·전량반품 유지·반품후취소)·`ShippingPolicyTest`(임계 경계)·`ShippingFeeTest`(전체취소 환불·부분취소 유지·반품후취소 e2e)·`SettlementServiceTest`(배송비 엔트리·전량반품 유지·전량취소 상계)·`ReconciliationServiceTest`(배송비 포함 MATCHED).
+
+---
+
 ## 7. 동시성 제어 — 세 가지 전략
 
 | 문제 | 전략 | 이유 |
@@ -389,7 +412,7 @@ push/PR(`dev`·`main`) 시 2잡: **backend**(JDK 21, `gradlew test`, H2 — 시�
 | **brand** | `GET`(public) · `POST·PUT·DELETE` · `PUT /{id}/seller`(ADMIN) |
 | **cart** | `POST·GET /api/carts/items|carts` · `PUT·DELETE /items/{optionId}`(auth) |
 | **address** | `GET·POST /api/addresses` · `PUT·DELETE /{id}` · `PUT /{id}/default`(auth) |
-| **order** | `POST /api/orders` · `/checkout` · `/coupon-preview` · `GET /api/orders`(내것) · `/{id}` · `POST /{id}/cancel` · `/items/{itemId}/cancel`(부분) · `GET /admin`·`PATCH /{id}/status`(ADMIN 일괄 배송) · `PATCH /{id}/shipments/{sid}/status`(ADMIN 셀러별/플랫폼 배송, #1) · `POST /{id}/returns`(반품/교환 요청, #3) · `PATCH /{id}/returns/{rid}/status`(ADMIN 대행, #3) |
+| **order** | `POST /api/orders` · `/checkout` · `/coupon-preview` · `GET /shipping-policy`(배송비 정책, #4) · `GET /api/orders`(내것) · `/{id}` · `POST /{id}/cancel` · `/items/{itemId}/cancel`(부분) · `GET /admin`·`PATCH /{id}/status`(ADMIN 일괄 배송) · `PATCH /{id}/shipments/{sid}/status`(ADMIN 셀러별/플랫폼 배송, #1) · `POST /{id}/returns`(반품/교환 요청, #3) · `PATCH /{id}/returns/{rid}/status`(ADMIN 대행, #3) |
 | **returns** (#3) | `GET /api/returns/me`(구매자 내 반품/교환) · 셀러 `GET /api/seller/me/returns`(내 셀러 목록) · `PATCH /api/seller/me/returns/{id}/status`(승인/거부/수거/검수/환불·교환 확정) |
 | **payment** | `POST /api/payments`(auth, 멱등키) |
 | **coupon** | `POST /api/coupons` · `/{id}/issue` · `GET`(ADMIN) · `GET /api/member-coupons/me|claimable` · `POST /claim/{id}`(auth) |

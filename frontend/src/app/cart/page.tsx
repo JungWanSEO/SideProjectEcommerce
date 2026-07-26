@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { apiGet, apiDelete, apiPut } from "@/lib/api";
-import { Cart, CartItem } from "@/lib/types";
+import { Cart, CartItem, ShippingPolicy } from "@/lib/types";
 import { useAuth } from "@/lib/auth";
 import { loginHref } from "@/lib/useRequireAuth";
 import Badge from "@/components/ui/Badge";
@@ -22,6 +22,7 @@ export default function CartPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [updatingOptionId, setUpdatingOptionId] = useState<number | null>(null); // 수량 변경 중인 항목
+  const [shippingPolicy, setShippingPolicy] = useState<ShippingPolicy | null>(null); // 무료배송 진행바(#4)
 
   // 비로그인 → 로그인으로
   useEffect(() => {
@@ -34,6 +35,8 @@ export default function CartPage() {
       .then(setCart)
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
+    // 무료배송 진행바용 정책(실패해도 장바구니는 정상 — 조용히 무시)
+    apiGet<ShippingPolicy>("/api/orders/shipping-policy").then(setShippingPolicy).catch(() => {});
   }, [user]);
 
   const remove = async (optionId: number) => {
@@ -173,6 +176,17 @@ export default function CartPage() {
             <span className="text-muted">총 {cart?.totalQuantity ?? 0}개</span>
             <span className="text-2xl font-bold text-ink">{totalPrice.toLocaleString()}원</span>
           </div>
+
+          {/* 무료배송 진행(#4): 임계까지 남은 금액을 안내(배송비는 체크아웃에서 최종 계산). */}
+          {shippingPolicy &&
+            (totalPrice >= shippingPolicy.freeThreshold ? (
+              <p className="mt-2 text-sm text-sage-600">무료배송 대상입니다 🎉</p>
+            ) : (
+              <p className="mt-2 text-sm text-muted">
+                {(shippingPolicy.freeThreshold - totalPrice).toLocaleString()}원 더 담으면 무료배송
+                <span className="text-muted/70"> (배송비 {shippingPolicy.flatFee.toLocaleString()}원)</span>
+              </p>
+            ))}
 
           {error && <p className="mt-4 text-sm text-danger">{error}</p>}
 

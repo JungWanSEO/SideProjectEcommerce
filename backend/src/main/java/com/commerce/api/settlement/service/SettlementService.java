@@ -90,13 +90,17 @@ public class SettlementService {
             //    남은 항목의 실효가 합 = 결제액이 되어 대사가 그대로 MATCHED(run/reverseRefunds가 같은 출처를 씀).
             Map<Long, Long> grossBySeller = new LinkedHashMap<>();
             Map<Long, Long> discountBySeller = new LinkedHashMap<>();
-            for (OrderItemResponse item : orderService.getOrderItems(payment.orderId())) {
+            List<OrderItemResponse> orderItems = orderService.getOrderItems(payment.orderId());
+            for (OrderItemResponse item : orderItems) {
                 if (item.status() != OrderItemStatus.ACTIVE) {
                     continue;
                 }
                 grossBySeller.merge(item.sellerId(), item.subtotal(), Long::sum);
                 discountBySeller.merge(item.sellerId(), item.discountShare(), Long::sum);
             }
+            // 배송비 유지 여부: 전량취소(모든 항목 CANCELLED)에서만 환불 → CANCELLED 아닌 항목(ACTIVE/RETURNED)이
+            //   하나라도 있으면 유지(#4 적대적리뷰 HIGH — 전량반품을 전량취소로 오인해 배송비 매출을 소실하던 것 교정).
+            boolean shippingRetained = orderItems.stream().anyMatch(i -> i.status() != OrderItemStatus.CANCELLED);
             OrderDiscountInfo discount = orderService.getOrderDiscount(payment.orderId());   // 부담 주체(net 환원 판정)
 
             // 2) 할인 후 셀러 몫(reduced gross). Σreduced = payable(고객 실제 결제액) → 대사 group-by-sum이 그대로 MATCHED.
@@ -132,6 +136,25 @@ public class SettlementService {
                 totalDiscount += entry.getDiscountAmount();
                 byProvider.computeIfAbsent(provider, p -> new ProviderAccumulator(p, feeRate)).add(entry);
                 bySeller.computeIfAbsent(sellerId, SellerAccumulator::new).add(entry);
+            }
+
+            // 6) 배송비(플랫폼 수익) 엔트리(#4): 배송비가 유지되는 주문이면 sellerId=null·gross=배송비 엔트리 1건을
+            //    만들어 Σgross = (PG 잔여 청구액) 으로 복원한다(대사 MATCHED). PG수수료는 배송비 몫도 플랫폼이 부담
+            //    (net = 배송비 − 수수료). 전량취소(모든 항목 CANCELLED)면 배송비도 환불됐으므로 엔트리를 안 만든다.
+            //    전량반품이면 활성은 0이지만 배송비는 유지되므로(shippingRetained=true) 배송비 엔트리는 만든다.
+            long shippingFee = discount.shippingFee();
+            if (shippingFee > 0 && shippingRetained) {
+                long shippingPgFee = SettlementPolicy.calculateFee(feeRate, shippingFee);
+                SettlementEntry shipEntry = SettlementEntry.shippingScheduled(
+                        payment.id(), payment.orderId(), payment.pgTransactionId(), provider,
+                        shippingFee, shippingPgFee, feeRate, settledDate);
+                settlementRepository.save(shipEntry);
+                created++;
+                totalGross += shipEntry.getGrossAmount();
+                totalFee += shipEntry.getFee();
+                totalNet += shipEntry.getNetAmount();
+                byProvider.computeIfAbsent(provider, p -> new ProviderAccumulator(p, feeRate)).add(shipEntry);
+                bySeller.computeIfAbsent(null, SellerAccumulator::new).add(shipEntry);
             }
         }
 
@@ -176,23 +199,32 @@ public class SettlementService {
             // run()과 같은 항목별 출처를 쓰므로 할인 주문도 자연히 일관(미환불이면 target=settled → diff 0).
             Map<Long, Long> grossBySeller = new LinkedHashMap<>();
             Map<Long, Long> discountBySeller = new LinkedHashMap<>();
-            for (OrderItemResponse item : orderService.getOrderItems(payment.orderId())) {
+            List<OrderItemResponse> orderItems = orderService.getOrderItems(payment.orderId());
+            for (OrderItemResponse item : orderItems) {
                 if (item.status() != OrderItemStatus.ACTIVE) {
                     continue;
                 }
                 grossBySeller.merge(item.sellerId(), item.subtotal(), Long::sum);
                 discountBySeller.merge(item.sellerId(), item.discountShare(), Long::sum);
             }
+            // 배송비 유지 여부(#4): 전량취소(모든 항목 CANCELLED)에서만 환불 → CANCELLED 아닌 항목이 하나라도 있으면 유지.
+            //   활성 항목만 보면(과거) 전량반품(RETURNED)을 전량취소로 오인해 배송비를 잘못 상계했다(적대적리뷰 HIGH 교정).
+            boolean shippingRetained = orderItems.stream().anyMatch(i -> i.status() != OrderItemStatus.CANCELLED);
             Map<Long, Long> reducedGrossBySeller = new LinkedHashMap<>();
             grossBySeller.forEach((sid, g) -> reducedGrossBySeller.put(sid, g - discountBySeller.getOrDefault(sid, 0L)));
             long payable = reducedGrossBySeller.values().stream().mapToLong(Long::longValue).sum();
             long pgFeeTotal = SettlementPolicy.calculateFee(feeRate, payable);
             Map<Long, Long> pgFeeBySeller = proRate(reducedGrossBySeller, payable, pgFeeTotal);
 
-            // 기존 정산 합계(셀러별) [gross, fee, platformFee, discount] + 적용된 플랫폼 요율 보존
+            // 기존 정산 합계(셀러별) [gross, fee, platformFee, discount] + 적용된 플랫폼 요율 보존.
+            //   배송비 엔트리(shipping=true)는 셀러 집계에서 <b>분리</b>한다 — 안 그러면 null 버킷에 섞여
+            //   매 실행마다 -배송비로 역분개돼 멱등성이 깨진다(#4). 배송비는 아래에서 따로 상계한다.
             Map<Long, long[]> settledBySeller = new LinkedHashMap<>();
             Map<Long, Double> platformRateBySeller = new HashMap<>();
             for (SettlementEntry e : existing) {
+                if (e.isShipping()) {
+                    continue;
+                }
                 long[] agg = settledBySeller.computeIfAbsent(e.getSellerId(), k -> new long[4]);
                 agg[0] += e.getGrossAmount();
                 agg[1] += e.getFee();
@@ -223,6 +255,30 @@ public class SettlementService {
                 settlementRepository.save(rev);
                 reversed++;
                 totalReversedNet += rev.getNetAmount();
+            }
+
+            // 배송비 상계(#4): 배송비 엔트리를 따로 모아 목표(배송비 유지면 shippingFee, 전량취소면 0)와의 차이를
+            //   역분개한다. 부분취소·부분반품·전량반품은 CANCELLED 아닌 항목이 남아 shippingRetained=true →
+            //   targetShip=settled → diff 0(배송비 유지). 전량취소(모든 항목 CANCELLED)면 target 0 → -배송비 상계.
+            //   상계 후 Σ배송비 엔트리=0=target이라 재실행에도 멱등.
+            long settledShipGross = 0, settledShipFee = 0;
+            for (SettlementEntry e : existing) {
+                if (e.isShipping()) {
+                    settledShipGross += e.getGrossAmount();
+                    settledShipFee += e.getFee();
+                }
+            }
+            long targetShipGross = shippingRetained ? discount.shippingFee() : 0L;
+            long targetShipFee = shippingRetained ? SettlementPolicy.calculateFee(feeRate, discount.shippingFee()) : 0L;
+            long dShipGross = targetShipGross - settledShipGross;
+            long dShipFee = targetShipFee - settledShipFee;
+            if (dShipGross != 0 || dShipFee != 0) {
+                SettlementEntry shipRev = SettlementEntry.shippingScheduled(
+                        payment.id(), payment.orderId(), payment.pgTransactionId(), provider,
+                        dShipGross, dShipFee, feeRate, settledDate);
+                settlementRepository.save(shipRev);
+                reversed++;
+                totalReversedNet += shipRev.getNetAmount();
             }
         }
         return new SettlementReverseResponse(reversed, totalReversedNet);
