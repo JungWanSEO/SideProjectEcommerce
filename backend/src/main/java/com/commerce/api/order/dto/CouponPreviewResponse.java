@@ -9,12 +9,14 @@ package com.commerce.api.order.dto;
  * @param couponCode     적용된(정규화된) 쿠폰 코드
  * @param totalPrice     할인 전 장바구니 합계(원)
  * @param discountAmount 할인액(원)
- * @param payableAmount  예상 결제액(= totalPrice - discountAmount)
+ * @param shippingFee    배송비(원, #4). 할인 후 상품금액이 무료임계 이상이면 0.
+ * @param payableAmount  예상 결제액(= totalPrice - discountAmount + shippingFee)
  */
 public record CouponPreviewResponse(
         String couponCode,
         long totalPrice,
         long discountAmount,
+        long shippingFee,
         long payableAmount
 ) {
 }

@@ -77,6 +77,16 @@ public class Order extends BaseEntity {
     @Column(name = "coupon_seller_id")
     private Long couponSellerId;
 
+    /**
+     * 배송비 스냅샷(#4). 체크아웃 시점에 "정액 + 무료임계" 정책으로 1회 계산해 고정한다(discountAmount와 동형 —
+     * 이후 정책이 바뀌어도 이 주문의 결제액은 불변). payable에는 <b>활성 항목이 하나라도 있을 때만</b> 가산된다
+     * ({@link #getPayableAmount()}) — 전량취소(활성 0)면 payable에서 빠져 배송비까지 환불되고, 부분취소는
+     * 활성이 남아 배송비가 유지된다(오너 결정: 전체취소만 환불). 배송비는 <b>플랫폼 수익</b>이라 셀러 정산 net에는
+     * 들어가지 않는다(정산은 항목 실효가만 읽는다). 셀러별 아닌 주문 단위 단일 값.
+     */
+    @Column(name = "shipping_fee", nullable = false)
+    private long shippingFee;
+
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<OrderItem> orderItems = new ArrayList<>();
 
@@ -118,6 +128,7 @@ public class Order extends BaseEntity {
         this.status = OrderStatus.PENDING;   // 생성 시점 = 결제 대기
         this.totalPrice = 0L;
         this.discountAmount = 0L;            // 쿠폰 미적용 기본값
+        this.shippingFee = 0L;               // 배송비 미산정 기본값(체크아웃에서 스냅샷)
         // 타임라인 시작점: 이전 상태 없음(null) → PENDING, 주체=주문한 회원.
         recordHistory(null, OrderStatus.PENDING, memberId, "주문 생성");
     }
@@ -172,18 +183,37 @@ public class Order extends BaseEntity {
     }
 
     /**
-     * 실제 결제 대상 금액 = <b>활성 항목</b>의 실효가(소계 − 안분 할인) 합. PG 승인·Payment.amount의 기준.
+     * 배송비 스냅샷 지정(#4, 체크아웃 시 1회). 배송비 계산(정액·무료임계)은 서비스({@code ShippingPolicy})가 하고
+     * 엔티티는 값만 저장한다(discountAmount가 coupon 도메인에서 넘어오는 것과 같은 경계). 음수 가드.
+     */
+    public void assignShippingFee(long shippingFee) {
+        if (shippingFee < 0) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "배송비는 음수일 수 없습니다.");
+        }
+        this.shippingFee = shippingFee;
+    }
+
+    /**
+     * 실제 결제 대상 금액 = <b>활성 항목</b>의 실효가(소계 − 안분 할인) 합 <b>+ 배송비(활성 항목이 있을 때만)</b>.
+     * PG 승인·Payment.amount의 기준.
      *
      * <p>취소된 항목은 뺀다 — PENDING 중 항목을 취소하고 결제하면 그 항목까지 청구되던 버그를 막고,
      * 정산이 쓰는 "활성 항목 실효가" 불변식({@link #discountShares})과 한 출처로 맞춘다(대사 금액 불일치 방지).
-     * 취소가 없는 정상 주문에선 {@code totalPrice − discountAmount}와 동일하다(모든 항목이 활성이므로).
+     * 취소가 없는 정상 주문에선 {@code totalPrice − discountAmount + shippingFee}와 동일하다(모든 항목이 활성이므로).
+     *
+     * <p><b>배송비 접기(#4)</b>: 활성 항목이 하나라도 있으면 배송비를 더하고, 전량취소(활성 0)면 더하지 않는다.
+     * 이 조건부가 취소 환불 공식(PaymentService {@code refundNow = (amount − refundedAmount) − 남은 payable})을
+     * <b>변경 없이</b> 오너 규칙에 맞춘다: 전체취소 → payable 0 → 배송비까지 전액 환불 / 부분취소 → 배송비가
+     * 남은 payable에 남아 환불에서 제외(유지). 반품은 항목 실효가로만 환불하므로 배송비는 자연히 유지된다.
      */
     public long getPayableAmount() {
         Map<OrderItem, Long> shares = discountShares();
-        return orderItems.stream()
+        long itemsPayable = orderItems.stream()
                 .filter(OrderItem::isActive)
                 .mapToLong(item -> item.getSubtotal() - shares.getOrDefault(item, 0L))
                 .sum();
+        boolean hasActive = orderItems.stream().anyMatch(OrderItem::isActive);
+        return itemsPayable + (hasActive ? shippingFee : 0L);
     }
 
     /**

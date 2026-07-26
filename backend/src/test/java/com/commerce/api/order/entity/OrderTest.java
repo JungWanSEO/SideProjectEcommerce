@@ -83,6 +83,65 @@ class OrderTest {
         assertThat(shares.get(b)).isZero();
     }
 
+    // === #4 배송비: payable 접기(활성 항목 있을 때만 가산) ============================
+
+    @Test
+    @DisplayName("배송비 - 활성 항목이 있으면 payable = 소계 + 배송비")
+    void payable_includesShippingWhenActive() {
+        Order order = orderWith(item(1L, 10000L));
+        order.assignShippingFee(3000L);
+        assertThat(order.getPayableAmount()).isEqualTo(13000L);
+    }
+
+    @Test
+    @DisplayName("배송비 - 할인과 함께: payable = 소계 − 할인 + 배송비")
+    void payable_withDiscountAndShipping() {
+        Order order = orderWith(item(1L, 10000L));
+        order.applyCoupon("C", 1000L, "PLATFORM", null);
+        order.assignShippingFee(3000L);
+        assertThat(order.getPayableAmount()).isEqualTo(12000L);   // 10000 − 1000 + 3000
+    }
+
+    @Test
+    @DisplayName("배송비 - 전량취소면 payable 0(배송비까지 빠져 전액 환불로 이어짐)")
+    void payable_dropsShippingWhenAllCancelled() {
+        OrderItem only = item(1L, 10000L);
+        Order order = orderWith(only);
+        order.assignShippingFee(3000L);
+        only.cancel();   // 활성 0
+        assertThat(order.getPayableAmount()).isZero();
+    }
+
+    @Test
+    @DisplayName("배송비 - 부분취소면 배송비 유지(남은 활성 실효가 + 배송비)")
+    void payable_retainsShippingOnPartialCancel() {
+        OrderItem a = item(1L, 10000L);
+        OrderItem b = item(2L, 20000L);
+        Order order = orderWith(a, b);
+        order.assignShippingFee(3000L);
+        a.cancel();   // b만 활성
+        assertThat(order.getPayableAmount()).isEqualTo(23000L);   // 20000 + 배송비 3000 유지
+    }
+
+    @Test
+    @DisplayName("배송비 - 반품(RETURNED)도 남은 활성엔 배송비 유지")
+    void payable_retainsShippingOnReturn() {
+        OrderItem a = item(1L, 10000L);
+        OrderItem b = item(2L, 20000L);
+        Order order = orderWith(a, b);
+        order.assignShippingFee(3000L);
+        a.markReturned();   // b만 활성
+        assertThat(order.getPayableAmount()).isEqualTo(23000L);
+    }
+
+    @Test
+    @DisplayName("배송비 - 음수는 400")
+    void assignShippingFee_negativeRejected() {
+        Order order = orderWith(item(1L, 10000L));
+        assertThatThrownBy(() -> order.assignShippingFee(-1L))
+                .isInstanceOf(BusinessException.class);
+    }
+
     // === #1 P2: 결제 팬아웃 · 백필 =====================================================
 
     @Test

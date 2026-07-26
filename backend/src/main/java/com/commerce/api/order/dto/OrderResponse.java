@@ -20,7 +20,8 @@ public record OrderResponse(
         OrderStatus status,
         long totalPrice,          // 할인 전 총액(gross)
         long discountAmount,      // 쿠폰 할인액 (없으면 0)
-        long payableAmount,       // 실제 결제액 = totalPrice - discountAmount
+        long shippingFee,         // 배송비(#4, 없으면 0). 플랫폼 수익 — 셀러 정산 net에는 미포함
+        long payableAmount,       // 실제 결제액 = totalPrice - discountAmount + shippingFee (활성 항목 있을 때)
         String couponCode,        // 적용된 쿠폰 코드 (없으면 null)
         List<OrderItemResponse> items,
         ShippingResponse shipping,   // 배송지 스냅샷 (없으면 null)
@@ -46,6 +47,7 @@ public record OrderResponse(
                 order.getStatus(),
                 order.getTotalPrice(),
                 order.getDiscountAmount(),
+                order.getShippingFee(),
                 order.getPayableAmount(),
                 order.getCouponCode(),
                 items,

@@ -65,6 +65,8 @@ class OrderProcessorTest {
     private MemberCouponService memberCouponService;
     @Mock
     private com.commerce.api.product.service.StockReservationService stockReservationService;
+    @Mock
+    private ShippingPolicy shippingPolicy;   // #4 — mock의 feeFor 기본 0L 반환이라 기존 payable 기대값 유지
 
     @InjectMocks
     private OrderProcessor orderProcessor;

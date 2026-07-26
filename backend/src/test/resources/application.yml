@@ -44,6 +44,10 @@ app:
   # 결제 대기 만료 배치 OFF — 켜두면 테스트 도중 10분 경계에 배치가 돌아 다른 테스트의 PENDING 주문을
   #   취소해 버려 간헐적 실패(flaky)를 만든다(아웃박스 폴러와 같은 이유).
   order:
+    # 배송비 테스트 기본 OFF(0원) — 기존 결제/취소/정산 테스트의 payable 기대값이 배송비로 흔들리지 않게.
+    #   배송비 동작은 ShippingFeeTest에서 @SpringBootTest(properties=...)로 값을 켜서만 검증한다.
+    shipping-fee: 0
+    free-shipping-threshold: 0
     expiry:
       enabled: false
   # shipment 백필 러너 OFF — 기동 시 자동 소급 생성 방지(백필 로직은 ShipmentBackfillServiceTest로 직접 검증).

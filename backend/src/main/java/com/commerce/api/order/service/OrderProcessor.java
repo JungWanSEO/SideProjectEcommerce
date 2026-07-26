@@ -53,6 +53,7 @@ public class OrderProcessor {
     private final BrandRepository brandRepository;  // 주문 시점 셀러 귀속 스냅샷용(brandId→sellerId 조회)
     private final MemberCouponService memberCouponService;   // 쿠폰 적용/미리보기(공개형·발급형 분기·단일 사용) — 경계는 DTO로
     private final StockReservationService stockReservationService;   // 재고 예약(#2) — 주문 생성 시 오버셀 차단
+    private final ShippingPolicy shippingPolicy;   // 배송비 정액+무료임계 계산(#4) — 주문 생성 시점 스냅샷
 
     /** 예약 만료 기준 = PENDING 결제 대기 TTL(OrderExpiryService와 같은 값). 만료 배치가 그때 예약을 해제한다. */
     @Value("${app.order.pending-ttl-minutes:30}")
@@ -150,8 +151,10 @@ public class OrderProcessor {
         }
 
         CouponApplyResult applied = memberCouponService.preview(memberId, couponCode, total, grossBySeller);
+        long afterDiscount = total - applied.discountAmount();
+        long shippingFee = shippingPolicy.feeFor(afterDiscount);   // 실제 주문과 같은 규칙(#4) — 프리뷰≠실결제 방지
         return new CouponPreviewResponse(applied.code(), total, applied.discountAmount(),
-                total - applied.discountAmount());
+                shippingFee, afterDiscount + shippingFee);
     }
 
     /**
@@ -210,6 +213,10 @@ public class OrderProcessor {
             String fundedBy = applied.fundedBy() == null ? null : applied.fundedBy().name();
             order.applyCoupon(applied.code(), applied.discountAmount(), fundedBy, applied.sellerId());
         }
+
+        // 배송비 스냅샷(#4): 정액+무료임계를 할인 후 상품금액(소계−할인) 기준으로 1회 계산해 고정한다.
+        //   payable = 소계 − 할인 + 배송비. 이후 정책이 바뀌어도 이 주문의 결제액은 불변(discountAmount와 동형).
+        order.assignShippingFee(shippingPolicy.feeFor(order.getTotalPrice() - order.getDiscountAmount()));
 
         Order saved = orderRepository.save(order);
 
