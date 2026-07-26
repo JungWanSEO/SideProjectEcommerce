@@ -24,20 +24,17 @@ export default function CartPage() {
   const [updatingOptionId, setUpdatingOptionId] = useState<number | null>(null); // 수량 변경 중인 항목
   const [shippingPolicy, setShippingPolicy] = useState<ShippingPolicy | null>(null); // 무료배송 진행바(#4)
 
-  // 비로그인 → 로그인으로
+  // #7 게스트 장바구니: 비로그인도 장바구니를 본다(서버가 cart_token 쿠키로 게스트 카트를 돌려줌).
+  //   로그인 상태가 확정된 뒤 로드한다(회원/게스트 무관 — GET /api/carts가 쿠키로 판별).
   useEffect(() => {
-    if (!authLoading && !user) router.replace(loginHref(window.location.pathname + window.location.search));
-  }, [authLoading, user, router]);
-
-  useEffect(() => {
-    if (!user) return;
+    if (authLoading) return;
     apiGet<Cart>("/api/carts")
       .then(setCart)
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
     // 무료배송 진행바용 정책(실패해도 장바구니는 정상 — 조용히 무시)
     apiGet<ShippingPolicy>("/api/orders/shipping-policy").then(setShippingPolicy).catch(() => {});
-  }, [user]);
+  }, [authLoading]);
 
   const remove = async (optionId: number) => {
     try {
@@ -100,7 +97,6 @@ export default function CartPage() {
         <Skeleton className="mt-6 h-[3.25rem] w-full rounded-full" />
       </main>
     );
-  if (!user) return null; // 리다이렉트 중
 
   const items = cart?.items ?? [];
   const totalPrice = items.reduce((sum, it) => sum + it.subtotal, 0);
@@ -191,11 +187,16 @@ export default function CartPage() {
           {error && <p className="mt-4 text-sm text-danger">{error}</p>}
 
           <button
-            onClick={() => router.push("/checkout")}
+            onClick={() => router.push(user ? "/checkout" : loginHref("/checkout"))}
             className="mt-6 w-full rounded-full bg-clay px-4 py-3.5 font-medium text-cream transition hover:bg-clay-600"
           >
-            주문하기
+            {user ? "주문하기" : "로그인하고 주문하기"}
           </button>
+          {!user && items.length > 0 && (
+            <p className="mt-2 text-center text-xs text-muted">
+              로그인하면 담아둔 상품이 회원 장바구니로 합쳐집니다.
+            </p>
+          )}
         </>
       )}
     </main>

@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import com.commerce.api.cart.dto.CartItemAddRequest;
 import com.commerce.api.cart.dto.CartItemUpdateRequest;
@@ -66,7 +68,7 @@ class CartServiceTest {
         given(productRepository.findAllById(any())).willReturn(List.of(product));
 
         // when
-        CartResponse response = cartService.addItem(100L, new CartItemAddRequest(10L, 2));
+        CartResponse response = cartService.addItem(CartOwner.member(100L), new CartItemAddRequest(10L, 2));
 
         // then: 항목에 상품명·사이즈·재고가 라이브로 채워짐
         assertThat(response.items()).hasSize(1);
@@ -92,7 +94,7 @@ class CartServiceTest {
         given(productRepository.findAllById(any())).willReturn(List.of(product));
 
         // when: 같은 옵션 3개 추가
-        CartResponse response = cartService.addItem(100L, new CartItemAddRequest(10L, 3));
+        CartResponse response = cartService.addItem(CartOwner.member(100L), new CartItemAddRequest(10L, 3));
 
         // then: 항목은 1개, 수량은 5
         assertThat(response.items()).hasSize(1);
@@ -107,7 +109,7 @@ class CartServiceTest {
         given(productRepository.findByOptionId(99L)).willReturn(Optional.empty());
 
         // when & then
-        assertThatThrownBy(() -> cartService.addItem(100L, new CartItemAddRequest(99L, 1)))
+        assertThatThrownBy(() -> cartService.addItem(CartOwner.member(100L), new CartItemAddRequest(99L, 1)))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("옵션을 찾을 수 없습니다");
     }
@@ -119,7 +121,7 @@ class CartServiceTest {
         given(cartRepository.findByMemberId(100L)).willReturn(Optional.empty());
 
         // when
-        CartResponse response = cartService.getCart(100L);
+        CartResponse response = cartService.getCart(CartOwner.member(100L));
 
         // then
         assertThat(response.items()).isEmpty();
@@ -137,7 +139,7 @@ class CartServiceTest {
         given(productRepository.findAllById(any())).willReturn(List.of(product));
 
         // when: 수량을 5로 변경
-        CartResponse response = cartService.changeQuantity(100L, 10L, new CartItemUpdateRequest(5));
+        CartResponse response = cartService.changeQuantity(CartOwner.member(100L), 10L, new CartItemUpdateRequest(5));
 
         // then: 2+5=7이 아니라 5로 덮어써짐
         assertThat(response.items()).hasSize(1);
@@ -155,7 +157,7 @@ class CartServiceTest {
         given(cartRepository.findByMemberId(100L)).willReturn(Optional.of(cart));
 
         // when & then: 담기지 않은 옵션 99 변경 시도
-        assertThatThrownBy(() -> cartService.changeQuantity(100L, 99L, new CartItemUpdateRequest(3)))
+        assertThatThrownBy(() -> cartService.changeQuantity(CartOwner.member(100L), 99L, new CartItemUpdateRequest(3)))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("해당 옵션 항목이 없습니다");
     }
@@ -167,7 +169,7 @@ class CartServiceTest {
         given(cartRepository.findByMemberId(anyLong())).willReturn(Optional.empty());
 
         // when & then
-        assertThatThrownBy(() -> cartService.changeQuantity(100L, 10L, new CartItemUpdateRequest(3)))
+        assertThatThrownBy(() -> cartService.changeQuantity(CartOwner.member(100L), 10L, new CartItemUpdateRequest(3)))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("장바구니가 없습니다");
     }
@@ -184,7 +186,7 @@ class CartServiceTest {
         given(productRepository.findAllById(any())).willReturn(List.of(product2));
 
         // when: 옵션 10 제거
-        CartResponse response = cartService.removeItem(100L, 10L);
+        CartResponse response = cartService.removeItem(CartOwner.member(100L), 10L);
 
         // then: 옵션 20만 남음
         assertThat(response.items()).hasSize(1);
@@ -199,8 +201,60 @@ class CartServiceTest {
         given(cartRepository.findByMemberId(anyLong())).willReturn(Optional.empty());
 
         // when & then
-        assertThatThrownBy(() -> cartService.removeItem(100L, 10L))
+        assertThatThrownBy(() -> cartService.removeItem(CartOwner.member(100L), 10L))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("장바구니가 없습니다");
+    }
+
+    // === 게스트 → 회원 병합(#7) ===
+
+    private int qtyOf(Cart cart, long optionId) {
+        return cart.getCartItems().stream()
+                .filter(i -> i.getOptionId().equals(optionId)).findFirst().orElseThrow().getQuantity();
+    }
+
+    @Test
+    @DisplayName("병합 - 게스트 카트를 회원 카트로 합산(같은 옵션 수량 더함)하고 게스트 카트 삭제")
+    void mergeGuestIntoMember_sums() {
+        Cart guest = Cart.createForGuest("tok");
+        guest.addItem(1L, 10L, 2);   // 옵션10 ×2
+        guest.addItem(2L, 20L, 1);   // 옵션20 ×1
+        Cart member = Cart.create(100L);
+        member.addItem(1L, 10L, 1);  // 옵션10 ×1 (겹침)
+        given(cartRepository.findByCartToken("tok")).willReturn(Optional.of(guest));
+        given(cartRepository.findByMemberId(100L)).willReturn(Optional.of(member));
+
+        cartService.mergeGuestIntoMember("tok", 100L);
+
+        assertThat(member.getCartItems()).hasSize(2);
+        assertThat(qtyOf(member, 10L)).isEqualTo(3);   // 1 + 2 합산
+        assertThat(qtyOf(member, 20L)).isEqualTo(1);   // 게스트에서 이전
+        verify(cartRepository).save(member);
+        verify(cartRepository).delete(guest);          // 병합 후 게스트 카트 제거
+    }
+
+    @Test
+    @DisplayName("병합 - 회원 카트가 없으면 새로 만들어 게스트 항목을 옮긴다")
+    void mergeGuestIntoMember_newMemberCart() {
+        Cart guest = Cart.createForGuest("tok");
+        guest.addItem(1L, 10L, 2);
+        given(cartRepository.findByCartToken("tok")).willReturn(Optional.of(guest));
+        given(cartRepository.findByMemberId(100L)).willReturn(Optional.empty());
+        given(cartRepository.save(any(Cart.class))).willAnswer(inv -> inv.getArgument(0));
+
+        cartService.mergeGuestIntoMember("tok", 100L);
+
+        verify(cartRepository).delete(guest);
+    }
+
+    @Test
+    @DisplayName("병합 - 게스트 카트가 없으면 no-op(저장·삭제 없음)")
+    void mergeGuestIntoMember_noGuest() {
+        given(cartRepository.findByCartToken("tok")).willReturn(Optional.empty());
+
+        cartService.mergeGuestIntoMember("tok", 100L);
+
+        verify(cartRepository, never()).save(any());
+        verify(cartRepository, never()).delete(any());
     }
 }

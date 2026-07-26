@@ -47,6 +47,10 @@ class AuthControllerTest {
     private MemberService memberService;
     @MockitoBean
     private AuthCookieManager cookieManager;
+    @MockitoBean
+    private com.commerce.api.cart.service.CartService cartService;          // #7 로그인 시 게스트 카트 병합 의존
+    @MockitoBean
+    private com.commerce.api.cart.service.CartCookieManager cartCookieManager;
 
     private MemberResponse user() {
         return new MemberResponse(1L, "alice@commerce.com", "alice", Role.USER, null, null);

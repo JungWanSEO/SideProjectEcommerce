@@ -8,11 +8,14 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.commerce.api.cart.dto.CartResponse;
 import com.commerce.api.cart.dto.CartResponse.CartItemResponse;
+import com.commerce.api.cart.service.CartCookieManager;
+import com.commerce.api.cart.service.CartOwner;
 import com.commerce.api.cart.service.CartService;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -43,6 +46,9 @@ class CartControllerTest {
     @MockitoBean
     private CartService cartService;
 
+    @MockitoBean
+    private CartCookieManager cartCookieManager;   // #7 — @WebMvcTest 슬라이스엔 @Component가 안 실려 목으로 주입
+
     @BeforeEach
     void setAuth() {
         SecurityContextHolder.getContext().setAuthentication(
@@ -64,7 +70,7 @@ class CartControllerTest {
     @Test
     @DisplayName("POST /api/carts/items - 담기 성공 시 200")
     void addItem_success() throws Exception {
-        given(cartService.addItem(eq(1L), any())).willReturn(sampleCart());
+        given(cartService.addItem(any(CartOwner.class), any())).willReturn(sampleCart());
 
         mockMvc.perform(post("/api/carts/items")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -77,6 +83,24 @@ class CartControllerTest {
                 .andExpect(jsonPath("$.data.items[0].optionId").value(10))
                 .andExpect(jsonPath("$.data.items[0].size").value("M"))
                 .andExpect(jsonPath("$.data.items[0].subtotal").value(20000));
+    }
+
+    @Test
+    @DisplayName("POST /api/carts/items - 비로그인 게스트는 담기 시 cart_token 쿠키 발급(#7)")
+    void addItem_guest_issuesCookie() throws Exception {
+        SecurityContextHolder.clearContext();   // 비로그인
+        given(cartService.addItem(any(CartOwner.class), any())).willReturn(sampleCart());
+        given(cartCookieManager.newToken()).willReturn("guest-tok-1");
+        given(cartCookieManager.issue("guest-tok-1")).willReturn(
+                org.springframework.http.ResponseCookie.from("cart_token", "guest-tok-1").httpOnly(true).path("/").build());
+
+        mockMvc.perform(post("/api/carts/items")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"optionId":10,"quantity":2}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.containsString("cart_token=guest-tok-1")));
     }
 
     @Test
@@ -94,7 +118,7 @@ class CartControllerTest {
     @Test
     @DisplayName("GET /api/carts - 조회 성공 시 200")
     void getCart_success() throws Exception {
-        given(cartService.getCart(1L)).willReturn(sampleCart());
+        given(cartService.getCart(any(CartOwner.class))).willReturn(sampleCart());
 
         mockMvc.perform(get("/api/carts"))
                 .andExpect(status().isOk())
@@ -108,7 +132,7 @@ class CartControllerTest {
         // 수량을 5로 변경한 장바구니 응답을 stub
         CartResponse updated = new CartResponse(1L,
                 List.of(new CartItemResponse(1L, 10L, "반팔티셔츠", "M", 10000L, 5, 50000L, 50, false)), 5);
-        given(cartService.changeQuantity(eq(1L), eq(10L), any())).willReturn(updated);
+        given(cartService.changeQuantity(any(CartOwner.class), eq(10L), any())).willReturn(updated);
 
         mockMvc.perform(put("/api/carts/items/10")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -137,7 +161,7 @@ class CartControllerTest {
     @Test
     @DisplayName("DELETE /api/carts/items/{optionId} - 제거 성공 시 200")
     void removeItem_success() throws Exception {
-        given(cartService.removeItem(anyLong(), anyLong()))
+        given(cartService.removeItem(any(CartOwner.class), anyLong()))
                 .willReturn(new CartResponse(1L, List.of(), 0));
 
         mockMvc.perform(delete("/api/carts/items/10"))
