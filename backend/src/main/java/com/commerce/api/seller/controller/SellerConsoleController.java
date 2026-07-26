@@ -8,6 +8,8 @@ import com.commerce.api.order.dto.OrderSearchCondition;
 import com.commerce.api.order.dto.OrderSummaryResponse;
 import com.commerce.api.order.dto.SellerShipmentResponse;
 import com.commerce.api.order.dto.ShipmentStatusUpdateRequest;
+import com.commerce.api.returns.dto.ReturnResponse;
+import com.commerce.api.returns.dto.ReturnStatusUpdateRequest;
 import com.commerce.api.seller.dto.SellerResponse;
 import com.commerce.api.seller.service.SellerConsoleService;
 import com.commerce.api.settlement.dto.PayoutResponse;
@@ -113,5 +115,26 @@ public class SellerConsoleController {
                 SecurityUtil.getCurrentMemberId(), shipmentId,
                 request.status(), request.courier(), request.trackingNumber());
         return ResponseEntity.ok(ApiResponse.success("배송 상태가 변경되었습니다.", response));
+    }
+
+    @Operation(summary = "내 반품/교환 목록",
+            description = "내 셀러의 반품·교환 요청 목록. 셀러 스코프는 서버가 강제(남의 셀러 반품은 안 보임). 최신순.")
+    @GetMapping("/me/returns")
+    public ResponseEntity<ApiResponse<PageResponse<ReturnResponse>>> getMyReturns(
+            @ParameterObject @PageableDefault(size = 20, sort = "id", direction = Direction.DESC) Pageable pageable) {
+        return ResponseEntity.ok(ApiResponse.success(
+                sellerConsoleService.getMyReturns(SecurityUtil.getCurrentMemberId(), pageable)));
+    }
+
+    @Operation(summary = "내 반품/교환 처리",
+            description = "내 셀러의 반품·교환을 처리한다(APPROVE·REJECT·PICK_UP·INSPECT). 내 셀러 것이 아니면 403, "
+                    + "잘못된 전이면 409. 환불/교환 확정(REFUND·COMPLETE)은 후속 단계.")
+    @Auditable(action = "RETURN_ADVANCE", targetType = "RETURN", targetId = "#returnId")
+    @PatchMapping("/me/returns/{returnId}/status")
+    public ResponseEntity<ApiResponse<ReturnResponse>> advanceMyReturn(
+            @PathVariable Long returnId, @Valid @RequestBody ReturnStatusUpdateRequest request) {
+        ReturnResponse response = sellerConsoleService.advanceMyReturn(
+                SecurityUtil.getCurrentMemberId(), returnId, request);
+        return ResponseEntity.ok(ApiResponse.success("반품 상태가 변경되었습니다.", response));
     }
 }

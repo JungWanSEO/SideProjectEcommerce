@@ -61,9 +61,8 @@ public class ReviewService {
         if (!productRepository.existsById(productId)) {
             throw new BusinessException(HttpStatus.NOT_FOUND, "상품을 찾을 수 없습니다.");
         }
-        // 구매자만: 이 회원이 이 상품을 구매(결제~배송완료) 주문으로 산 적이 있어야 한다.
-        boolean purchased = orderRepository.existsByMemberIdAndStatusInAndOrderItems_ProductId(
-                memberId, OrderStatus.PURCHASED, productId);
+        // 구매자만: 이 회원이 이 상품을 구매(결제~배송완료)한 ACTIVE 항목이 있어야 한다(반품·취소분은 자격 없음 — #3).
+        boolean purchased = orderRepository.hasActivePurchase(memberId, OrderStatus.PURCHASED, productId);
         if (!purchased) {
             throw new BusinessException(HttpStatus.FORBIDDEN, "구매한 상품에만 리뷰를 작성할 수 있습니다.");
         }

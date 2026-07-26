@@ -62,6 +62,9 @@ class OrderControllerTest {
     @MockitoBean
     private com.commerce.api.order.service.ShipmentService shipmentService;   // 배송 건 전진 위임 대상(#1 c안)
 
+    @MockitoBean
+    private com.commerce.api.returns.service.ReturnService returnService;   // 반품 ADMIN 대행 위임 대상(#3)
+
     @BeforeEach
     void setAuth() {
         SecurityContextHolder.getContext().setAuthentication(

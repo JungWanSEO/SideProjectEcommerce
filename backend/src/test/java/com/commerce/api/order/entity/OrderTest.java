@@ -276,4 +276,30 @@ class OrderTest {
         order.cancelItem(501L, 100L);   // 셀러2 마지막 항목 → 전부 취소
         assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
     }
+
+    // === #3 P1: OrderItem RETURNED 상태 =============================================
+
+    @Test
+    @DisplayName("markReturned - ACTIVE 항목만 RETURNED로, 비활성 항목은 409")
+    void markReturned_activeOnly() {
+        OrderItem a = item(1L, 5000L);
+        a.markReturned();
+        assertThat(a.getStatus()).isEqualTo(OrderItemStatus.RETURNED);
+        assertThat(a.isActive()).isFalse();   // RETURNED는 비활성 → 정산 자동 상계
+
+        assertThatThrownBy(a::markReturned)   // 이중 반품 차단
+                .isInstanceOf(BusinessException.class).hasMessageContaining("반품할 수 없");
+    }
+
+    @Test
+    @DisplayName("취소/반품 상호 배타 - 취소된 항목은 반품 불가, 반품된 항목은 취소 불가(이중 원장 차단)")
+    void cancelReturn_mutuallyExclusive() {
+        OrderItem cancelled = item(1L, 5000L);
+        cancelled.cancel();
+        assertThatThrownBy(cancelled::markReturned).isInstanceOf(BusinessException.class);
+
+        OrderItem returned = item(2L, 4000L);
+        returned.markReturned();
+        assertThatThrownBy(returned::cancel).isInstanceOf(BusinessException.class);
+    }
 }

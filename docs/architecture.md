@@ -156,8 +156,9 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 | `product_image` | product(자식) | 이미지 갤러리 | FK→product · sort_order |
 | `cart`/`cart_item` | cart | 멤버당 장바구니 | cart.member_id UNIQUE · option_id |
 | `orders` | order(루트) | 주문 헤더: 상태머신·배송 스냅샷·쿠폰 스냅샷 | status(PENDING/PAID/SHIPPING/DELIVERED/CANCELLED) · 배송 컬럼 · discount/coupon 스냅샷 |
-| `order_item` | order(자식) | 라인: 가격·이름·사이즈 + brand/seller **스냅샷** | FK→orders · status(ACTIVE/CANCELLED, 부분환불축) |
-| `shipment` / `shipment_status_history` | order(자식, #1) | **셀러별 배송 단위**(상태·송장) + 전이 이력 | order_id · seller_id(null=플랫폼) · status(PAID/SHIPPING/DELIVERED/CANCELLED) · `version` · courier/tracking. `orders.status`는 이들의 rollup 파생 |
+| `order_item` | order(자식) | 라인: 가격·이름·사이즈 + brand/seller **스냅샷** | FK→orders · status(ACTIVE/CANCELLED/**RETURNED**, 부분환불·반품축) |
+| `shipment` / `shipment_status_history` | order(자식, #1·#3) | **셀러별 배송 단위**(상태·송장) + 전이 이력 | order_id · seller_id(null=플랫폼) · status(PAID/SHIPPING/DELIVERED/CANCELLED) · `version` · courier/tracking · `delivered_at`(반품 기한 기산) · `kind`(ORIGINAL/**EXCHANGE**, EXCHANGE는 rollup 제외). `orders.status`는 ORIGINAL rollup 파생 |
+| `return_request` / `return_status_history` | returns(루트, #3) | **반품/교환 워크플로**(역방향 상태머신) + 전이 이력 | order_id·order_item_id·shipment_id·seller_id·member_id(ID참조) · type(RETURN/EXCHANGE) · status(REQUESTED→APPROVED→PICKED_UP→INSPECTED→REFUNDED/COMPLETED, REJECTED) · refund_amount·restock·exchange_option_id·exchange_shipment_id · `version` |
 | `address` | member | 저장 배송지 | member_id · is_default |
 | `payment` | payment | 주문당 결제(다중 PG·부분환불) | order_id(ID참조) · idempotency_key UNIQUE · provider · refunded_amount |
 | `settlement_entry` | settlement | **(결제 × 셀러)** 정산: 수수료·플랫폼수수료·할인 배분·지급 연결 | payment_id · seller_id · payout_id · gross/fee/net/platform_fee · fee_rate · provider |
@@ -173,7 +174,7 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 | `recommendation` | personalization | 멤버별 "나를위한" 사전계산 | member_id+product_id UNIQUE · score |
 | `product_cooccurrence` | personalization | "함께 산 상품" 사전계산 | reference_product_id+product_id UNIQUE · co_buy_count · score |
 
-### 5.3 스키마 진화 (Flyway 46개, 에포크별)
+### 5.3 스키마 진화 (Flyway 48개, 에포크별)
 
 | 에포크 | 마이그레이션 | 내용 |
 |---|---|---|
@@ -191,6 +192,7 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 | L 감사·이력 | V37~V41 | audit_log / 주문 멱등키 / order_status_history+송장 / 돈경로·정산일 인덱스 |
 | M 할인가·재고예약 | V42~V44 | product.original_price(#5) / stock_reservation+reserved(#2) / orders.version(낙관락) |
 | N 멀티셀러 배송(#1) | V45~V46 | shipment+shipment_status_history(셀러별 배송축) / orders 송장 컬럼 DROP(shipment로 이전) |
+| O 반품·교환(#3) | V47~V48 | order_item.RETURNED·shipment.delivered_at/kind(add-only) / return_request+return_status_history(역방향 워크플로) |
 
 ---
 
@@ -291,6 +293,29 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 
 ---
 
+### 6.9 반품 / 교환 — 역방향 워크플로 (#3)
+
+**문제**: 배송완료(DELIVERED)가 막다른 길이었다(그 뒤 상태 전이 없음). #1 shipment 축이 셀러 스코프를 열어준 위에, DELIVERED 이후의 역방향 흐름(반품 환불·교환 재출고)을 새 애그리거트로 도입. 오너 결정: **범위=반품+교환**, **환불 시점=수거·검수 확정 후**, **승인 주체=셀러 승인 + ADMIN 대행**.
+
+**모델** (`return_request` = 독립 애그리거트 루트, V48):
+- **애그리거트 경계**: 주문/항목/배송/셀러/회원을 **ID 참조**만(Payment·SettlementEntry 동형 — DDD). `ReturnRequest`가 상태 전이를 **엔티티 강제**(잘못된 순서·타입 409). "항목이 유효한가"의 단일 출처는 여전히 `OrderItem.status`, 이 엔티티 status는 **워크플로 진행용**.
+- **상태머신**(forward-only): REQUESTED → APPROVED → PICKED_UP → INSPECTED → **REFUNDED**(반품) / **COMPLETED**(교환). REJECTED는 요청 거부·검수 불합격 양쪽에서.
+- **자격 게이트**(`Order.ensureReturnable`): 항목 **ACTIVE** + 그 셀러 **원배송 DELIVERED** + 배송완료 후 **7일**(전자상거래법 기본). `deliveredAt`은 shipment DELIVERED 전이 시 비정규화 저장(이력 스캔 없이 O(1) 기한 판정). sellerId는 **서버가 항목에서 도출**(클라 입력 금지 — IDOR).
+
+**돈/재고 불변식** (환불 = 수거·검수 확정 후):
+- **flip-before-PG**: 검수확정 환불은 `OrderItem.markReturned()`(ACTIVE 가드)·상태전이 검증을 **PG 환불보다 먼저** 수행 → 환불 실패 시 전체 롤백(flip·재입고 무산). 환불액 = gross 아니라 **실효가**(소계 − 안분할인, `Order.effectivePriceOf`).
+- **정산 클로백 누수 fix**: 정산 후 전액환불로 Payment가 CANCELLED가 되면 역분개 후보에서 빠져 셀러 과다정산이 남던 것을, 역분개 후보를 **PAID + CANCELLED**(`getSettlementReversalCandidates`)로 확장해 교정. Payout net<0 → 400(다음 기간 이월 상계).
+- **교환 = revenue-neutral 옵션 스왑**: 원 `OrderItem`을 **ACTIVE로 유지**하고 optionId/size만 교체(`swapOption`) → `getSubtotal` 불변 → discountShares·정산 델타 0. (새 OrderItem을 만들면 discountShares basis가 이중계상되므로 금지.) 대체품은 `consumeForExchange`(품절 시 409로 전체 롤백 — 자동 환불 전환 금지) → 원품 `restoreOption`(옵션별 정확 복원) → **kind=EXCHANGE 재출고 shipment** 생성. EXCHANGE shipment는 rollup·항목 배송판정·일괄 전진에서 제외되므로 DELIVERED 주문이 교환 재출고로 **후퇴하지 않는다**.
+- **리뷰 자격**: 반품·취소한 항목은 리뷰 불가 — 자격 판정을 주문 상태(PURCHASED)만 보던 파생쿼리에서 **항목 status=ACTIVE**까지 보는 JPQL(`hasActivePurchase`)로 교정.
+
+**동시성**: 모든 상태/원장/재고 변경은 **부모 주문 비관락**(#1 P7 교훈, `findByIdForUpdate`) 아래서. 락 순서는 항상 **ORDER→RETURN**(데드락 회피, `findOrderIdById` 스칼라로 부모를 먼저 잡음). 요청 생성도 부모 락으로 구매자 더블클릭 중복요청을 직렬화. 교환의 두 옵션 행은 **id 오름차순 선(先)비관락**으로 미러 교환 간 데드락 예방(§7).
+
+**엔드포인트**: 구매자 `POST /api/orders/{id}/returns`·`GET /api/returns/me` / 셀러 콘솔 `PATCH /api/seller/me/returns/{id}/status`(자기 셀러만·`belongsToSeller`) / ADMIN `PATCH /api/orders/{id}/returns/{rid}/status`(대행·주문 매칭 404 가드).
+
+> 구현: 7-phase(토대 V47 → 애그리거트/상태머신 V48 → 워크플로/라우트/인가 → 환불 → 정산 무손상 → 교환 → 리뷰자격+적대적리뷰). **적대적 리뷰(6차원 find → 회의론 3인 verify)가 확정한 3종 교정**: ①교환 후 원배송 기준 재-반품으로 교환품+환불 이중지급(MED) → `create`에 "교환 완료 항목 재-반품 차단" 가드 ②ADMIN 대행 생성 시 소유자가 caller로 귀속(LOW) → `order.getMemberId()` 귀속 ③미러 교환 `product_option` 데드락(LOW) → 두 옵션 id 오름차순 선락. 검증: `ReturnRequestTest`(상태머신)·`ReturnWorkflowTest`(자격·IDOR·ADMIN 귀속)·`ReturnRefundTest`(실효가·flip 순서)·`ReturnSettlementReversalTest`(클로백)·`ReturnExchangeTest`(스왑·양방향 재고·품절 롤백·재-반품 차단)·`ReviewEligibilityQueryTest`. **v1 유예**(결정 필요): 하자 반품 write-off·교환품 반품·수량 단위 부분반품.
+
+---
+
 ## 7. 동시성 제어 — 세 가지 전략
 
 | 문제 | 전략 | 이유 |
@@ -300,6 +325,8 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 | **shipment 상태 rollup** (#1, 파생 상태 + 부작용) | **비관적 쓰기 락**(부모 주문 `findByIdForUpdate`, PESSIMISTIC_WRITE + READ_COMMITTED) | `Order.status`가 shipment rollup 파생인데 rollup write가 **조건부**(값 바뀔 때만)라, 서로 다른 자식(shipment/항목)을 동시에 바꾸는 두 tx가 각자 형제를 stale로 읽어 둘 다 "변화 없음"으로 커밋되는 lost update가 난다. 상태/원장 변경 **모든 경로**(전진·취소·ADMIN 일괄·백필)가 부모 주문을 같은 락으로 잡아 **부작용(PG 환불) 이전에** 직렬화 — 늦은 tx는 로드 시점에 막혀 형제의 최신 상태로 rollup을 재계산. 취소는 PG 환불이 있어 낙관락 재시도가 부적합(재시도=이중환불)이라 비관락 채택 |
 
 > **왜 세 번째 전략인가**: 낙관락(재고)·원자 UPDATE(쿠폰)로 안 되는 케이스 — 파생 상태의 조건부 write + 외부 부작용(환불)이 겹친다. 적대적 리뷰가 "worker만 락, 취소·일괄·백필 무락"의 락 비대칭이 stale-sibling lost update를 냄을 확정 → 전 경로 비관락 통일로 교정. 검증: `ShipmentConcurrencyTest`(전진×취소→DELIVERED·취소×취소→CANCELLED 수렴)·`PaymentCancelConcurrencyTest`(두 환불 누적=결제액).
+
+> **반품/교환(#3)도 같은 전략**: 모든 반품 전이가 부모 주문을 `findByIdForUpdate`로 먼저 잡아 취소·배송과 직렬화한다(락 순서 항상 **ORDER→RETURN** — 부모 orderId를 스칼라로 먼저 조회해 데드락 회피). 추가로 **교환**은 원/새 `product_option` 두 행을 순차 UPDATE하므로, 서로 다른 주문의 미러 교환(같은 두 옵션·반대 방향)이 행 락을 역순으로 잡아 데드락날 수 있다 → 두 옵션을 **id 오름차순으로 먼저 비관락**해 획득 순서를 통일한다(재고 원자 UPDATE 경로의 락 순서 철학과 동형).
 
 **분산 락**(`global/lock`, ADR-0015)은 포트 + 어댑터로 토글한다: NoOp(기본) / Redis DIY(`SET NX PX` + Lua 원자 해제) / Redisson(`RLock` 워치독). 쿠폰 발급의 *정합*은 위 DB 원자 UPDATE가 이미 보장하므로 분산 락은 **멀티 인스턴스 직렬화를 위한 advisory**이고, DB가 펜싱 백스톱 역할을 한다. `MemberCouponClaimService`가 이 포트로 claim 트랜잭션을 감싼다.
 
@@ -362,7 +389,8 @@ push/PR(`dev`·`main`) 시 2잡: **backend**(JDK 21, `gradlew test`, H2 — 시�
 | **brand** | `GET`(public) · `POST·PUT·DELETE` · `PUT /{id}/seller`(ADMIN) |
 | **cart** | `POST·GET /api/carts/items|carts` · `PUT·DELETE /items/{optionId}`(auth) |
 | **address** | `GET·POST /api/addresses` · `PUT·DELETE /{id}` · `PUT /{id}/default`(auth) |
-| **order** | `POST /api/orders` · `/checkout` · `/coupon-preview` · `GET /api/orders`(내것) · `/{id}` · `POST /{id}/cancel` · `/items/{itemId}/cancel`(부분) · `GET /admin`·`PATCH /{id}/status`(ADMIN 일괄 배송) · `PATCH /{id}/shipments/{sid}/status`(ADMIN 셀러별/플랫폼 배송, #1) |
+| **order** | `POST /api/orders` · `/checkout` · `/coupon-preview` · `GET /api/orders`(내것) · `/{id}` · `POST /{id}/cancel` · `/items/{itemId}/cancel`(부분) · `GET /admin`·`PATCH /{id}/status`(ADMIN 일괄 배송) · `PATCH /{id}/shipments/{sid}/status`(ADMIN 셀러별/플랫폼 배송, #1) · `POST /{id}/returns`(반품/교환 요청, #3) · `PATCH /{id}/returns/{rid}/status`(ADMIN 대행, #3) |
+| **returns** (#3) | `GET /api/returns/me`(구매자 내 반품/교환) · 셀러 `GET /api/seller/me/returns`(내 셀러 목록) · `PATCH /api/seller/me/returns/{id}/status`(승인/거부/수거/검수/환불·교환 확정) |
 | **payment** | `POST /api/payments`(auth, 멱등키) |
 | **coupon** | `POST /api/coupons` · `/{id}/issue` · `GET`(ADMIN) · `GET /api/member-coupons/me|claimable` · `POST /claim/{id}`(auth) |
 | **seller** | `GET·POST·PUT /api/sellers` · `suspend·activate·owner`(ADMIN) · `GET /api/seller/me|settlements|summary|payouts|orders`(SELLER) · `PATCH /api/seller/me/shipments/{id}/status`(SELLER 자기 출고, #1) |

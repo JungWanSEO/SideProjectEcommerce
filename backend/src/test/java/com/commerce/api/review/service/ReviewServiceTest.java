@@ -64,7 +64,7 @@ class ReviewServiceTest {
     void create_success() {
         ReviewCreateRequest request = new ReviewCreateRequest(5, "핏이 좋아요", "/products/tee.svg");
         given(productRepository.existsById(PRODUCT_ID)).willReturn(true);
-        given(orderRepository.existsByMemberIdAndStatusInAndOrderItems_ProductId(
+        given(orderRepository.hasActivePurchase(
                 MEMBER_ID, OrderStatus.PURCHASED, PRODUCT_ID)).willReturn(true);
         given(reviewRepository.existsByMemberIdAndProductId(MEMBER_ID, PRODUCT_ID)).willReturn(false);
         given(reviewRepository.save(any(Review.class)))
@@ -84,7 +84,7 @@ class ReviewServiceTest {
     void create_notPurchased() {
         ReviewCreateRequest request = new ReviewCreateRequest(5, "핏이 좋아요", null);
         given(productRepository.existsById(PRODUCT_ID)).willReturn(true);
-        given(orderRepository.existsByMemberIdAndStatusInAndOrderItems_ProductId(
+        given(orderRepository.hasActivePurchase(
                 MEMBER_ID, OrderStatus.PURCHASED, PRODUCT_ID)).willReturn(false);
 
         assertThatThrownBy(() -> reviewService.create(MEMBER_ID, PRODUCT_ID, request))
@@ -99,7 +99,7 @@ class ReviewServiceTest {
     void create_duplicate() {
         ReviewCreateRequest request = new ReviewCreateRequest(4, "또 샀어요", null);
         given(productRepository.existsById(PRODUCT_ID)).willReturn(true);
-        given(orderRepository.existsByMemberIdAndStatusInAndOrderItems_ProductId(
+        given(orderRepository.hasActivePurchase(
                 MEMBER_ID, OrderStatus.PURCHASED, PRODUCT_ID)).willReturn(true);
         given(reviewRepository.existsByMemberIdAndProductId(MEMBER_ID, PRODUCT_ID)).willReturn(true);
 

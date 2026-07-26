@@ -16,6 +16,9 @@ import com.commerce.api.order.dto.ShipmentStatusUpdateRequest;
 import com.commerce.api.order.service.OrderService;
 import com.commerce.api.order.service.ShipmentService;
 import com.commerce.api.payment.service.PaymentService;
+import com.commerce.api.returns.dto.ReturnResponse;
+import com.commerce.api.returns.dto.ReturnStatusUpdateRequest;
+import com.commerce.api.returns.service.ReturnService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -52,6 +55,7 @@ public class OrderController {
     private final OrderService orderService;
     private final PaymentService paymentService;   // 취소+환불 오케스트레이션은 결제 측에 위임(순환 의존 회피)
     private final ShipmentService shipmentService;   // 배송 건(shipment) 단위 전진(#1 c안)
+    private final ReturnService returnService;       // 반품/교환 ADMIN 대행(#3)
 
     @Operation(summary = "주문 생성", description = "상품 ID·수량 목록으로 주문한다. 주문자는 로그인 사용자. 주문은 결제 대기(PENDING)로 생성되며 주문 시점 가격을 스냅샷한다. 재고 차감은 결제 승인 시점에 일어난다.")
     @PostMapping
@@ -180,5 +184,18 @@ public class OrderController {
                 orderId, shipmentId, request.status(), SecurityUtil.getCurrentMemberId(),
                 request.courier(), request.trackingNumber());
         return ResponseEntity.ok(ApiResponse.success("배송 상태가 변경되었습니다.", response));
+    }
+
+    @Operation(summary = "반품/교환 처리 (ADMIN 대행)",
+            description = "운영자가 특정 주문의 반품·교환을 대행 처리한다(셀러 대신). 경로 주문과 반품이 안 맞으면 404, "
+                    + "잘못된 전이면 409. 환불/교환 확정(REFUND·COMPLETE)은 후속 단계.")
+    @Auditable(action = "RETURN_ADVANCE", targetType = "RETURN", targetId = "#returnId")
+    @PatchMapping("/{orderId}/returns/{returnId}/status")
+    public ResponseEntity<ApiResponse<ReturnResponse>> advanceReturn(
+            @PathVariable Long orderId, @PathVariable Long returnId,
+            @Valid @RequestBody ReturnStatusUpdateRequest request) {
+        ReturnResponse response = returnService.advanceForAdmin(
+                orderId, returnId, request, SecurityUtil.getCurrentMemberId());
+        return ResponseEntity.ok(ApiResponse.success("반품 상태가 변경되었습니다.", response));
     }
 }

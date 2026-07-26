@@ -106,6 +106,42 @@ public class StockReservationService {
         }
     }
 
+    /**
+     * 교환(#3 P6) — 반환된 <b>원 옵션</b>의 실재고를 복원한다. undoForOrderItem은 항목의 모든 예약을 되돌려 옵션 스왑 후
+     * 새 옵션까지 건드리므로, 원 optionId 예약(CONSUMED)만 골라 restore + RELEASED. 예약행이 없으면(레거시) 직접 복원.
+     */
+    @Transactional
+    public void restoreOption(Long orderItemId, Long optionId, int quantity) {
+        List<StockReservation> found = stockReservationRepository.findByOrderItemIdAndOptionId(orderItemId, optionId);
+        if (found.isEmpty()) {
+            productOptionRepository.restore(optionId, quantity);   // 레거시 폴백(예약행 없음)
+            return;
+        }
+        for (StockReservation r : found) {
+            if (r.getStatus() == StockReservationStatus.CONSUMED) {
+                productOptionRepository.restore(optionId, quantity);
+                r.markReleased();
+            }
+        }
+    }
+
+    /**
+     * 교환(#3 P6) — 대체품(새 옵션) 재고를 예약→즉시 소진(실차감)하고 CONSUMED 예약 행을 남긴다(이후 재반품 시
+     * undoForOrderItem이 이 행으로 새 옵션을 정확히 복원). 대체품 품절이면 409로 교환 확정을 롤백한다(자동 환불 전환 금지).
+     */
+    @Transactional
+    public void consumeForExchange(Long orderId, Long orderItemId, Long optionId, int quantity, LocalDateTime expiresAt) {
+        if (productOptionRepository.reserve(optionId, quantity) == 0) {
+            throw new BusinessException(HttpStatus.CONFLICT, "교환 대체품 재고가 부족합니다. (옵션 id: " + optionId + ")");
+        }
+        if (productOptionRepository.consume(optionId, quantity) == 0) {
+            throw new BusinessException(HttpStatus.CONFLICT, "교환 대체품 소진에 실패했습니다. (옵션 id: " + optionId + ")");
+        }
+        StockReservation res = StockReservation.active(orderId, orderItemId, optionId, quantity, expiresAt);
+        res.markConsumed();   // 예약 즉시 실차감 전환 — 결제 없는 교환 출고
+        stockReservationRepository.save(res);
+    }
+
     private List<StockReservation> activeOf(Long orderId) {
         return stockReservationRepository.findByOrderIdAndStatus(orderId, StockReservationStatus.ACTIVE);
     }

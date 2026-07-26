@@ -161,7 +161,9 @@ public class SettlementService {
         int reversed = 0;
         long totalReversedNet = 0;
 
-        for (PaymentResponse payment : paymentService.getPaidPayments()) {
+        // 역분개 후보 = 정산된 모든 결제(PAID + CANCELLED). 반품 전액환불로 CANCELLED된 결제까지 포함해야
+        //   역분개가 누락되지 않는다(#3 P5 클로백 누수 fix). 정방향 run()은 계속 PAID만.
+        for (PaymentResponse payment : paymentService.getSettlementReversalCandidates()) {
             List<SettlementEntry> existing = settlementRepository.findByPaymentId(payment.id());
             if (existing.isEmpty()) {
                 continue;   // 아직 정산 안 된 결제는 run()의 몫

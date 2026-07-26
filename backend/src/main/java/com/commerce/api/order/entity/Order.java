@@ -320,12 +320,68 @@ public class Order extends BaseEntity {
         return shipment == null || shipment.getStatus() == ShipmentStatus.PAID;
     }
 
-    /** 이 항목이 속한 셀러의 shipment(없으면 null — PENDING). null(플랫폼 버킷) null-safe 매칭. */
+    /** 이 항목이 속한 셀러의 <b>원배송</b> shipment(없으면 null — PENDING). 교환 재출고(EXCHANGE)는 제외(#3). null-safe 매칭. */
     private Shipment shipmentForItem(OrderItem item) {
         return shipments.stream()
+                .filter(Shipment::isOriginal)
                 .filter(s -> s.belongsToSeller(item.getSellerId()))
                 .findFirst()
                 .orElse(null);
+    }
+
+    /**
+     * 반품/교환 요청 자격 검증(#3 P3) — 통과하면 요청 생성에 필요한 스냅샷(shipmentId·sellerId·quantity)을 돌려준다.
+     * 게이트: 항목이 <b>ACTIVE</b>(이미 취소·반품된 항목 차단 — 과다환불 방지), 그 셀러 원배송이 <b>DELIVERED</b>,
+     * 배송완료 후 {@code windowDays}일 이내. deliveredAt이 null(레거시 이력 부재)이면 기한 판정 유예(허용).
+     */
+    public ReturnableItem ensureReturnable(Long orderItemId, int windowDays) {
+        OrderItem item = orderItems.stream()
+                .filter(i -> orderItemId.equals(i.getId()))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "주문 항목을 찾을 수 없습니다."));
+        if (!item.isActive()) {
+            throw new BusinessException(HttpStatus.CONFLICT,
+                    "반품할 수 없는 항목입니다. (현재: " + item.getStatus() + ")");
+        }
+        Shipment shipment = shipmentForItem(item);
+        if (shipment == null || shipment.getStatus() != ShipmentStatus.DELIVERED) {
+            throw new BusinessException(HttpStatus.CONFLICT, "배송 완료된 항목만 반품/교환할 수 있습니다.");
+        }
+        java.time.LocalDateTime deliveredAt = shipment.getDeliveredAt();
+        if (deliveredAt != null && deliveredAt.plusDays(windowDays).isBefore(java.time.LocalDateTime.now())) {
+            throw new BusinessException(HttpStatus.CONFLICT, "반품 기한(" + windowDays + "일)이 지났습니다.");
+        }
+        return new ReturnableItem(shipment.getId(), item.getSellerId(), item.getQuantity());
+    }
+
+    /** 반품 요청 생성에 필요한 주문 측 스냅샷(#3). sellerId는 여기서 서버가 도출(클라 입력 금지 — IDOR 방지). */
+    public record ReturnableItem(Long shipmentId, Long sellerId, int quantity) {
+    }
+
+    /**
+     * 교환 재출고 shipment를 추가한다(#3 P6, kind=EXCHANGE). rollup·항목 배송 판정에서 제외되므로 DELIVERED 주문이
+     * 후퇴하지 않는다. 반환한 shipment의 id는 cascade flush 후 채워진다(호출자가 flush 후 사용).
+     */
+    public Shipment addExchangeShipment(Long sellerId) {
+        Shipment exchange = Shipment.forExchange(this, sellerId);
+        this.shipments.add(exchange);
+        return exchange;
+    }
+
+    /** 주문 항목 조회 — 없으면 404(#3 반품 확정 등). */
+    public OrderItem requireItem(Long orderItemId) {
+        return orderItems.stream()
+                .filter(i -> orderItemId.equals(i.getId()))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "주문 항목을 찾을 수 없습니다."));
+    }
+
+    /**
+     * 항목 실효가 = 소계 − 안분 할인({@link #discountShares} 단일 출처). 환불액의 단일 출처 — 취소·반품이 같은 값을 써야
+     * "Σ실효가=결제액" 불변식이 유지된다(과다환불·대사 불일치 방지).
+     */
+    public long effectivePriceOf(OrderItem item) {
+        return item.getSubtotal() - discountShares().getOrDefault(item, 0L);
     }
 
     /** 결제 완료 처리 (PENDING → PAID). 결제 대기 상태가 아니면 예외. 결제 시점에 셀러별 shipment를 팬아웃 생성한다(#1 P2). */
@@ -413,7 +469,8 @@ public class Order extends BaseEntity {
 
         int advanced = 0;
         for (Shipment s : shipments) {
-            if (s.isActive() && s.getStatus() == prereq) {
+            // 교환 재출고(EXCHANGE)는 ADMIN 일괄 전진에서 제외 — 재출고건은 shipmentId 직접 경로로만 전이한다(#3).
+            if (s.isOriginal() && s.isActive() && s.getStatus() == prereq) {
                 s.advanceShipping(target, changedBy, courier, trackingNumber);
                 advanced++;
             }
@@ -460,9 +517,11 @@ public class Order extends BaseEntity {
     }
 
     private OrderStatus rollupStatus() {
-        List<Shipment> active = shipments.stream().filter(Shipment::isActive).toList();
+        // 교환 재출고(EXCHANGE)는 주문 상태 rollup에서 제외 — 안 그러면 DELIVERED 주문이 재출고로 SHIPPING 후퇴(#3).
+        List<Shipment> active = shipments.stream()
+                .filter(Shipment::isOriginal).filter(Shipment::isActive).toList();
         if (active.isEmpty()) {
-            return OrderStatus.CANCELLED;   // 모든 shipment 취소 → 주문 취소
+            return OrderStatus.CANCELLED;   // 모든 원배송 shipment 취소 → 주문 취소
         }
         if (active.stream().allMatch(s -> s.getStatus() == ShipmentStatus.DELIVERED)) {
             return OrderStatus.DELIVERED;
