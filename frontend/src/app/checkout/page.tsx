@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { apiGet, apiPost } from "@/lib/api";
-import { Cart, Address, Order, CouponPreview, MemberCoupon } from "@/lib/types";
+import { Cart, Address, Order, CouponPreview, MemberCoupon, ShippingPolicy } from "@/lib/types";
 import { useAuth } from "@/lib/auth";
 import { loginHref } from "@/lib/useRequireAuth";
 import Badge from "@/components/ui/Badge";
@@ -34,6 +34,7 @@ export default function CheckoutPage() {
   const [couponError, setCouponError] = useState<string | null>(null);
   const [applyingCoupon, setApplyingCoupon] = useState(false);
   const [wallet, setWallet] = useState<MemberCoupon[]>([]); // 내 쿠폰함(사용 가능한 발급 쿠폰)
+  const [shippingPolicy, setShippingPolicy] = useState<ShippingPolicy | null>(null); // 배송비 정책(#4)
 
   /**
    * 멱등키 — 이 체크아웃 화면에서 딱 한 번 발급하고, 재시도(더블클릭·네트워크 타임아웃 후 재요청)에도 같은 값을 보낸다.
@@ -53,13 +54,15 @@ export default function CheckoutPage() {
       apiGet<Cart>("/api/carts"),
       apiGet<Address[]>("/api/addresses"),
       apiGet<MemberCoupon[]>("/api/member-coupons/me"),
+      apiGet<ShippingPolicy>("/api/orders/shipping-policy"),
     ])
-      .then(([c, a, w]) => {
+      .then(([c, a, w, sp]) => {
         setCart(c);
         setAddresses(a);
         const def = a.find((x) => x.isDefault) ?? a[0];
         setSelectedId(def ? def.id : null);
         setWallet(w.filter((mc) => mc.usable)); // 사용 가능한 것만 선택지로
+        setShippingPolicy(sp);
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
@@ -197,6 +200,18 @@ export default function CheckoutPage() {
 
   const items = cart?.items ?? [];
   const total = items.reduce((s, it) => s + it.subtotal, 0);
+  // 배송비(#4): 쿠폰 적용 시 서버 프리뷰값, 아니면 정책으로 계산(무료임계 기준 = 할인 후 상품금액 = 쿠폰 없으면 total).
+  const afterDiscount = coupon ? coupon.totalPrice - coupon.discountAmount : total;
+  const shippingFee = coupon
+    ? coupon.shippingFee
+    : shippingPolicy
+      ? afterDiscount >= shippingPolicy.freeThreshold
+        ? 0
+        : shippingPolicy.flatFee
+      : 0;
+  const payable = coupon ? coupon.payableAmount : total + shippingFee;
+  const freeShippingGap =
+    shippingPolicy && shippingFee > 0 ? shippingPolicy.freeThreshold - afterDiscount : 0;
 
   if (items.length === 0) {
     return (
@@ -368,11 +383,20 @@ export default function CheckoutPage() {
             <span className="font-medium text-sage-600">−{coupon.discountAmount.toLocaleString()}원</span>
           </div>
         )}
+        <div className="mt-1.5 flex justify-between text-sm">
+          <span className="text-muted">배송비</span>
+          <span className="text-ink">
+            {shippingFee === 0 ? "무료" : `${shippingFee.toLocaleString()}원`}
+          </span>
+        </div>
+        {freeShippingGap > 0 && (
+          <p className="mt-1 text-xs text-sage-600">
+            {freeShippingGap.toLocaleString()}원 더 담으면 무료배송
+          </p>
+        )}
         <div className="mt-3 flex items-center justify-between border-t border-line pt-3">
           <span className="font-medium text-ink">최종 결제 예정</span>
-          <span className="text-2xl font-bold text-ink">
-            {(coupon ? coupon.payableAmount : total).toLocaleString()}원
-          </span>
+          <span className="text-2xl font-bold text-ink">{payable.toLocaleString()}원</span>
         </div>
       </div>
 
