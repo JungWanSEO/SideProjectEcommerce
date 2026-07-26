@@ -154,7 +154,7 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 | `product` | product(루트) | 판매 상품 + 비정규화 신호 카운터 | brand_id · category_id · status · image_url · rating_count/sum · wishlist_count |
 | `product_option` | product(자식) | **SKU**(사이즈+재고) + 낙관적 락 | FK→product · `version` |
 | `product_image` | product(자식) | 이미지 갤러리 | FK→product · sort_order |
-| `cart`/`cart_item` | cart | 멤버당 장바구니 | cart.member_id UNIQUE · option_id |
+| `cart`/`cart_item` | cart | 회원(member_id) 또는 게스트(cart_token) 장바구니(#7) | member_id UNIQUE(nullable) · `cart_token` UNIQUE(게스트·nullable) · option_id |
 | `orders` | order(루트) | 주문 헤더: 상태머신·배송 스냅샷·쿠폰 스냅샷 | status(PENDING/PAID/SHIPPING/DELIVERED/CANCELLED) · 배송 컬럼 · discount/coupon 스냅샷 · `shipping_fee`(#4, 플랫폼 수익) |
 | `order_item` | order(자식) | 라인: 가격·이름·사이즈 + brand/seller **스냅샷** | FK→orders · status(ACTIVE/CANCELLED/**RETURNED**, 부분환불·반품축) |
 | `shipment` / `shipment_status_history` | order(자식, #1·#3) | **셀러별 배송 단위**(상태·송장) + 전이 이력 | order_id · seller_id(null=플랫폼) · status(PAID/SHIPPING/DELIVERED/CANCELLED) · `version` · courier/tracking · `delivered_at`(반품 기한 기산) · `kind`(ORIGINAL/**EXCHANGE**, EXCHANGE는 rollup 제외). `orders.status`는 ORIGINAL rollup 파생 |
@@ -174,7 +174,7 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 | `recommendation` | personalization | 멤버별 "나를위한" 사전계산 | member_id+product_id UNIQUE · score |
 | `product_cooccurrence` | personalization | "함께 산 상품" 사전계산 | reference_product_id+product_id UNIQUE · co_buy_count · score |
 
-### 5.3 스키마 진화 (Flyway 50개, 에포크별)
+### 5.3 스키마 진화 (Flyway 51개, 에포크별)
 
 | 에포크 | 마이그레이션 | 내용 |
 |---|---|---|
@@ -194,6 +194,7 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 | N 멀티셀러 배송(#1) | V45~V46 | shipment+shipment_status_history(셀러별 배송축) / orders 송장 컬럼 DROP(shipment로 이전) |
 | O 반품·교환(#3) | V47~V48 | order_item.RETURNED·shipment.delivered_at/kind(add-only) / return_request+return_status_history(역방향 워크플로) |
 | P 배송비(#4) | V49~V50 | orders.shipping_fee(스냅샷·플랫폼 수익) / settlement_entry.shipping(플랫폼 배송비 엔트리 플래그) |
+| Q 게스트 카트(#7) | V51 | cart.member_id NULL 허용 + cart_token UNIQUE(게스트 토큰 카트·로그인 병합) |
 
 ---
 
@@ -339,6 +340,27 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 
 ---
 
+### 6.11 게스트 장바구니 — 서버 토큰 카트 + 로그인 병합 (#7)
+
+**문제**: 비로그인 사용자가 "담기"를 누르면 즉시 `/login`으로 튕겨(전환 킬러). 오너 결정: **서버 토큰 카트 + 로그인 시 회원 카트로 병합(수량 합산)**, 기존 `/api/carts` 엔드포인트를 게스트도 쓰게 확장.
+
+**모델** (`cart`를 회원/게스트 공용으로, V51):
+- Cart는 `memberId`(로그인·unique) 또는 `cartToken`(게스트·unique) — **정확히 하나만** 설정. 게스트 토큰은 서버가 발급한 **추측불가 UUID**를 **httpOnly 쿠키**(`cart_token`, 30일)에 담는다(JS로 못 읽어 다른 게스트 카트 탈취=IDOR 방지). `member_id` NULL 허용·`cart_token` UNIQUE는 MySQL의 NULL-중복 허용에 기대(회원 카트 다수가 cart_token=NULL, 게스트 카트 다수가 member_id=NULL 공존).
+- **소유 판별**은 컨트롤러가 `CartOwner`(memberId | token)로 만들어 서비스에 넘긴다: 로그인이면 SecurityContext의 memberId(게스트 토큰이 함께 와도 **회원 우선**), 아니면 `cart_token` 쿠키. `/api/carts/**`는 `permitAll`이지만 JWT 필터가 토큰이 있으면 컨텍스트를 채우므로 **회원 카트는 memberId로만 접근**된다(토큰으로 남의 회원 카트 접근 불가).
+- 담기 시 게스트가 토큰이 없으면 서버가 발급해 `Set-Cookie`로 내려주고, 있으면 재사용.
+
+**로그인 병합** (`CartService.mergeGuestIntoMember`):
+- 폼 로그인(`AuthController.login`)·소셜 로그인(`OAuth2LoginSuccessHandler`) **양쪽** 모두, 로그인 성공 후 `cart_token` 쿠키가 있으면 게스트 카트 항목을 회원 카트로 **합산**(같은 옵션이면 수량 더함)하고 게스트 카트를 삭제한 뒤 쿠키를 지운다. **best-effort** — 병합이 실패해도 로그인 자체는 성립(게스트 카트 잔존 → 다음 로그인에 재시도).
+- 체크아웃(`OrderProcessor.checkout`)은 여전히 `findByMemberId`(회원 전용) — 게스트는 로그인 후에만 주문. FE는 게스트 장바구니를 보여주되 "로그인하고 주문하기"로 유도한다.
+
+**적대적 리뷰 교정**: 소셜 로그인 경로에 병합이 누락돼 있던 것(LOW)을 `OAuth2LoginSuccessHandler`에도 배선. **v1 한계**(문서화): 쿠키 없는 게스트의 "첫 담기 동시 요청"이 서로 다른 토큰 2개를 발급해 한쪽 카트가 고아가 되는 레이스(쿠키리스 첫 요청 동시성의 본질적 한계 — FE 담기 버튼 `adding` 가드가 동일 페이지 더블클릭은 막음).
+
+**엔드포인트**: 기존 `/api/carts` 4종을 게스트도 사용(담기 시 토큰 쿠키 발급). FE=상품상세 담기 로그인 게이트 제거·장바구니 게스트 조회.
+
+> 검증: `CartServiceTest`(병합 합산·새 회원카트·no-op)·`CartControllerTest`(게스트 담기 쿠키 발급)·`GuestCartTest`(게스트 담기 토큰카트·로그인 병합 e2e)·`OAuth2LoginSuccessHandlerTest`(소셜 병합).
+
+---
+
 ## 7. 동시성 제어 — 세 가지 전략
 
 | 문제 | 전략 | 이유 |
@@ -410,7 +432,7 @@ push/PR(`dev`·`main`) 시 2잡: **backend**(JDK 21, `gradlew test`, H2 — 시�
 | **product** | `GET /api/products`(검색/필터/정렬) · `/feed`(커서) · `/{id}`(public) · `POST·PUT /api/products` · 옵션 `POST·PUT·DELETE` · `PATCH /{id}/status` · 이미지 `POST·DELETE`(ADMIN) |
 | **category** | `GET`(public) · `POST·PUT·DELETE`(ADMIN, 2단계) |
 | **brand** | `GET`(public) · `POST·PUT·DELETE` · `PUT /{id}/seller`(ADMIN) |
-| **cart** | `POST·GET /api/carts/items|carts` · `PUT·DELETE /items/{optionId}`(auth) |
+| **cart** | `POST·GET /api/carts/items|carts` · `PUT·DELETE /items/{optionId}` — **로그인·게스트 공통**(#7, 게스트는 cart_token 쿠키·로그인 시 병합) |
 | **address** | `GET·POST /api/addresses` · `PUT·DELETE /{id}` · `PUT /{id}/default`(auth) |
 | **order** | `POST /api/orders` · `/checkout` · `/coupon-preview` · `GET /shipping-policy`(배송비 정책, #4) · `GET /api/orders`(내것) · `/{id}` · `POST /{id}/cancel` · `/items/{itemId}/cancel`(부분) · `GET /admin`·`PATCH /{id}/status`(ADMIN 일괄 배송) · `PATCH /{id}/shipments/{sid}/status`(ADMIN 셀러별/플랫폼 배송, #1) · `POST /{id}/returns`(반품/교환 요청, #3) · `PATCH /{id}/returns/{rid}/status`(ADMIN 대행, #3) |
 | **returns** (#3) | `GET /api/returns/me`(구매자 내 반품/교환) · 셀러 `GET /api/seller/me/returns`(내 셀러 목록) · `PATCH /api/seller/me/returns/{id}/status`(승인/거부/수거/검수/환불·교환 확정) |
