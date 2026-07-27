@@ -48,6 +48,7 @@ public class ReturnService {
     private final PaymentService paymentService;              // 반품 환불(#3 P4) — returns→payment 단방향
     private final StockReservationService stockReservationService;   // 반품 재입고·교환 재고(#3 P4/P6) — returns→product
     private final ProductOptionRepository productOptionRepository;   // 교환 대체 옵션 검증(#3 P6)
+    private final ReturnEventEmitter returnEventEmitter;   // 상태 전이 → 구매자 알림 이벤트(#6 P2c)
 
     /**
      * 구매자 반품/교환 요청 생성. 부모 주문 비관락으로 중복요청을 직렬화하고, 대상 항목 자격(ACTIVE·배송완료·기한)을
@@ -121,6 +122,8 @@ public class ReturnService {
             case REFUND -> refund(locked.order(), r, changedBy);
             case COMPLETE -> exchange(locked.order(), r, changedBy);
         }
+        // 전이 성공 후 구매자 알림 이벤트(#6 P2c) — 같은 트랜잭션이라 상태 변경과 원자적. 전이가 예외로 막히면 발행도 롤백.
+        returnEventEmitter.emitStatusChanged(r);
     }
 
     /**
