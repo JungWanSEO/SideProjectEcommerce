@@ -156,9 +156,9 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 | `product_image` | product(자식) | 이미지 갤러리 | FK→product · sort_order |
 | `cart`/`cart_item` | cart | 회원(member_id) 또는 게스트(cart_token) 장바구니(#7) | member_id UNIQUE(nullable) · `cart_token` UNIQUE(게스트·nullable) · option_id |
 | `orders` | order(루트) | 주문 헤더: 상태머신·배송 스냅샷·쿠폰 스냅샷 | status(PENDING/PAID/SHIPPING/DELIVERED/CANCELLED) · 배송 컬럼 · discount/coupon 스냅샷 · `shipping_fee`(#4, 플랫폼 수익) |
-| `order_item` | order(자식) | 라인: 가격·이름·사이즈 + brand/seller **스냅샷** | FK→orders · status(ACTIVE/CANCELLED/**RETURNED**, 부분환불·반품축) |
+| `order_item` | order(자식) | 라인: 가격·이름·사이즈 + brand/seller **스냅샷** | FK→orders · status(ACTIVE/CANCELLED/**RETURNED**, 부분환불·반품축) · `cancel_reason`(#8, 취소 사유 taxonomy·nullable·기록집계용) |
 | `shipment` / `shipment_status_history` | order(자식, #1·#3) | **셀러별 배송 단위**(상태·송장) + 전이 이력 | order_id · seller_id(null=플랫폼) · status(PAID/SHIPPING/DELIVERED/CANCELLED) · `version` · courier/tracking · `delivered_at`(반품 기한 기산) · `kind`(ORIGINAL/**EXCHANGE**, EXCHANGE는 rollup 제외). `orders.status`는 ORIGINAL rollup 파생 |
-| `return_request` / `return_status_history` | returns(루트, #3) | **반품/교환 워크플로**(역방향 상태머신) + 전이 이력 | order_id·order_item_id·shipment_id·seller_id·member_id(ID참조) · type(RETURN/EXCHANGE) · status(REQUESTED→APPROVED→PICKED_UP→INSPECTED→REFUNDED/COMPLETED, REJECTED) · refund_amount·restock·exchange_option_id·exchange_shipment_id · `version` |
+| `return_request` / `return_status_history` | returns(루트, #3) | **반품/교환 워크플로**(역방향 상태머신) + 전이 이력 | order_id·order_item_id·shipment_id·seller_id·member_id(ID참조) · type(RETURN/EXCHANGE) · status(REQUESTED→APPROVED→PICKED_UP→INSPECTED→REFUNDED/COMPLETED, REJECTED) · refund_amount·restock·exchange_option_id·exchange_shipment_id · `reason_code`(#8, 반품 사유 taxonomy·nullable·기록집계용) · `version` |
 | `address` | member | 저장 배송지 | member_id · is_default |
 | `payment` | payment | 주문당 결제(다중 PG·부분환불) | order_id(ID참조) · idempotency_key UNIQUE · provider · refunded_amount |
 | `settlement_entry` | settlement | **(결제 × 셀러)** 정산: 수수료·플랫폼수수료·할인 배분·지급 연결 | payment_id · seller_id · payout_id · gross/fee/net/platform_fee · fee_rate · provider · `shipping`(#4, 플랫폼 배송비 엔트리 표시) |
@@ -174,7 +174,7 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 | `recommendation` | personalization | 멤버별 "나를위한" 사전계산 | member_id+product_id UNIQUE · score |
 | `product_cooccurrence` | personalization | "함께 산 상품" 사전계산 | reference_product_id+product_id UNIQUE · co_buy_count · score |
 
-### 5.3 스키마 진화 (Flyway 51개, 에포크별)
+### 5.3 스키마 진화 (Flyway 52개, 에포크별)
 
 | 에포크 | 마이그레이션 | 내용 |
 |---|---|---|
@@ -195,6 +195,7 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 | O 반품·교환(#3) | V47~V48 | order_item.RETURNED·shipment.delivered_at/kind(add-only) / return_request+return_status_history(역방향 워크플로) |
 | P 배송비(#4) | V49~V50 | orders.shipping_fee(스냅샷·플랫폼 수익) / settlement_entry.shipping(플랫폼 배송비 엔트리 플래그) |
 | Q 게스트 카트(#7) | V51 | cart.member_id NULL 허용 + cart_token UNIQUE(게스트 토큰 카트·로그인 병합) |
+| R 취소·환불 사유(#8) | V52 | order_item.cancel_reason·return_request.reason_code(구조화 사유 taxonomy·add-only·nullable·기록집계 전용) |
 
 ---
 
@@ -358,6 +359,22 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 **엔드포인트**: 기존 `/api/carts` 4종을 게스트도 사용(담기 시 토큰 쿠키 발급). FE=상품상세 담기 로그인 게이트 제거·장바구니 게스트 조회.
 
 > 검증: `CartServiceTest`(병합 합산·새 회원카트·no-op)·`CartControllerTest`(게스트 담기 쿠키 발급)·`GuestCartTest`(게스트 담기 토큰카트·로그인 병합 e2e)·`OAuth2LoginSuccessHandlerTest`(소셜 병합).
+
+### 6.12 취소·환불 사유 taxonomy — 기록·집계 전용 (#8)
+
+**문제**: 취소/반품에 남는 사유가 `Order.cancel(changedBy, memo)`의 **자유텍스트 메모**(V39)뿐이라 집계·필터·정책 연동이 불가능했다. 오너 결정: **구조화된 사유 enum** 도입, 단 **기록·집계 전용**(정산 귀책·배송비 부담 등 **돈 경로는 v1에서 미연동**), 취소와 반품에 **공통** taxonomy.
+
+**taxonomy** (`CancelReason` in `global/common`):
+- 7종 — `CHANGE_OF_MIND`·`WRONG_ORDER`(고객 귀책) / `DELIVERY_DELAY`·`OUT_OF_STOCK`·`DEFECTIVE`·`WRONG_DELIVERY`(셀러 귀책) / `OTHER`. 각 사유는 `Fault`(CUSTOMER/SELLER/PLATFORM/NONE) 메타를 갖되 **v1은 돈 경로에 연결하지 않는다** — 향후 정산 귀책/왕복배송비 부담 연동 시 쓸 확장 지점(미연동 메타데이터). 저장은 enum STRING(`varchar(30)`).
+
+**배선** (V52, 두 컬럼 모두 **add-only·nullable**):
+- **취소**: `order_item.cancel_reason`. 컨트롤러 → `PaymentService.cancelOrder/cancelOrderItem` → `OrderService` → `Order` → `OrderItem`로 사유 전달. `OrderCancelRequest(reason)`를 `@RequestBody(required = false)`로 받아 **본문 없거나 사유 null이면 사유 없이 취소**(기존 API 완전 호환). 시스템 취소(만료 등)는 NULL.
+- **반품/교환**: `return_request.reason_code`. `ReturnCreateRequest`에 기존 자유텍스트 `reason`과 **병행**하는 `reasonCode`(선택) 추가 → `create` 시 저장.
+- **응답 노출**: `OrderItemResponse.cancelReason`·`ReturnResponse.reasonCode`.
+
+> **왜 "기록 전용"부터인가**: 사유를 정산 귀책/배송비 부담에 곧바로 연동하면 #3 반품·#4 배송비의 돈 흐름 불변식과 얽혀 회귀 위험이 크다. 먼저 구조화해 쌓으면(집계·필터 가능) 정책은 데이터가 모인 뒤 근거를 갖고 얹을 수 있다. add-only·nullable이라 기존 행/돈 경로 불변식은 무영향.
+
+> 검증: `OrderTest`(주문 취소·항목 취소 사유 기록)·`ReturnRequestTest`(reasonCode 저장)·`OrderControllerTest`(취소 본문 reason이 서비스로 전달). 기존 취소/반품 테스트는 사유 인자 추가로 시그니처 갱신.
 
 ---
 
