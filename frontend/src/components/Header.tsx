@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth";
+import NotificationBell from "@/components/NotificationBell";
 
 /** 상단 네비게이션 — 로그인 상태에 따라 로그인 링크 / 유저+로그아웃 표시. */
 export default function Header() {
@@ -44,6 +45,7 @@ export default function Header() {
               <Link href="/account/profile" className={navLink}>
                 내 정보
               </Link>
+              <NotificationBell />
               {user.role === "ADMIN" && (
                 <Link href="/admin/settlements" className="text-sm font-medium text-clay hover:text-clay-600">
                   관리자
