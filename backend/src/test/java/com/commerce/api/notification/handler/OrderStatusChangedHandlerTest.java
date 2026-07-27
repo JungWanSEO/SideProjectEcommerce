@@ -69,6 +69,20 @@ class OrderStatusChangedHandlerTest {
     }
 
     @Test
+    @DisplayName("CANCELLED → 구매자 인박스에 '주문이 취소되었습니다'(전체 취소·환불)")
+    void handle_cancelled() throws Exception {
+        given(notificationRepository.existsByEventIdAndRecipientTypeAndRecipientId(
+                1L, RecipientType.BUYER, BUYER_ID)).willReturn(false);
+
+        handler.handle(event(1L, "CANCELLED"));
+
+        ArgumentCaptor<NotificationLog> captor = ArgumentCaptor.forClass(NotificationLog.class);
+        verify(notificationRepository).save(captor.capture());
+        assertThat(captor.getValue().getMessage()).contains("취소").contains("10");
+        assertThat(captor.getValue().getRecipientType()).isEqualTo(RecipientType.BUYER);
+    }
+
+    @Test
     @DisplayName("관심 밖 상태(PAID)는 알림 생성 안 함")
     void handle_uninterestingStatusSkipped() throws Exception {
         handler.handle(event(1L, "PAID"));
