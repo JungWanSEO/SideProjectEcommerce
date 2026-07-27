@@ -15,10 +15,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 알림 인박스 서비스(#6 P1) — 구매자(BUYER) 스코프. 모든 조회·읽음은 로그인 사용자 본인 것으로만 스코핑된다
- * (남의 알림을 못 읽게 recipient 일치를 쿼리에서 강제 → IDOR 차단).
+ * 알림 인박스 서비스(#6). 모든 조회·읽음은 <b>수신자 본인 것으로만</b> 스코핑된다(recipient 일치를 쿼리에서 강제
+ * → IDOR 차단). 구매자(BUYER=memberId)·셀러(SELLER=sellerId)가 각자의 진입점으로 자기 인박스만 본다.
  *
- * <p>셀러 인박스(P3)는 수신자 유형이 SELLER인 별도 진입점에서 다룬다 — 여기선 BUYER로 고정.
+ * <p>스코프별 공개 메서드는 얇은 래퍼이고, 실제 로직은 (recipientType, recipientId)로 파라미터화한 private 코어가 담당한다.
  */
 @Service
 @RequiredArgsConstructor
@@ -26,37 +26,76 @@ public class NotificationService {
 
     private final NotificationRepository notificationRepository;
 
-    /** 내 알림 목록(최신순, 페이지). unreadOnly=true면 안읽음만. */
+    // === 구매자(BUYER) 진입점 — recipientId = memberId ===
+
     @Transactional(readOnly = true)
     public PageResponse<NotificationResponse> getMyNotifications(
             Long memberId, boolean unreadOnly, Pageable pageable) {
+        return list(RecipientType.BUYER, memberId, unreadOnly, pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public long unreadCount(Long memberId) {
+        return count(RecipientType.BUYER, memberId);
+    }
+
+    @Transactional
+    public void markRead(Long memberId, Long notificationId) {
+        markRead(RecipientType.BUYER, memberId, notificationId);
+    }
+
+    @Transactional
+    public int markAllRead(Long memberId) {
+        return markAll(RecipientType.BUYER, memberId);
+    }
+
+    // === 셀러(SELLER) 진입점 — recipientId = sellerId (SellerConsoleService가 sellerId 도출) ===
+
+    @Transactional(readOnly = true)
+    public PageResponse<NotificationResponse> getSellerNotifications(
+            Long sellerId, boolean unreadOnly, Pageable pageable) {
+        return list(RecipientType.SELLER, sellerId, unreadOnly, pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public long sellerUnreadCount(Long sellerId) {
+        return count(RecipientType.SELLER, sellerId);
+    }
+
+    @Transactional
+    public void sellerMarkRead(Long sellerId, Long notificationId) {
+        markRead(RecipientType.SELLER, sellerId, notificationId);
+    }
+
+    @Transactional
+    public int sellerMarkAllRead(Long sellerId) {
+        return markAll(RecipientType.SELLER, sellerId);
+    }
+
+    // === (recipientType, recipientId)로 파라미터화한 코어 ===
+
+    private PageResponse<NotificationResponse> list(
+            RecipientType type, Long recipientId, boolean unreadOnly, Pageable pageable) {
         Page<NotificationLog> page = unreadOnly
                 ? notificationRepository.findByRecipientTypeAndRecipientIdAndReadAtIsNullOrderByCreatedAtDesc(
-                        RecipientType.BUYER, memberId, pageable)
+                        type, recipientId, pageable)
                 : notificationRepository.findByRecipientTypeAndRecipientIdOrderByCreatedAtDesc(
-                        RecipientType.BUYER, memberId, pageable);
+                        type, recipientId, pageable);
         return PageResponse.from(page.map(NotificationResponse::from));
     }
 
-    /** 안읽음 개수(벨 뱃지). */
-    @Transactional(readOnly = true)
-    public long unreadCount(Long memberId) {
-        return notificationRepository.countByRecipientTypeAndRecipientIdAndReadAtIsNull(
-                RecipientType.BUYER, memberId);
+    private long count(RecipientType type, Long recipientId) {
+        return notificationRepository.countByRecipientTypeAndRecipientIdAndReadAtIsNull(type, recipientId);
     }
 
-    /** 단건 읽음 처리 — 본인(BUYER=memberId) 알림만. 없거나 남의 것이면 404. */
-    @Transactional
-    public void markRead(Long memberId, Long notificationId) {
+    private void markRead(RecipientType type, Long recipientId, Long notificationId) {
         NotificationLog n = notificationRepository
-                .findByIdAndRecipientTypeAndRecipientId(notificationId, RecipientType.BUYER, memberId)
+                .findByIdAndRecipientTypeAndRecipientId(notificationId, type, recipientId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "알림을 찾을 수 없습니다."));
         n.markRead();   // 더티체킹으로 read_at 반영
     }
 
-    /** 전체 읽음 처리 — 안읽음 일괄 갱신. 처리 건수 반환. */
-    @Transactional
-    public int markAllRead(Long memberId) {
-        return notificationRepository.markAllRead(RecipientType.BUYER, memberId, LocalDateTime.now());
+    private int markAll(RecipientType type, Long recipientId) {
+        return notificationRepository.markAllRead(type, recipientId, LocalDateTime.now());
     }
 }

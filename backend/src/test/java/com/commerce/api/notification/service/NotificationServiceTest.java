@@ -94,6 +94,24 @@ class NotificationServiceTest {
     }
 
     @Test
+    @DisplayName("셀러 스코프 - getSellerNotifications는 SELLER 수신분만(구매자 것과 격리)")
+    void sellerScope_isolatedFromBuyer() {
+        notificationRepository.save(buyerNote(1L, ALICE, "구매자 알림"));
+        notificationRepository.save(NotificationLog.of(1L, RecipientType.SELLER, 700L,
+                "PAYMENT_COMPLETED", NotificationCategory.TRANSACTIONAL, "셀러 새주문", "/seller/orders"));
+
+        PageResponse<NotificationResponse> seller =
+                notificationService.getSellerNotifications(700L, false, PageRequest.of(0, 20));
+        PageResponse<NotificationResponse> buyer =
+                notificationService.getMyNotifications(ALICE, false, PageRequest.of(0, 20));
+
+        assertThat(seller.content()).hasSize(1);
+        assertThat(seller.content().get(0).message()).isEqualTo("셀러 새주문");
+        assertThat(buyer.content()).hasSize(1);
+        assertThat(buyer.content().get(0).message()).isEqualTo("구매자 알림");
+    }
+
+    @Test
     @DisplayName("복합 멱등키 - 같은 이벤트라도 수신자가 다르면 공존(팬아웃), 같은 수신자 중복은 거부")
     void compositeIdempotency() {
         // 같은 event_id(1) 이지만 수신자가 다르면 둘 다 저장된다 → 멀티셀러 팬아웃 가능(핵심)

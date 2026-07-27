@@ -4,6 +4,7 @@ import com.commerce.api.audit.aspect.Auditable;
 import com.commerce.api.global.common.ApiResponse;
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.security.SecurityUtil;
+import com.commerce.api.notification.dto.NotificationResponse;
 import com.commerce.api.order.dto.OrderSearchCondition;
 import com.commerce.api.order.dto.OrderSummaryResponse;
 import com.commerce.api.order.dto.SellerShipmentResponse;
@@ -58,6 +59,36 @@ public class SellerConsoleController {
     public ResponseEntity<ApiResponse<SellerResponse>> getMySeller() {
         return ResponseEntity.ok(
                 ApiResponse.success(sellerConsoleService.getMySeller(SecurityUtil.getCurrentMemberId())));
+    }
+
+    @Operation(summary = "내 알림 목록", description = "셀러 인박스(새 주문·반품요청 등)를 최신순으로. unreadOnly=true면 안읽음만. (#6)")
+    @GetMapping("/me/notifications")
+    public ResponseEntity<ApiResponse<PageResponse<NotificationResponse>>> getMyNotifications(
+            @RequestParam(defaultValue = "false") boolean unreadOnly,
+            @ParameterObject @PageableDefault(size = 20) Pageable pageable) {
+        return ResponseEntity.ok(ApiResponse.success(sellerConsoleService.getMyNotifications(
+                SecurityUtil.getCurrentMemberId(), unreadOnly, pageable)));
+    }
+
+    @Operation(summary = "내 안읽음 알림 수", description = "셀러 콘솔 벨 뱃지용.")
+    @GetMapping("/me/notifications/unread-count")
+    public ResponseEntity<ApiResponse<Long>> myUnreadNotificationCount() {
+        return ResponseEntity.ok(ApiResponse.success(
+                sellerConsoleService.myUnreadNotificationCount(SecurityUtil.getCurrentMemberId())));
+    }
+
+    @Operation(summary = "내 알림 읽음 처리", description = "본인 셀러 알림만. 없거나 남의 것이면 404.")
+    @PatchMapping("/me/notifications/{id}/read")
+    public ResponseEntity<ApiResponse<Void>> markNotificationRead(@PathVariable Long id) {
+        sellerConsoleService.markMyNotificationRead(SecurityUtil.getCurrentMemberId(), id);
+        return ResponseEntity.ok(ApiResponse.success("읽음 처리되었습니다.", null));
+    }
+
+    @Operation(summary = "내 알림 전체 읽음", description = "안읽음 알림을 모두 읽음으로. 처리 건수 반환.")
+    @PatchMapping("/me/notifications/read-all")
+    public ResponseEntity<ApiResponse<Integer>> markAllNotificationsRead() {
+        int marked = sellerConsoleService.markAllMyNotificationsRead(SecurityUtil.getCurrentMemberId());
+        return ResponseEntity.ok(ApiResponse.success("모두 읽음 처리되었습니다.", marked));
     }
 
     @Operation(summary = "내 정산 항목", description = "본인 셀러의 정산 항목(상태·기간 필터). 최신순.")

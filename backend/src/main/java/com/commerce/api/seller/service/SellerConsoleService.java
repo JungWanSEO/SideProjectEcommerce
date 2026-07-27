@@ -51,6 +51,7 @@ public class SellerConsoleService {
     private final ShipmentService shipmentService;   // 내 shipment 출고 전진(#1 c안) — 소유권은 워커가 검증
     private final ReturnService returnService;         // 내 반품 처리(#3) — 소유권은 서비스가 검증
     private final ReturnQueryService returnQueryService;   // 내 반품 목록(셀러 스코프)
+    private final com.commerce.api.notification.service.NotificationService notificationService;   // 내 알림 인박스(#6 P3)
 
     /** 내 셀러 정보. */
     public SellerResponse getMySeller(Long memberId) {
@@ -117,6 +118,32 @@ public class SellerConsoleService {
     public ReturnResponse advanceMyReturn(Long memberId, Long returnId, ReturnStatusUpdateRequest request) {
         Long sellerId = requireSellerId(memberId);
         return returnService.advanceForSeller(returnId, sellerId, request, memberId);
+    }
+
+    /** 내 알림 목록(셀러 인박스, 최신순). unreadOnly=true면 안읽음만. */
+    public PageResponse<com.commerce.api.notification.dto.NotificationResponse> getMyNotifications(
+            Long memberId, boolean unreadOnly, Pageable pageable) {
+        return notificationService.getSellerNotifications(requireSellerId(memberId), unreadOnly, pageable);
+    }
+
+    /** 내 안읽음 알림 수(벨 뱃지). */
+    public long myUnreadNotificationCount(Long memberId) {
+        return notificationService.sellerUnreadCount(requireSellerId(memberId));
+    }
+
+    /**
+     * 내 알림 읽음 처리. {@link Propagation#NOT_SUPPORTED}로 클래스 read-only tx 밖에서 실행 —
+     * NotificationService의 쓰기 @Transactional이 새 트랜잭션으로 걸리게(read-only 컨텍스트 쓰기 차단 회피).
+     */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public void markMyNotificationRead(Long memberId, Long notificationId) {
+        notificationService.sellerMarkRead(requireSellerId(memberId), notificationId);
+    }
+
+    /** 내 알림 전체 읽음 처리 — 처리 건수 반환. */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public int markAllMyNotificationsRead(Long memberId) {
+        return notificationService.sellerMarkAllRead(requireSellerId(memberId));
     }
 
     /** 로그인 회원의 셀러 ID — 셀러 계정(sellerId 보유)이 아니면 403. */

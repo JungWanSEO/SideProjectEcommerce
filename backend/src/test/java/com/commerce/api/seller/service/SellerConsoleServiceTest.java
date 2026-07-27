@@ -43,6 +43,8 @@ class SellerConsoleServiceTest {
     private PayoutService payoutService;
     @Mock
     private com.commerce.api.order.service.OrderService orderService;
+    @Mock
+    private com.commerce.api.notification.service.NotificationService notificationService;
     @InjectMocks
     private SellerConsoleService sellerConsoleService;
 
@@ -67,6 +69,17 @@ class SellerConsoleServiceTest {
 
         assertThat(response.id()).isEqualTo(5L);
         verify(sellerService).getSeller(5L);
+    }
+
+    @Test
+    @DisplayName("내 알림 - 내 sellerId로 스코핑해 셀러 인박스 조회에 위임")
+    void getMyNotifications_scopedToMySeller() {
+        given(memberRepository.findById(1L)).willReturn(Optional.of(memberWithSeller(1L, 5L)));
+        var pageable = org.springframework.data.domain.PageRequest.of(0, 20);
+
+        sellerConsoleService.getMyNotifications(1L, false, pageable);
+
+        verify(notificationService).getSellerNotifications(5L, false, pageable);
     }
 
     @Test
