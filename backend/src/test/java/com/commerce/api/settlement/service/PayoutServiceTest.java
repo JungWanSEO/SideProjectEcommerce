@@ -3,6 +3,7 @@ package com.commerce.api.settlement.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
@@ -62,7 +63,7 @@ class PayoutServiceTest {
     }
 
     @Test
-    @DisplayName("생성 - 셀러 SCHEDULED 항목을 묶어 합계 스냅샷 + 항목에 payoutId 설정")
+    @DisplayName("생성 - 셀러 SCHEDULED 항목을 묶어 합계 스냅샷 + 원자적 조건부 UPDATE로 편입")
     void create_groupsAndSums() {
         List<SettlementEntry> entries = List.of(entry(10000, 250, 1000), entry(20000, 500, 2000));
         given(settlementRepository.findBySellerIdAndStatusAndPayoutIdIsNullAndSettledDateBetween(
@@ -72,6 +73,7 @@ class PayoutServiceTest {
             ReflectionTestUtils.setField(p, "id", 100L);
             return p;
         });
+        given(settlementRepository.claimForPayout(eq(100L), anyList())).willReturn(2);   // 두 항목 모두 편입 성공
         given(sellerRepository.findById(5L)).willReturn(Optional.of(sellerWithId(5L, "UrbanSelect")));
 
         PayoutResponse response = payoutService.create(new PayoutCreateRequest(5L, FROM, TO));
@@ -83,9 +85,27 @@ class PayoutServiceTest {
         assertThat(response.entryCount()).isEqualTo(2);
         assertThat(response.status()).isEqualTo(PayoutStatus.PENDING);
         assertThat(response.sellerName()).isEqualTo("UrbanSelect");
-        // 묶인 항목들에 payoutId 설정됨
-        assertThat(entries.get(0).getPayoutId()).isEqualTo(100L);
-        assertThat(entries.get(1).getPayoutId()).isEqualTo(100L);
+        // 편입은 조건부 UPDATE(payout_id IS NULL 대상만)로 — 저장된 payoutId로 요청 항목을 원자적으로 잡는다.
+        verify(settlementRepository).claimForPayout(eq(100L), anyList());
+    }
+
+    @Test
+    @DisplayName("생성 실패 - 동시 편입 경합에 밀리면(claimed < 요청 항목 수) 409, 트랜잭션 롤백")
+    void create_raceLosesClaim_conflict() {
+        List<SettlementEntry> entries = List.of(entry(10000, 250, 1000), entry(20000, 500, 2000));
+        given(settlementRepository.findBySellerIdAndStatusAndPayoutIdIsNullAndSettledDateBetween(
+                eq(5L), eq(SettlementStatus.SCHEDULED), any(), any())).willReturn(entries);
+        given(payoutRepository.save(any(Payout.class))).willAnswer(inv -> {
+            Payout p = inv.getArgument(0);
+            ReflectionTestUtils.setField(p, "id", 100L);
+            return p;
+        });
+        // 다른 create()가 먼저 한 항목을 잡아가 2개 중 1개만 편입됨 → 경합 감지
+        given(settlementRepository.claimForPayout(eq(100L), anyList())).willReturn(1);
+
+        assertThatThrownBy(() -> payoutService.create(new PayoutCreateRequest(5L, FROM, TO)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("동시에 다른 지급 요청");
     }
 
     @Test

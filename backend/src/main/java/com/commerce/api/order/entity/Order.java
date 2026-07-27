@@ -497,7 +497,12 @@ public class Order extends BaseEntity {
      *
      * <p>전이는 forward-only PAID→SHIPPING→DELIVERED. next는 SHIPPING/DELIVERED만 유효하고, 전진 가능한
      * shipment가 하나도 없으면 409(건너뛰기·되돌리기·PENDING/CANCELLED에서의 전진 차단 — 기존 order-grain 의미 보존).
-     * SHIPPING 전이 시 송장은 각 shipment에 저장하고, order-level courier/tracking에도 복제한다(P6에서 컬럼 제거 전까지 응답 호환).
+     *
+     * <p><b>멀티셀러 운송장 가드(#1 회귀 교정)</b>: 일괄 경로는 하나의 courier/trackingNumber를 전진 대상 <b>모든</b>
+     * shipment에 그대로 넣으므로, 셀러가 둘 이상(전진 대상 2건+)인데 송장을 실으면 물리적으로 다른 소포에 같은 운송장이
+     * 복제돼 구매자 배송조회가 틀린다. 그래서 전진 대상이 2건 이상이면 송장 동반을 <b>거부(400)</b>하고 셀러별 경로
+     * (PATCH /shipments/{id}/status)로 유도한다. 단일 셀러(전진 대상 1건)는 기존대로 송장 동반 허용, 송장 없는
+     * 상태-only 일괄 전진은 셀러 수와 무관하게 허용.
      */
     public void advanceShipping(OrderStatus next, Long changedBy, String courier, String trackingNumber) {
         ShipmentStatus prereq;
@@ -512,16 +517,20 @@ public class Order extends BaseEntity {
             throw shippingConflict(next);   // PENDING/PAID/CANCELLED로의 전진은 무효
         }
 
-        int advanced = 0;
-        for (Shipment s : shipments) {
-            // 교환 재출고(EXCHANGE)는 ADMIN 일괄 전진에서 제외 — 재출고건은 shipmentId 직접 경로로만 전이한다(#3).
-            if (s.isOriginal() && s.isActive() && s.getStatus() == prereq) {
-                s.advanceShipping(target, changedBy, courier, trackingNumber);
-                advanced++;
-            }
-        }
-        if (advanced == 0) {
+        // 교환 재출고(EXCHANGE)는 ADMIN 일괄 전진에서 제외 — 재출고건은 shipmentId 직접 경로로만 전이한다(#3).
+        List<Shipment> advanceable = shipments.stream()
+                .filter(s -> s.isOriginal() && s.isActive() && s.getStatus() == prereq)
+                .toList();
+        if (advanceable.isEmpty()) {
             throw shippingConflict(next);   // 전진 가능한 shipment 없음(건너뛰기·되돌리기·미결제 등)
+        }
+        if ((courier != null || trackingNumber != null) && advanceable.size() > 1) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST,
+                    "여러 셀러의 배송이 섞인 주문은 일괄 전진에서 운송장을 함께 지정할 수 없습니다. "
+                            + "배송 건별 경로(PATCH /api/orders/{id}/shipments/{shipmentId}/status)로 각각 지정해 주세요.");
+        }
+        for (Shipment s : advanceable) {
+            s.advanceShipping(target, changedBy, courier, trackingNumber);
         }
         // 송장은 각 shipment에 저장됐다(order-level courier/tracking 컬럼은 P6에서 제거).
         recomputeStatusFromShipments(changedBy, shippingMemo(next, courier, trackingNumber));

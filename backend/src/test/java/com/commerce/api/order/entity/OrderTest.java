@@ -228,7 +228,7 @@ class OrderTest {
     void backfill_inheritsStatusAndIdempotent() {
         Order order = orderWith(item(1L, 5000L), item(2L, 4000L));
         order.markPaid();
-        order.advanceShipping(OrderStatus.SHIPPING, null, "CJ", "1234");
+        order.advanceShipping(OrderStatus.SHIPPING);   // 멀티셀러라 상태-only 일괄 전진(송장은 per-shipment 경로)
         order.getShipments().clear();   // 레거시(P2 이전) 시뮬 — shipment 없음
 
         assertThat(order.backfillShipments()).isTrue();
@@ -317,6 +317,47 @@ class OrderTest {
         order.getShipments().get(1).advanceShipping(ShipmentStatus.SHIPPING, 8L, "CJ", "2");
         order.recomputeStatusFromShipments(8L, "CJ 2");
         assertThat(order.getStatusHistory()).hasSize(base + 1);   // rollup 여전히 SHIPPING → 주문 이력 불변
+    }
+
+    // === #1 회귀 교정: 멀티셀러 일괄 전진 운송장 가드 (적대적 스캔 확정②) ==============
+
+    @Test
+    @DisplayName("일괄 전진 - 멀티셀러 주문에 송장 실으면 400(운송장 복제 방지·per-shipment 유도)")
+    void advanceShipping_multiSellerWithTracking_rejected() {
+        Order order = orderWith(item(1L, 5000L), item(2L, 4000L));
+        order.markPaid();   // 셀러 2건 shipment(PAID)
+
+        assertThatThrownBy(() -> order.advanceShipping(OrderStatus.SHIPPING, null, "CJ", "111"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("운송장");
+        // 거부됐으니 어떤 shipment에도 송장이 붙거나 상태가 전진하지 않았다(원자적 롤백 아님·엔티티 선검증)
+        assertThat(order.getShipments()).allMatch(s -> s.getTrackingNumber() == null);
+        assertThat(order.getShipments()).allMatch(s -> s.getStatus() == ShipmentStatus.PAID);
+    }
+
+    @Test
+    @DisplayName("일괄 전진 - 멀티셀러라도 송장 없이 상태만 전진은 허용(모두 SHIPPING)")
+    void advanceShipping_multiSellerStatusOnly_allowed() {
+        Order order = orderWith(item(1L, 5000L), item(2L, 4000L));
+        order.markPaid();
+
+        order.advanceShipping(OrderStatus.SHIPPING);   // 송장 없이 일괄
+
+        assertThat(order.getShipments()).allMatch(s -> s.getStatus() == ShipmentStatus.SHIPPING);
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.SHIPPING);
+    }
+
+    @Test
+    @DisplayName("일괄 전진 - 단일 셀러는 송장 동반 허용(전진 대상 1건)")
+    void advanceShipping_singleSellerWithTracking_allowed() {
+        Order order = orderWith(item(1L, 5000L), item(1L, 3000L));   // 같은 셀러 → shipment 1건
+        order.markPaid();
+
+        order.advanceShipping(OrderStatus.SHIPPING, null, "CJ", "111");
+
+        assertThat(order.getShipments()).hasSize(1);
+        assertThat(order.getShipments().get(0).getTrackingNumber()).isEqualTo("111");
+        assertThat(order.getShipments().get(0).getStatus()).isEqualTo(ShipmentStatus.SHIPPING);
     }
 
     // === #1 P4: shipment-grain 취소 ===================================================

@@ -5,6 +5,7 @@ import com.commerce.api.settlement.entity.SettlementStatus;
 import java.time.LocalDate;
 import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -21,6 +22,17 @@ public interface SettlementRepository extends JpaRepository<SettlementEntry, Lon
     /** 지급 묶음 생성 대상 — 셀러의 SCHEDULED·미지급(payoutId null) 항목 중 정산일이 기간 안인 것. */
     List<SettlementEntry> findBySellerIdAndStatusAndPayoutIdIsNullAndSettledDateBetween(
             Long sellerId, SettlementStatus status, LocalDate from, LocalDate to);
+
+    /**
+     * 지급 묶음 편입을 <b>원자적 조건부 UPDATE</b>로(동시성 방어). 아직 미편입(payout_id IS NULL)인 대상만
+     * 이 묶음으로 표시하고 영향 행 수를 돌려준다 → {@code PayoutService.create}가 "요청한 항목 수 == 편입된 수"를
+     * 확인해, 같은 항목을 두 create()가 동시에 잡는 lost update(→ 이중지급)를 막는다.
+     * (선착순 쿠폰 {@code incrementIssuedCount}·재고 예약과 동형 idiom — 앱 락 없이 DB 행 락이 직렬화.)
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("update SettlementEntry s set s.payoutId = :payoutId "
+            + "where s.id in :ids and s.payoutId is null")
+    int claimForPayout(@Param("payoutId") Long payoutId, @Param("ids") List<Long> ids);
 
     /** 지급 묶음에 묶인 항목들(지급 처리 시 PAID_OUT 전이용). */
     List<SettlementEntry> findByPayoutId(Long payoutId);
