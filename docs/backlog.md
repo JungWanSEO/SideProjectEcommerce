@@ -6,9 +6,22 @@
 
 ## READY (결정 완료 · 외부 무관 · 자율 진행 가능 · 위에서부터)
 > **2026-07-21 무결정 스캔 8건 전부 소진(07-22)** + **재스캔 완료(클린, `39bcd3b`)** → 결정 없이 고칠 실버그 0. **자율 진행 가능한 READY = 0** — 남은 자율 후보는 아래 "여유 시" N+1 1건(오너 런타임 필요)뿐. 새 작업은 "결정 필요"에서 오너가 골라야 내려온다.
+> **2026-07-27 자율 loop: #1/#3/#4/#8 교차 적대적 money-path 스캔(`wf_643f9628`) → 확정 2·LOW 3 = 아래 "🔍 적대적 money-path 스캔 발견"에 기록.** 전부 결정 또는 MySQL 런타임 필요라 **자율 진행 가능한 READY는 여전히 0**(오너 게이트). 결정 없이 고칠 실버그 0 유지.
 
 ### (여유 시·무결정이나 저긴급) — 남은 저긴급 자율 후보
 - ⚠️**[오너 몫 권장] 체크아웃·결제·pay N+1 → `findByOptionIdIn` 배치** — 돈 쓰기 경로(재고차감·낙관적락·@Retryable)라 동시성 정합(동일상품 다옵션 매핑·락 거동)에 닿고 **MySQL 런타임 검증 필요**. 이득은 marginal(주문 항목 N 작음). 복귀 후 런타임과 함께. *(07-22 나머지 저긴급 3건[대사 윈도우·감사 targetId FE·순수 테스트]은 완료 → DONE.)*
+
+## 🔍 적대적 money-path 스캔 발견 (2026-07-27 자율 loop · 오너 결정/런타임 필요 · 자율 금지)
+> `자율진행` 위임 중 #1(shipment)·#3(반품/교환)·#4(배송비)·#8(취소사유) **교차 상호작용** 적대적 버그헌트(5렌즈 find→회의론 2인 verify, `wf_643f9628`). 원시 6→확정 **2**·기각 1·LOW 3. 개별 피처는 리뷰 통과했으나 함께 재검증된 적 없던 표면. **전부 결정 또는 MySQL 런타임 필요 → 자율 금지, 오너 게이트.** 상세 근거·검증 로그=dev-log 2026-07 블록.
+
+**확정 (MED · 재현 경로 명확):**
+- ⚠️**[오너·런타임] 정산 payout 이중지급 동시성** — `PayoutService.create` (`settlement/service/PayoutService.java:44`). 같은 셀러·겹치는 정산 윈도우로 `create()` 두 요청이 동시 진입 시, 비잠금 파생조회가 같은 SCHEDULED·payoutId=null 엔트리를 둘 다 읽고 `assignPayout`이 조건절 없는 setter(더티체킹 UPDATE)라 마지막 writer만 남고 **두 Payout 애그리거트가 같은 엔트리 net을 이중 청구 → 실제 송금 2회**. 가드 부재 확인: settlement/**에 @Lock/@Version 0건·payout_id UNIQUE 없음(V23 nullable·V36 비-UNIQUE 인덱스만). **수정 방향**=엔트리 payout_id 배정을 **조건부 UPDATE(`WHERE payout_id IS NULL` + 영향행수 선점검증)** 또는 대상 엔트리 비관락(재고예약#2·쿠폰claim과 동형 idiom). Order @Version(V44)이 같은 클래스 문제를 이미 해결한 전례. **money-write 경로+동시성이라 MySQL 런타임 검증 필요=오너 몫**(위 N+1 항목과 동류). 트리거=ADMIN 수동 payout 동시 2회(저확률이나 실재). H2 동시성 IT 추가는 가능하나 락/제약(UNIQUE 마이그레이션?) 결정은 오너.
+- ⚠️**[오너·결정] 일괄 배송전진 운송장 복제** — `Order.advanceShipping` (`order/entity/Order.java:519`). 멀티셀러 주문에 ADMIN이 `PATCH /orders/{id}/status`(status=SHIPPING, courier, trackingNumber) 호출 시 루프가 **활성 ORIGINAL shipment 전부에 같은 운송장 복제** → 셀러 B 소포에 셀러 A 운송장이 붙어 구매자 배송조회가 틀림(오류 없이 조용히). #1에서 order-level 단일운송장→per-seller shipment로 옮기며 생긴 회귀(올바른 경로=per-shipment `PATCH /shipments/{sid}/status`). **수정 방향(택1, 결정 필요)**: ①일괄경로에 shipment 2+면 courier/tracking 거부(400·per-shipment 강제) ②일괄은 상태만 전진·송장 무시 ③단일셀러 주문만 송장 동반 허용. **UX/정책 결정.**
+
+**LOW (참고 · 미검증 · 전부 결정/런타임 필요):**
+- `OrderExpiryService.expireOne`(:91) 만 `findById`(무락)라 "모든 상태변경 경로 부모주문 비관락"(INV9) 유일 위반 — **현재 PENDING 전용이라 무해**(Order @Version이 경합 차단), 만료를 비-PENDING(미출고 PAID 자동취소 등)으로 확장하면 위험. `findByIdForUpdate` 통일 or INV9에 예외 명시(런타임 스모크 권장).
+- `Order.discountShares`(:247) 안분 basis가 **결제 전 취소된 항목까지 포함** → PENDING에서 항목 취소 후 결제 시 그 몫 소멸해 쿠폰 액면보다 과다청구(PENDING 부분취소 허용 여부/재계산 정책 결정).
+- 쿠폰 복원(`PaymentService`:178)이 `order.status==CANCELLED` 조건뿐 → 반품(RETURNED)+취소(CANCELLED) 혼합 전액환불 시 원배송 DELIVERED로 남으면 발급쿠폰 미복원(순수 전량취소와 대우 불일치·반품 시 쿠폰정책 결정).
 
 ## 함께 (외부 연동 · 학습 — 자율 금지)
 - 🚧 **배포 ($0 라이브 데모) — 경로 A(Oracle VM) 확정** — 준비물 완료: env화·`Dockerfile`·`docs/deploy.md`(`feature/deploy-prep`) + **prod 산출물·배선 보강**(`feature/deploy-prep-hardening`→dev `06e7ff8`): `backend/docker-compose.prod.yml`(앱+MySQL)·`.env.prod.example`·datasource `${SPRING_DATASOURCE_USERNAME:${MYSQL_USER}}` 체인·`APP_OAUTH2_REDIRECT` 행·`.gitignore` `.env.prod` 차단. 로컬 검증=`bootJar`·`next build` PASS. **결정=경로 A**(Oracle Always Free VM: Vercel FE + VM에 Spring Boot+MySQL; 콜드스타트 없음·진짜 MySQL·쿠키 first-party). ⚠️경로 B는 Koyeb 무료 폐쇄(Mistral 인수)로 약화. **다음=사용자 계정 단계**: Oracle A1 VM 생성→레포 clone→`.env.prod`→`docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build`→Caddy HTTPS→Vercel FE→쿠키전략(Vercel rewrites `/api/*` 프록시=first-party 추천)→로그인 확인. MySQL 실런타임 검증=VM 첫 기동. **VM 준비물 `deploy/`**(vm-setup.sh·Caddyfile·README) + 프록시 뒤 OAuth2 헤더(`server.forward-headers-strategy`) 추가(`feature/deploy-vm-runbook`→dev `2832ed5`). (가이드=docs/deploy.md §3, deploy/README.md)
