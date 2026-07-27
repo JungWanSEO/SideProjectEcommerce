@@ -55,6 +55,8 @@ class PaymentServiceTest {
     private PaymentCompletionRecorder paymentCompletionRecorder;
     @Mock
     private MemberCouponService memberCouponService;   // 취소 시 쿠폰 복원(release) — void, 검증 불필요
+    @Mock
+    private com.commerce.api.order.service.OrderEventEmitter orderEventEmitter;   // 전체 취소 알림(#6 P2b, void)
 
     @InjectMocks
     private PaymentService paymentService;

@@ -5,6 +5,7 @@ import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.global.common.CancelReason;
 import com.commerce.api.order.dto.OrderResponse;
 import com.commerce.api.order.entity.OrderStatus;
+import com.commerce.api.order.service.OrderEventEmitter;
 import com.commerce.api.order.service.OrderService;
 import com.commerce.api.payment.dto.PaymentRequest;
 import com.commerce.api.payment.dto.PaymentResponse;
@@ -47,6 +48,7 @@ public class PaymentService {
     private final PaymentGatewayRouter paymentGatewayRouter;
     private final PaymentCompletionRecorder paymentCompletionRecorder;
     private final MemberCouponService memberCouponService;   // 주문 취소 시 발급형 쿠폰 복원
+    private final OrderEventEmitter orderEventEmitter;   // 전체 취소 시 구매자 알림 이벤트(#6 P2b)
 
     public PaymentResponse pay(Long memberId, PaymentRequest request) {
         // 1) 멱등성: 같은 키로 이미 처리된 결제가 있으면 재실행 없이 그 결과를 반환
@@ -113,6 +115,7 @@ public class PaymentService {
         // 발급형 쿠폰 복원은 주문이 <b>전부</b> 취소됐을 때만 — 부분 취소면 남은(출고된) 항목에 쿠폰이 유효하다.
         if (cancelled.status() == OrderStatus.CANCELLED) {
             memberCouponService.release(cancelled.memberId(), cancelled.couponCode());
+            orderEventEmitter.emitOrderStatusChanged(orderId, cancelled.memberId(), OrderStatus.CANCELLED);   // 구매자 취소·환불 알림(#6 P2b)
         }
 
         // 2) 결제 완료(PAID) 건이 있으면 <b>이번에 취소된 항목의 실효가 합만</b> 환불한다(#1 P4, 과다환불 차단).
@@ -174,9 +177,10 @@ public class PaymentService {
                     payment.partialRefund(refundNow);   // 누적, 전액 도달 시 CANCELLED
                     paymentRepository.save(payment);
                 });
-        // 마지막 항목 취소로 주문 전체가 취소되면 발급형 쿠폰도 복원.
+        // 마지막 항목 취소로 주문 전체가 취소되면 발급형 쿠폰도 복원 + 구매자 알림.
         if (order.status() == OrderStatus.CANCELLED) {
             memberCouponService.release(order.memberId(), order.couponCode());
+            orderEventEmitter.emitOrderStatusChanged(orderId, order.memberId(), OrderStatus.CANCELLED);   // 구매자 취소·환불 알림(#6 P2b)
         }
         return order;
     }

@@ -73,4 +73,22 @@ class OrderEventEmitterTest {
 
         verify(outboxService, never()).append(any(), any(), any(), any());
     }
+
+    @Test
+    @DisplayName("상태-확정 발행(전체 취소) → CANCELLED 이벤트 발행(엔티티 없이 orderId·buyerId로)")
+    void emitOrderStatusChanged_cancelled() {
+        emitter.emitOrderStatusChanged(10L, 99L, OrderStatus.CANCELLED);
+
+        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
+        verify(outboxService).append(eq("ORDER_STATUS_CHANGED"), eq("ORDER"), eq("10"), payload.capture());
+        assertThat(payload.getValue()).contains("CANCELLED").contains("99");
+    }
+
+    @Test
+    @DisplayName("상태-확정 발행 - 관심 밖 상태(PAID)는 발행 안 함(방어)")
+    void emitOrderStatusChanged_notNotifiable() {
+        emitter.emitOrderStatusChanged(10L, 99L, OrderStatus.PAID);
+
+        verify(outboxService, never()).append(any(), any(), any(), any());
+    }
 }

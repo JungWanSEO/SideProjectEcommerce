@@ -29,17 +29,35 @@ public class OrderEventEmitter {
     private final OutboxService outboxService;
     private final ObjectMapper objectMapper;
 
-    /** 주문 status가 {@code before}에서 관심 상태로 새로 바뀌었으면 ORDER_STATUS_CHANGED 이벤트를 낸다(아니면 no-op). */
+    /**
+     * 주문 status가 {@code before}에서 관심 상태로 새로 바뀌었으면 ORDER_STATUS_CHANGED 이벤트를 낸다(아니면 no-op).
+     * 배송 전진처럼 "전이 후 status가 뭔지 확실치 않은" 경로용(rollup 결과를 before와 비교).
+     */
     public void emitIfStatusBecameNotifiable(Order order, OrderStatus before) {
         OrderStatus after = order.getStatus();
         if (after == before || !NOTIFIABLE.contains(after)) {
             return;
         }
+        append(order.getId(), order.getMemberId(), after);
+    }
+
+    /**
+     * 이미 특정 상태로 전이됐음을 아는 호출자용(예: 전체 취소 확정) — 관심 상태면 발행한다.
+     * OrderResponse(DTO)만 든 오케스트레이터(PaymentService.cancel*)가 엔티티 없이 발행할 때 쓴다.
+     */
+    public void emitOrderStatusChanged(Long orderId, Long buyerId, OrderStatus status) {
+        if (!NOTIFIABLE.contains(status)) {
+            return;
+        }
+        append(orderId, buyerId, status);
+    }
+
+    private void append(Long orderId, Long buyerId, OrderStatus status) {
         outboxService.append(
                 "ORDER_STATUS_CHANGED",
                 "ORDER",
-                String.valueOf(order.getId()),
-                toJson(new OrderStatusChangedPayload(order.getId(), order.getMemberId(), after.name())));
+                String.valueOf(orderId),
+                toJson(new OrderStatusChangedPayload(orderId, buyerId, status.name())));
     }
 
     private String toJson(OrderStatusChangedPayload payload) {
