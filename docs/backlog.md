@@ -14,9 +14,9 @@
 ## 🔍 적대적 money-path 스캔 발견 (2026-07-27 자율 loop · 오너 결정/런타임 필요 · 자율 금지)
 > `자율진행` 위임 중 #1(shipment)·#3(반품/교환)·#4(배송비)·#8(취소사유) **교차 상호작용** 적대적 버그헌트(5렌즈 find→회의론 2인 verify, `wf_643f9628`). 원시 6→확정 **2**·기각 1·LOW 3. 개별 피처는 리뷰 통과했으나 함께 재검증된 적 없던 표면. **전부 결정 또는 MySQL 런타임 필요 → 자율 금지, 오너 게이트.** 상세 근거·검증 로그=dev-log 2026-07 블록.
 
-**확정 (MED · 재현 경로 명확):**
-- ⚠️**[오너·런타임] 정산 payout 이중지급 동시성** — `PayoutService.create` (`settlement/service/PayoutService.java:44`). 같은 셀러·겹치는 정산 윈도우로 `create()` 두 요청이 동시 진입 시, 비잠금 파생조회가 같은 SCHEDULED·payoutId=null 엔트리를 둘 다 읽고 `assignPayout`이 조건절 없는 setter(더티체킹 UPDATE)라 마지막 writer만 남고 **두 Payout 애그리거트가 같은 엔트리 net을 이중 청구 → 실제 송금 2회**. 가드 부재 확인: settlement/**에 @Lock/@Version 0건·payout_id UNIQUE 없음(V23 nullable·V36 비-UNIQUE 인덱스만). **수정 방향**=엔트리 payout_id 배정을 **조건부 UPDATE(`WHERE payout_id IS NULL` + 영향행수 선점검증)** 또는 대상 엔트리 비관락(재고예약#2·쿠폰claim과 동형 idiom). Order @Version(V44)이 같은 클래스 문제를 이미 해결한 전례. **money-write 경로+동시성이라 MySQL 런타임 검증 필요=오너 몫**(위 N+1 항목과 동류). 트리거=ADMIN 수동 payout 동시 2회(저확률이나 실재). H2 동시성 IT 추가는 가능하나 락/제약(UNIQUE 마이그레이션?) 결정은 오너.
-- ⚠️**[오너·결정] 일괄 배송전진 운송장 복제** — `Order.advanceShipping` (`order/entity/Order.java:519`). 멀티셀러 주문에 ADMIN이 `PATCH /orders/{id}/status`(status=SHIPPING, courier, trackingNumber) 호출 시 루프가 **활성 ORIGINAL shipment 전부에 같은 운송장 복제** → 셀러 B 소포에 셀러 A 운송장이 붙어 구매자 배송조회가 틀림(오류 없이 조용히). #1에서 order-level 단일운송장→per-seller shipment로 옮기며 생긴 회귀(올바른 경로=per-shipment `PATCH /shipments/{sid}/status`). **수정 방향(택1, 결정 필요)**: ①일괄경로에 shipment 2+면 courier/tracking 거부(400·per-shipment 강제) ②일괄은 상태만 전진·송장 무시 ③단일셀러 주문만 송장 동반 허용. **UX/정책 결정.**
+**확정 (MED · 재현 경로 명확) — 둘 다 ✅ 완료(2026-07-27, dev `7d19027`, 676→681 tests):**
+- ✅ **정산 payout 이중지급 동시성** — `PayoutService.create`. 비잠금 조회 + 조건절 없는 `assignPayout` setter라 같은 셀러·윈도우 동시 create가 같은 엔트리를 두 묶음에 이중 편입(lost update)→ 실송금 2회 가능이던 것을 **원자적 조건부 UPDATE `SettlementRepository.claimForPayout`(payout_id IS NULL 대상만)+편입수 검증(경합 시 409·롤백)**으로 교정(재고예약#2·쿠폰claim과 동형·**스키마 무변경**). `PayoutConcurrencyTest`(8스레드→정확히 1건·이중지급 0)+경합 패자 단위 테스트. ⚠️MySQL 스모크(조건부 UPDATE는 DB-agnostic이라 H2로 실증됨·복귀 후 확인은 선택).
+- ✅ **일괄 배송전진 운송장 복제** — `Order.advanceShipping`. 멀티셀러 일괄 전진이 하나의 운송장을 전 shipment에 복제하던 #1 회귀를, **전진 대상 2건+ && 송장 동반이면 400(per-shipment 유도)·단일셀러/상태-only 허용**으로 교정(오너 확정=선택적 거부안). `OrderTest` 가드 3종+컨트롤러 API 문서 갱신.
 
 **LOW (참고 · 미검증 · 전부 결정/런타임 필요):**
 - `OrderExpiryService.expireOne`(:91) 만 `findById`(무락)라 "모든 상태변경 경로 부모주문 비관락"(INV9) 유일 위반 — **현재 PENDING 전용이라 무해**(Order @Version이 경합 차단), 만료를 비-PENDING(미출고 PAID 자동취소 등)으로 확장하면 위험. `findByIdForUpdate` 통일 or INV9에 예외 명시(런타임 스모크 권장).
