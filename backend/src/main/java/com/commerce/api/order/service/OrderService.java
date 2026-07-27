@@ -42,6 +42,7 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final StockReservationService stockReservationService;   // 예약 해제·항목별 재고 되돌리기(#2·#1)
     private final ShippingPolicy shippingPolicy;   // 배송비 정책값 노출(#4, FE 표시용)
+    private final OrderEventEmitter orderEventEmitter;   // 상태 변경 → 구매자 알림 이벤트(#6 P2)
 
     /**
      * 주문 생성. 동시 재고 차감으로 낙관적 락 충돌이 나면 최대 3회까지 (새 트랜잭션으로) 재시도.
@@ -171,7 +172,9 @@ public class OrderService {
             String courier, String trackingNumber) {
         // 부모 주문을 비관적 락으로 — shipment 단위 전진(worker)·동시 취소와 같은 락으로 직렬화(#1 리뷰 교정).
         Order order = findOrderForUpdate(id);
+        OrderStatus before = order.getStatus();
         order.advanceShipping(next, changedBy, courier, trackingNumber);   // shipment 일괄 전진 + rollup
+        orderEventEmitter.emitIfStatusBecameNotifiable(order, before);     // 주문이 SHIPPING/DELIVERED 되면 구매자 알림(#6 P2)
         return OrderResponse.from(order);
     }
 

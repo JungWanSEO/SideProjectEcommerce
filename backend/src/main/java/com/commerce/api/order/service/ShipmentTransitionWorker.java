@@ -4,6 +4,7 @@ import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.order.dto.OrderResponse;
 import com.commerce.api.order.dto.SellerShipmentResponse;
 import com.commerce.api.order.entity.Order;
+import com.commerce.api.order.entity.OrderStatus;
 import com.commerce.api.order.entity.Shipment;
 import com.commerce.api.order.entity.ShipmentStatus;
 import com.commerce.api.order.repository.OrderRepository;
@@ -31,6 +32,7 @@ public class ShipmentTransitionWorker {
 
     private final ShipmentRepository shipmentRepository;
     private final OrderRepository orderRepository;
+    private final OrderEventEmitter orderEventEmitter;   // 상태 변경 → 구매자 알림 이벤트(#6 P2)
 
     /** 인가 확인 없이 전진(내부/동시성 테스트용). */
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -90,8 +92,10 @@ public class ShipmentTransitionWorker {
 
     /** 전이 + 주문 status rollup 재계산(파생). 응답 형태는 호출자가 결정. */
     private void applyTransition(Loaded l, ShipmentStatus next, Long changedBy, String courier, String trackingNumber) {
+        OrderStatus before = l.order.getStatus();
         l.shipment.advanceShipping(next, changedBy, courier, trackingNumber);
         l.order.recomputeStatusFromShipments(changedBy, null);   // 주문 status는 shipment rollup 파생
+        orderEventEmitter.emitIfStatusBecameNotifiable(l.order, before);   // 주문이 SHIPPING/DELIVERED 되면 구매자 알림(#6 P2)
     }
 
     private record Loaded(Order order, Shipment shipment) {

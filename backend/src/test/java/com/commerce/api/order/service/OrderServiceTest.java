@@ -43,6 +43,8 @@ class OrderServiceTest {
     private OrderRepository orderRepository;
     @Mock
     private com.commerce.api.product.service.StockReservationService stockReservationService;   // 항목별 재고 되돌리기(#2·#1)
+    @Mock
+    private OrderEventEmitter orderEventEmitter;   // 상태 변경 → 구매자 알림 이벤트(#6 P2, void no-op)
 
     @InjectMocks
     private OrderService orderService;
