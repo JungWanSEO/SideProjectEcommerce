@@ -18,6 +18,20 @@ export interface PageResponse<T> {
   hasNext: boolean;
 }
 
+/** 알림 성격 (#6) */
+export type NotificationCategory = "TRANSACTIONAL" | "MARKETING";
+
+/** 인앱 알림 한 건 (#6) */
+export interface Notification {
+  id: number;
+  type: string;
+  category: NotificationCategory;
+  message: string;
+  link: string | null;
+  read: boolean;
+  createdAt: string;
+}
+
 /** 커서 기반(no-offset) 피드 응답 — GET /api/products/feed. nextCursor를 다음 요청 cursor로 넘긴다. */
 export interface ProductCursorResponse {
   items: Product[];
