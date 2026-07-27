@@ -2,6 +2,7 @@ package com.commerce.api.payment.service;
 
 import com.commerce.api.coupon.service.MemberCouponService;
 import com.commerce.api.global.exception.BusinessException;
+import com.commerce.api.global.common.CancelReason;
 import com.commerce.api.order.dto.OrderResponse;
 import com.commerce.api.order.entity.OrderStatus;
 import com.commerce.api.order.service.OrderService;
@@ -105,10 +106,10 @@ public class PaymentService {
      * 보강한다 — architecture.md §13.5.)
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public OrderResponse cancelOrder(Long memberId, Long orderId, boolean admin) {
+    public OrderResponse cancelOrder(Long memberId, Long orderId, boolean admin, CancelReason reason) {
         // 1) 주문 취소 위임 — 소유권(404/403) + 상태 가드 + 취소된 항목만 재고 되돌림. 멀티셀러(#1 c안)에선
-        //    출고 전 항목만 취소되는 <b>부분 취소</b>일 수 있다(출고된 셀러 항목은 남는다).
-        OrderResponse cancelled = orderService.cancel(orderId, memberId, admin);
+        //    출고 전 항목만 취소되는 <b>부분 취소</b>일 수 있다(출고된 셀러 항목은 남는다). 사유는 항목에 기록(#8).
+        OrderResponse cancelled = orderService.cancel(orderId, memberId, admin, reason);
         // 발급형 쿠폰 복원은 주문이 <b>전부</b> 취소됐을 때만 — 부분 취소면 남은(출고된) 항목에 쿠폰이 유효하다.
         if (cancelled.status() == OrderStatus.CANCELLED) {
             memberCouponService.release(cancelled.memberId(), cancelled.couponCode());
@@ -149,8 +150,8 @@ public class PaymentService {
      * 정산 상계(역분개)는 settlement 도메인의 reverseRefunds 배치가 사후 처리한다(settlement → order/payment 단방향).
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public OrderResponse cancelOrderItem(Long memberId, Long orderId, Long orderItemId, boolean admin) {
-        OrderResponse order = orderService.cancelItem(orderId, orderItemId, memberId, admin);
+    public OrderResponse cancelOrderItem(Long memberId, Long orderId, Long orderItemId, boolean admin, CancelReason reason) {
+        OrderResponse order = orderService.cancelItem(orderId, orderItemId, memberId, admin, reason);
 
         // 환불액 = (잔여 결제액) − (취소 후 남은 활성 payable). cancelOrder와 <b>같은 잔여-활성 공식으로 통일</b>한다(#4).
         //   이 공식은 이번에 취소된 항목의 실효가와 같되(무배송 세계선 기존 항목-실효가와 수학적 동치), 마지막 활성

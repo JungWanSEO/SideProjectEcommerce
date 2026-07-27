@@ -1,6 +1,7 @@
 package com.commerce.api.order.entity;
 
 import com.commerce.api.global.common.BaseEntity;
+import com.commerce.api.global.common.CancelReason;
 import com.commerce.api.global.exception.BusinessException;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
@@ -279,6 +280,11 @@ public class Order extends BaseEntity {
      * (재고 되돌리기·환불 금액 산정용 — 호출자 OrderService/PaymentService가 이 집합에만 재고 복원/환불을 적용).
      */
     public List<OrderItem> cancel(Long changedBy, String memo) {
+        return cancel(changedBy, memo, null);
+    }
+
+    /** 주문 취소 + 취소 사유 기록(#8). 취소된 각 항목에 사유를 남긴다(기록·집계 전용). */
+    public List<OrderItem> cancel(Long changedBy, String memo, CancelReason reason) {
         if (this.status == OrderStatus.CANCELLED) {
             throw new BusinessException(HttpStatus.CONFLICT, "이미 취소된 주문입니다.");
         }
@@ -289,7 +295,7 @@ public class Order extends BaseEntity {
             throw new BusinessException(HttpStatus.CONFLICT, "배송이 시작되어 취소할 수 있는 항목이 없습니다.");
         }
         for (OrderItem item : cancellable) {
-            cancelItemInternal(item, changedBy);
+            cancelItemInternal(item, changedBy, reason);
         }
         applyCancellationRollup(changedBy, memo);
         return cancellable;
@@ -297,7 +303,7 @@ public class Order extends BaseEntity {
 
     /** 항목 단위 취소 — 주체 미상. */
     public OrderItem cancelItem(Long orderItemId) {
-        return cancelItem(orderItemId, null);
+        return cancelItem(orderItemId, null, null);
     }
 
     /**
@@ -306,6 +312,11 @@ public class Order extends BaseEntity {
      * 모든 shipment(또는 PENDING의 모든 항목)가 취소되면 주문도 CANCELLED로 rollup된다. 취소된 항목을 반환한다.
      */
     public OrderItem cancelItem(Long orderItemId, Long changedBy) {
+        return cancelItem(orderItemId, changedBy, null);
+    }
+
+    /** 항목 단위 취소 + 취소 사유 기록(#8). */
+    public OrderItem cancelItem(Long orderItemId, Long changedBy, CancelReason reason) {
         OrderItem target = orderItems.stream()
                 .filter(i -> orderItemId.equals(i.getId()))
                 .findFirst()
@@ -316,14 +327,14 @@ public class Order extends BaseEntity {
         if (!isItemCancellable(target)) {
             throw new BusinessException(HttpStatus.CONFLICT, "배송이 시작된 항목은 취소할 수 없습니다.");
         }
-        cancelItemInternal(target, changedBy);
+        cancelItemInternal(target, changedBy, reason);
         applyCancellationRollup(changedBy, "항목 취소");
         return target;
     }
 
-    /** 항목을 CANCELLED로 만들고, 그 셀러의 남은 활성 항목이 없으면 그 셀러 shipment도 취소한다(내부 공통). */
-    private void cancelItemInternal(OrderItem item, Long changedBy) {
-        item.cancel();
+    /** 항목을 CANCELLED(사유 기록)로 만들고, 그 셀러의 남은 활성 항목이 없으면 그 셀러 shipment도 취소한다(내부 공통). */
+    private void cancelItemInternal(OrderItem item, Long changedBy, CancelReason reason) {
+        item.cancel(reason);
         Shipment shipment = shipmentForItem(item);
         if (shipment != null && shipment.getStatus() == ShipmentStatus.PAID) {
             boolean sellerHasActive = orderItems.stream()

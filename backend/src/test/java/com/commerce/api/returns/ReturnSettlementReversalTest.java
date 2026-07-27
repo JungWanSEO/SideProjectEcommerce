@@ -74,7 +74,7 @@ class ReturnSettlementReversalTest {
 
         // 반품 전액환불 → Payment CANCELLED, OrderItem RETURNED
         ReturnResponse req = returnService.create(100L, false, orderId,
-                new ReturnCreateRequest(itemId, ReturnType.RETURN, "변심", null));
+                new ReturnCreateRequest(itemId, ReturnType.RETURN, "변심", null, null));
         returnService.advanceForSeller(req.id(), sellerId, act(ReturnAction.APPROVE), 1L);
         returnService.advanceForSeller(req.id(), sellerId, act(ReturnAction.PICK_UP), 1L);
         returnService.advanceForSeller(req.id(), sellerId, act(ReturnAction.INSPECT), 1L);

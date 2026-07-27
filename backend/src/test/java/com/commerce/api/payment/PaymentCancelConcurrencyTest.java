@@ -56,8 +56,8 @@ class PaymentCancelConcurrencyTest {
         paymentRepository.saveAndFlush(payment);
 
         runConcurrently(
-                () -> paymentService.cancelOrderItem(100L, orderId, itemA, false),
-                () -> paymentService.cancelOrderItem(100L, orderId, itemB, false));
+                () -> paymentService.cancelOrderItem(100L, orderId, itemA, false, null),
+                () -> paymentService.cancelOrderItem(100L, orderId, itemB, false, null));
 
         Payment after = paymentRepository.findById(payment.getId()).orElseThrow();
         assertThat(after.getRefundedAmount()).isEqualTo(9000L);            // 두 환불(5000+4000) 모두 누적 — lost update 없음

@@ -14,11 +14,11 @@ import org.junit.jupiter.api.Test;
 class ReturnRequestTest {
 
     private ReturnRequest returnReq() {
-        return ReturnRequest.create(1L, 10L, 100L, 7L, 500L, ReturnType.RETURN, "단순변심", 1, null);
+        return ReturnRequest.create(1L, 10L, 100L, 7L, 500L, ReturnType.RETURN, "단순변심", null, 1, null);
     }
 
     private ReturnRequest exchangeReq() {
-        return ReturnRequest.create(1L, 10L, 100L, 7L, 500L, ReturnType.EXCHANGE, "사이즈 교환", 1, 22L);
+        return ReturnRequest.create(1L, 10L, 100L, 7L, 500L, ReturnType.EXCHANGE, "사이즈 교환", null, 1, 22L);
     }
 
     @Test
@@ -34,11 +34,20 @@ class ReturnRequestTest {
     }
 
     @Test
+    @DisplayName("사유 코드(#8) - 생성 시 구조화된 reasonCode를 저장한다(기록·집계 전용)")
+    void create_storesReasonCode() {
+        ReturnRequest r = ReturnRequest.create(1L, 10L, 100L, 7L, 500L, ReturnType.RETURN, "불량이에요",
+                com.commerce.api.global.common.CancelReason.DEFECTIVE, 1, null);
+        assertThat(r.getReasonCode()).isEqualTo(com.commerce.api.global.common.CancelReason.DEFECTIVE);
+        assertThat(returnReq().getReasonCode()).isNull();   // 미지정이면 null(레거시 허용)
+    }
+
+    @Test
     @DisplayName("생성 검증 - 교환은 옵션 필수, 반품은 옵션 금지(400)")
     void createValidation() {
-        assertThatThrownBy(() -> ReturnRequest.create(1L, 10L, 100L, 7L, 500L, ReturnType.EXCHANGE, "x", 1, null))
+        assertThatThrownBy(() -> ReturnRequest.create(1L, 10L, 100L, 7L, 500L, ReturnType.EXCHANGE, "x", null, 1, null))
                 .isInstanceOf(BusinessException.class);
-        assertThatThrownBy(() -> ReturnRequest.create(1L, 10L, 100L, 7L, 500L, ReturnType.RETURN, "x", 1, 22L))
+        assertThatThrownBy(() -> ReturnRequest.create(1L, 10L, 100L, 7L, 500L, ReturnType.RETURN, "x", null, 1, 22L))
                 .isInstanceOf(BusinessException.class);
     }
 

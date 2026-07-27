@@ -69,7 +69,12 @@ public class ReturnRequest extends BaseEntity {
     private ReturnStatus status;
 
     @Column(length = 255)
-    private String reason;
+    private String reason;   // 구매자 자유텍스트 사유(상세)
+
+    /** 구조화된 사유 코드(#8, 기록·집계 전용). 반품/교환 요청 시 구매자가 선택. 없으면 null(레거시). */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "reason_code", length = 30)
+    private com.commerce.api.global.common.CancelReason reasonCode;
 
     @Column(nullable = false)
     private int quantity;      // v1=라인 전량(OrderItem.quantity 스냅샷). 부분수량 반품은 후속(컬럼 선확보).
@@ -92,7 +97,8 @@ public class ReturnRequest extends BaseEntity {
     private List<ReturnStatusHistory> statusHistory = new ArrayList<>();
 
     private ReturnRequest(Long orderId, Long orderItemId, Long shipmentId, Long sellerId, Long memberId,
-                          ReturnType type, String reason, int quantity, Long exchangeOptionId) {
+                          ReturnType type, String reason,
+                          com.commerce.api.global.common.CancelReason reasonCode, int quantity, Long exchangeOptionId) {
         this.orderId = orderId;
         this.orderItemId = orderItemId;
         this.shipmentId = shipmentId;
@@ -100,6 +106,7 @@ public class ReturnRequest extends BaseEntity {
         this.memberId = memberId;
         this.type = type;
         this.reason = reason;
+        this.reasonCode = reasonCode;
         this.quantity = quantity;
         this.exchangeOptionId = exchangeOptionId;
         this.restock = true;   // 기본 재입고, 검수에서 하자 시 false로
@@ -109,17 +116,20 @@ public class ReturnRequest extends BaseEntity {
 
     /**
      * 반품/교환 요청 생성(REQUESTED). sellerId는 <b>대상 OrderItem에서 서버가 도출</b>해 넘긴다(클라 입력 금지 — IDOR).
-     * 교환이면 exchangeOptionId 필수(같은 상품 다른 옵션), 반품이면 null.
+     * 교환이면 exchangeOptionId 필수(같은 상품 다른 옵션), 반품이면 null. reasonCode(#8)는 구조화된 사유(선택).
      */
     public static ReturnRequest create(Long orderId, Long orderItemId, Long shipmentId, Long sellerId, Long memberId,
-                                       ReturnType type, String reason, int quantity, Long exchangeOptionId) {
+                                       ReturnType type, String reason,
+                                       com.commerce.api.global.common.CancelReason reasonCode,
+                                       int quantity, Long exchangeOptionId) {
         if (type == ReturnType.EXCHANGE && exchangeOptionId == null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "교환은 대상 옵션이 필요합니다.");
         }
         if (type == ReturnType.RETURN && exchangeOptionId != null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "반품에는 교환 옵션을 지정할 수 없습니다.");
         }
-        return new ReturnRequest(orderId, orderItemId, shipmentId, sellerId, memberId, type, reason, quantity, exchangeOptionId);
+        return new ReturnRequest(orderId, orderItemId, shipmentId, sellerId, memberId, type, reason,
+                reasonCode, quantity, exchangeOptionId);
     }
 
     // === 상태 전이 (forward-only, 엔티티 강제) =========================================

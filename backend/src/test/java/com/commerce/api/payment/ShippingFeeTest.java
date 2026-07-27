@@ -66,7 +66,7 @@ class ShippingFeeTest {
         long[] ids = paidOrderWithShipping();
         long orderId = ids[0], paymentId = ids[3];
 
-        paymentService.cancelOrder(100L, orderId, false);
+        paymentService.cancelOrder(100L, orderId, false, null);
 
         Payment after = paymentRepository.findById(paymentId).orElseThrow();
         assertThat(after.getRefundedAmount()).isEqualTo(33000L);            // 소계 30000 + 배송비 3000
@@ -80,7 +80,7 @@ class ShippingFeeTest {
         long[] ids = paidOrderWithShipping();
         long orderId = ids[0], itemA = ids[1], paymentId = ids[3];
 
-        paymentService.cancelOrderItem(100L, orderId, itemA, false);
+        paymentService.cancelOrderItem(100L, orderId, itemA, false, null);
 
         Payment after = paymentRepository.findById(paymentId).orElseThrow();
         assertThat(after.getRefundedAmount()).isEqualTo(10000L);            // A만, 배송비 유지
@@ -93,8 +93,8 @@ class ShippingFeeTest {
         long[] ids = paidOrderWithShipping();
         long orderId = ids[0], itemA = ids[1], itemB = ids[2], paymentId = ids[3];
 
-        paymentService.cancelOrderItem(100L, orderId, itemA, false);   // 10000 환불(배송비 유지)
-        paymentService.cancelOrderItem(100L, orderId, itemB, false);   // 20000 + 배송비 3000 환불
+        paymentService.cancelOrderItem(100L, orderId, itemA, false, null);   // 10000 환불(배송비 유지)
+        paymentService.cancelOrderItem(100L, orderId, itemB, false, null);   // 20000 + 배송비 3000 환불
 
         Payment after = paymentRepository.findById(paymentId).orElseThrow();
         assertThat(after.getRefundedAmount()).isEqualTo(33000L);            // 전액(배송비 포함) 도달
@@ -117,7 +117,7 @@ class ShippingFeeTest {
         paymentRepository.saveAndFlush(payment);
 
         // 이제 마지막 활성 항목 B를 취소 — 활성은 0이 되지만 A가 RETURNED라 전량취소 아님 → 배송비 유지
-        paymentService.cancelOrderItem(100L, orderId, itemB, false);
+        paymentService.cancelOrderItem(100L, orderId, itemB, false, null);
 
         Payment after = paymentRepository.findById(paymentId).orElseThrow();
         assertThat(after.getRefundedAmount()).isEqualTo(30000L);            // A 10000 + B 20000, 배송비 3000 유지

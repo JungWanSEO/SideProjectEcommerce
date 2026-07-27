@@ -59,7 +59,7 @@ class ReturnWorkflowTest {
         long itemId = order.getOrderItems().get(0).getId();
 
         ReturnResponse req = returnService.create(100L, false, order.getId(),
-                new ReturnCreateRequest(itemId, ReturnType.RETURN, "단순 변심", null));
+                new ReturnCreateRequest(itemId, ReturnType.RETURN, "단순 변심", null, null));
         assertThat(req.status()).isEqualTo(ReturnStatus.REQUESTED);
         assertThat(req.sellerId()).isEqualTo(1L);   // 서버가 항목에서 도출
 
@@ -82,7 +82,7 @@ class ReturnWorkflowTest {
         long itemId = saved.getOrderItems().get(0).getId();
 
         assertThatThrownBy(() -> returnService.create(100L, false, saved.getId(),
-                new ReturnCreateRequest(itemId, ReturnType.RETURN, "x", null)))
+                new ReturnCreateRequest(itemId, ReturnType.RETURN, "x", null, null)))
                 .isInstanceOf(BusinessException.class).extracting("status").isEqualTo(HttpStatus.CONFLICT);
     }
 
@@ -105,7 +105,7 @@ class ReturnWorkflowTest {
 
         // A(CANCELLED)로 반품 요청 → 배송완료 게이트는 통과하지만 ACTIVE 게이트에서 409
         assertThatThrownBy(() -> returnService.create(100L, false, order.getId(),
-                new ReturnCreateRequest(aId, ReturnType.RETURN, "x", null)))
+                new ReturnCreateRequest(aId, ReturnType.RETURN, "x", null, null)))
                 .isInstanceOf(BusinessException.class).extracting("status").isEqualTo(HttpStatus.CONFLICT);
     }
 
@@ -115,10 +115,10 @@ class ReturnWorkflowTest {
         Order order = deliveredOrder();
         long itemId = order.getOrderItems().get(0).getId();
         returnService.create(100L, false, order.getId(),
-                new ReturnCreateRequest(itemId, ReturnType.RETURN, "1차", null));
+                new ReturnCreateRequest(itemId, ReturnType.RETURN, "1차", null, null));
 
         assertThatThrownBy(() -> returnService.create(100L, false, order.getId(),
-                new ReturnCreateRequest(itemId, ReturnType.RETURN, "2차", null)))
+                new ReturnCreateRequest(itemId, ReturnType.RETURN, "2차", null, null)))
                 .isInstanceOf(BusinessException.class).extracting("status").isEqualTo(HttpStatus.CONFLICT);
     }
 
@@ -130,11 +130,11 @@ class ReturnWorkflowTest {
 
         // 남의 주문(멤버 999) 반품 요청 → 403
         assertThatThrownBy(() -> returnService.create(999L, false, order.getId(),
-                new ReturnCreateRequest(itemId, ReturnType.RETURN, "x", null)))
+                new ReturnCreateRequest(itemId, ReturnType.RETURN, "x", null, null)))
                 .isInstanceOf(BusinessException.class).extracting("status").isEqualTo(HttpStatus.FORBIDDEN);
 
         ReturnResponse req = returnService.create(100L, false, order.getId(),
-                new ReturnCreateRequest(itemId, ReturnType.RETURN, "x", null));
+                new ReturnCreateRequest(itemId, ReturnType.RETURN, "x", null, null));
 
         // 셀러2가 셀러1 반품 처리 → 403
         assertThatThrownBy(() -> returnService.advanceForSeller(req.id(), 2L, action(ReturnAction.APPROVE), 2L))
@@ -153,7 +153,7 @@ class ReturnWorkflowTest {
 
         // ADMIN(id=1)이 admin=true로 대행 생성 → 소유자는 caller(1)가 아니라 구매자(100)여야 /returns/me로 조회 가능
         ReturnResponse req = returnService.create(1L, true, order.getId(),
-                new ReturnCreateRequest(itemId, ReturnType.RETURN, "대행 접수", null));
+                new ReturnCreateRequest(itemId, ReturnType.RETURN, "대행 접수", null, null));
         assertThat(req.memberId()).isEqualTo(100L);
     }
 
@@ -163,7 +163,7 @@ class ReturnWorkflowTest {
         Order order = deliveredOrder();
         long itemId = order.getOrderItems().get(0).getId();
         ReturnResponse req = returnService.create(100L, false, order.getId(),
-                new ReturnCreateRequest(itemId, ReturnType.EXCHANGE, "사이즈 교환", 999_999L));   // 없는 옵션
+                new ReturnCreateRequest(itemId, ReturnType.EXCHANGE, "사이즈 교환", null, 999_999L));   // 없는 옵션
         returnService.advanceForSeller(req.id(), 1L, action(ReturnAction.APPROVE), 1L);
         returnService.advanceForSeller(req.id(), 1L, action(ReturnAction.PICK_UP), 1L);
         returnService.advanceForSeller(req.id(), 1L, action(ReturnAction.INSPECT), 1L);

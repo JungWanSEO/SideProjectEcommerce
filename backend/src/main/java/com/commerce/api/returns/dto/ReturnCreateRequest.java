@@ -1,5 +1,6 @@
 package com.commerce.api.returns.dto;
 
+import com.commerce.api.global.common.CancelReason;
 import com.commerce.api.returns.entity.ReturnType;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
@@ -19,8 +20,11 @@ public record ReturnCreateRequest(
         ReturnType type,
 
         @Size(max = 255, message = "사유는 255자 이내여야 합니다.")
-        @Schema(description = "사유", example = "단순 변심")
+        @Schema(description = "자유텍스트 상세 사유", example = "단순 변심")
         String reason,
+
+        @Schema(description = "구조화된 사유 코드(#8, 기록·집계용·선택)", example = "CHANGE_OF_MIND")
+        CancelReason reasonCode,
 
         @Schema(description = "교환 대상 옵션 ID(EXCHANGE일 때 필수, 같은 상품 다른 옵션)", example = "22")
         Long exchangeOptionId

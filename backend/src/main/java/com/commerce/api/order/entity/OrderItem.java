@@ -67,6 +67,11 @@ public class OrderItem extends BaseEntity {
     @Column(nullable = false, length = 20)
     private OrderItemStatus status;   // 부분환불(항목 단위 취소) 지원 — 기본 ACTIVE
 
+    /** 취소 사유(#8, 기록·집계 전용). 항목 취소 시 세팅, 그 전엔 null. 시스템 취소(만료 등)는 null. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "cancel_reason", length = 30)
+    private com.commerce.api.global.common.CancelReason cancelReason;
+
     @Builder
     private OrderItem(Long productId, Long optionId, Long brandId, Long sellerId, String productName,
                       String size, long orderPrice, int quantity) {
@@ -81,12 +86,18 @@ public class OrderItem extends BaseEntity {
         this.status = OrderItemStatus.ACTIVE;
     }
 
-    /** 항목 취소(부분환불). ACTIVE에서만 — 이미 취소·반품된 항목이면 409(이중 원장 차단). */
+    /** 항목 취소(부분환불) — 사유 미상(시스템·내부). {@link #cancel(com.commerce.api.global.common.CancelReason)}로 위임. */
     public void cancel() {
+        cancel(null);
+    }
+
+    /** 항목 취소(부분환불) + 사유 기록(#8). ACTIVE에서만 — 이미 취소·반품된 항목이면 409(이중 원장 차단). */
+    public void cancel(com.commerce.api.global.common.CancelReason reason) {
         if (this.status != OrderItemStatus.ACTIVE) {
             throw new BusinessException(HttpStatus.CONFLICT, "취소할 수 없는 주문 항목입니다. (현재: " + this.status + ")");
         }
         this.status = OrderItemStatus.CANCELLED;
+        this.cancelReason = reason;
     }
 
     /** 항목 반품 확정(#3). ACTIVE에서만 RETURNED로 — 취소된 항목 반품·이중 반품을 구조적으로 차단. */

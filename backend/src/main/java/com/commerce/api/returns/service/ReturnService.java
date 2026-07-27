@@ -73,7 +73,7 @@ public class ReturnService {
         // 소유권은 실제 구매자(order.memberId)로 귀속 — ADMIN 대행(admin=true) 생성 시에도 구매자가 자기 반품을
         // /returns/me로 조회·추적할 수 있게 한다(적대적리뷰 LOW: caller(admin) id로 귀속되던 문제 교정).
         ReturnRequest r = ReturnRequest.create(orderId, req.orderItemId(), ctx.shipmentId(), ctx.sellerId(),
-                order.getMemberId(), req.type(), req.reason(), ctx.quantity(), req.exchangeOptionId());
+                order.getMemberId(), req.type(), req.reason(), req.reasonCode(), ctx.quantity(), req.exchangeOptionId());
         returnRequestRepository.save(r);
         return ReturnResponse.from(r);
     }

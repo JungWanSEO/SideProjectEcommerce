@@ -85,7 +85,7 @@ class SettlementServiceTest {
     }
 
     private OrderItemResponse item(Long sellerId, long subtotal, long discountShare, OrderItemStatus status) {
-        return new OrderItemResponse(1L, 1L, 1L, null, sellerId, "P", "M", subtotal, 1, subtotal, discountShare, status);
+        return new OrderItemResponse(1L, 1L, 1L, null, sellerId, "P", "M", subtotal, 1, subtotal, discountShare, status, null);
     }
 
     /** 이미 정산된 항목(역분개 테스트용) — platformFeeRate 0.10 스냅샷. */

@@ -1,5 +1,6 @@
 package com.commerce.api.order.service;
 
+import com.commerce.api.global.common.CancelReason;
 import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.order.dto.CheckoutRequest;
@@ -180,12 +181,12 @@ public class OrderService {
      * 본인 주문이거나 ADMIN일 때만 허용. 취소 가능한 항목이 하나도 없으면 409.
      */
     @Transactional
-    public OrderResponse cancel(Long id, Long requesterId, boolean admin) {
+    public OrderResponse cancel(Long id, Long requesterId, boolean admin, CancelReason reason) {
         // 부모 주문 비관적 락 — shipment 전진·동시 취소와 직렬화(#1 리뷰 교정, PG 환불 이전에). 격리는 호출자
         //   PaymentService.cancelOrder(READ_COMMITTED)가 정한다 → 락 이후 형제 shipment를 fresh로 읽는다.
         Order order = findOwnedOrderForUpdate(id, requesterId, admin);
-        // 취소된 항목만 정확히 되돌린다(이미 취소됐거나 출고된 항목은 대상 아님 — 이중 복원 방지).
-        for (OrderItem item : order.cancel(requesterId, admin ? "관리자 취소" : "주문자 취소")) {
+        // 취소된 항목만 정확히 되돌린다(이미 취소됐거나 출고된 항목은 대상 아님 — 이중 복원 방지). 사유는 각 항목에 기록(#8).
+        for (OrderItem item : order.cancel(requesterId, admin ? "관리자 취소" : "주문자 취소", reason)) {
             stockReservationService.undoForOrderItem(item.getId());
         }
         return OrderResponse.from(order);
@@ -198,11 +199,11 @@ public class OrderService {
      * 이 항목 재고가 정확히 돌아온다. (PG 부분 환불은 호출자=PaymentService가 이어서 처리 — 순환 의존 회피.)
      */
     @Transactional
-    public OrderResponse cancelItem(Long orderId, Long orderItemId, Long requesterId, boolean admin) {
+    public OrderResponse cancelItem(Long orderId, Long orderItemId, Long requesterId, boolean admin, CancelReason reason) {
         // 부모 주문 비관적 락(#1 리뷰 교정) — 동시 항목취소/전진과 직렬화. 이 락이 결제 원장 읽기·갱신도 보호해
         //   Payment.refundedAmount lost update(리뷰 #2)를 함께 막는다(PaymentService가 이 락을 잡은 뒤 결제를 만진다).
         Order order = findOwnedOrderForUpdate(orderId, requesterId, admin);
-        OrderItem cancelled = order.cancelItem(orderItemId, requesterId);   // shipment-grain 취소 가능 판정 + rollup
+        OrderItem cancelled = order.cancelItem(orderItemId, requesterId, reason);   // shipment-grain 취소 가능 판정 + rollup + 사유(#8)
         stockReservationService.undoForOrderItem(cancelled.getId());
         return OrderResponse.from(order);
     }
