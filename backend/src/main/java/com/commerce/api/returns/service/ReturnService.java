@@ -76,6 +76,7 @@ public class ReturnService {
         ReturnRequest r = ReturnRequest.create(orderId, req.orderItemId(), ctx.shipmentId(), ctx.sellerId(),
                 order.getMemberId(), req.type(), req.reason(), req.reasonCode(), ctx.quantity(), req.exchangeOptionId());
         returnRequestRepository.save(r);
+        returnEventEmitter.emitStatusChanged(r);   // REQUESTED → 셀러에게 "반품 요청 접수" 알림(#6 P3b·같은 tx라 원자적)
         return ReturnResponse.from(r);
     }
 

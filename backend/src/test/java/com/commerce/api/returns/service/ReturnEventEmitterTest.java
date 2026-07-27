@@ -43,6 +43,7 @@ class ReturnEventEmitterTest {
         given(r.getId()).willReturn(7L);
         given(r.getOrderId()).willReturn(10L);
         given(r.getMemberId()).willReturn(99L);
+        given(r.getSellerId()).willReturn(700L);
         given(r.getStatus()).willReturn(ReturnStatus.APPROVED);
         given(r.getType()).willReturn(ReturnType.RETURN);
 
@@ -50,6 +51,6 @@ class ReturnEventEmitterTest {
 
         ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
         verify(outboxService).append(eq("RETURN_STATUS_CHANGED"), eq("RETURN"), eq("7"), payload.capture());
-        assertThat(payload.getValue()).contains("APPROVED").contains("99").contains("RETURN");
+        assertThat(payload.getValue()).contains("APPROVED").contains("99").contains("700").contains("RETURN");
     }
 }
