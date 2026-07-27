@@ -40,8 +40,8 @@
 6. **알림 인박스(벨) + 재입고 알림** — **📐 청사진 [docs/notification-matrix.md](notification-matrix.md)**. **🚧 진행 중(P1~P3 MVP 착수)**:
    - ✅ **P1(루프 완성, 07-27 dev `3cd1aaf`, 687 tests)** — `NotificationLog`에 수신자/읽음/성격/딥링크 + **복합 멱등키(event_id+recipient·팬아웃 함정 차단, V53)**. `PAYMENT_COMPLETED`→구매자 인박스. 조회/안읽음카운트/읽음/전체읽음 API(본인 스코프). ⚠️V53 MySQL 스모크=복귀 후.
    - ✅ **P2(buyer 거래알림, 07-27)** — 배송시작/완료(P2a `abddc0b`, `ORDER_STATUS_CHANGED`)·전체취소/환불(P2b `52b5f63`, CANCELLED 재사용)·반품 승인~환불/교환완료(P2c `ce3ec58`, `RETURN_STATUS_CHANGED`). emitter가 상태 전이와 같은 트랜잭션에서 발행(아웃박스 원자성). **687→701 tests**. 부분취소+부분환불 알림은 후속(주문 status 불변이라 별도 환불 이벤트 필요).
-   - ⬜ **P3(seller 알림)** — 새 주문 인입·반품요청 → seller 스코프. 복합 멱등키 fan-out(1 이벤트→N 셀러) 실증·IDOR(셀러 자기 것만).
-   - ⬜ **FE 벨** — 헤더 안읽음 뱃지 + 인박스 드롭다운/목록.
+   - ✅ **P3(seller 알림, 07-27)** — P3a 새 주문 fan-out(`SellerNewOrderHandler`, PAYMENT_COMPLETED 두 번째 구독자·1 이벤트→N 셀러·복합키 실증·dev `9b56bd5`)·P3b 반품요청(`SellerReturnRequestedHandler`, REQUESTED만 셀러로·`446a92a`). `GET/PATCH /api/seller/me/notifications*`(SELLER 스코프·IDOR). **701→709 tests**. **#6 백엔드 P1~P3 완성.**
+   - ⬜ **FE 벨** — 헤더 안읽음 뱃지 + 인박스 드롭다운/목록(구매자 `/api/notifications`·셀러 `/api/seller/me/notifications`). #6의 남은 유일 조각.
    - (후속) 재입고(P4·`stock_subscription`·마케팅성/구독)·수신설정(preference)·외부 채널(이메일·카카오 알림톡=오너 트랙). 남은 결정=재입고 1차 포함 여부.
 7. ✅ **게스트 장바구니** — **완료(07-26, c안: 서버 토큰 카트+로그인 병합)** → DONE. cart_token 쿠키(UUID·httpOnly)·로그인 시 회원 카트로 수량 합산·`/api/carts` 게스트 허용. 남은 후속: 게스트 카트 TTL 정리 배치(고아 카트)·첫담기 동시성 레이스(v1 한계).
 8. ✅ **취소·환불 사유 taxonomy** — **완료(07-26, 기록·집계 전용안) → DONE**. `CancelReason` enum 7종(+`Fault` 귀책 메타)·취소(`order_item.cancel_reason`)+반품(`return_request.reason_code`) 공통·**V52 add-only·nullable**. **돈 경로 무연동(v1)** — Fault 메타는 향후 정산 귀책/왕복배송비 부담 연동용 확장 지점. 남은 후속(유예): 사유별 집계 대시보드·Fault→정산 귀책/왕복배송비 부담 연동·사유 필수화 정책.
