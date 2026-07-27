@@ -63,7 +63,16 @@ public class PayoutService {
         }
         Payout payout = payoutRepository.save(Payout.create(
                 request.sellerId(), request.from(), request.to(), gross, fee, platformFee, net, entries.size()));
-        entries.forEach(e -> e.assignPayout(payout.getId()));   // 묶음에 편입(영속 → dirty checking)
+
+        // 묶음 편입은 원자적 조건부 UPDATE로(동시성) — 조건절 없는 setter(dirty checking)는 같은 셀러·윈도우로 동시
+        //   create()가 겹치면 같은 항목을 두 묶음이 각각 잡아(lost update) 동일 엔트리 net을 이중지급할 수 있었다.
+        //   payout_id IS NULL인 대상만 잡고, 편입된 수가 요청 항목 수와 다르면 경합에 밀린 것이므로 롤백(payout 저장도 취소).
+        List<Long> ids = entries.stream().map(SettlementEntry::getId).toList();
+        int claimed = settlementRepository.claimForPayout(payout.getId(), ids);
+        if (claimed != entries.size()) {
+            throw new BusinessException(HttpStatus.CONFLICT,
+                    "정산 항목이 동시에 다른 지급 요청에 편입되었습니다. 잠시 후 다시 시도해 주세요.");
+        }
 
         return PayoutResponse.from(payout, sellerNameOf(request.sellerId()));
     }
