@@ -200,17 +200,25 @@ class DemoDataSeederTest {
     }
 
     @Test
-    @DisplayName("실제 결제가 물린 주문이 섞여 있으면 아무것도 지우지 않는다(안전장치)")
-    void neverTouchesOrdersWithRealPayment() {
+    @DisplayName("실제 결제가 물린 주문은 건드리지 않되, 그 존재가 시드 주문 재귀속을 막지도 않는다(주문 단위 판정)")
+    void keepsRealOrdersButStillAttributesSeedOrders() {
         Member demo1 = saveMember("demo1@commerce.com", Role.USER);
-        Order realOrder = saveUnattributedOrder(demo1);
+        Order realOrder = saveUnattributedOrder(demo1);   // 사람이 만든 주문(결제행 있음)
         paymentRepository.save(Payment.ready(realOrder.getId(), 1000L, "MOCK_CARD", "TOSS", "key-demo-safety"));
 
         seeder.seed();
 
-        // 결제행이 있으면 "시드가 만든 주문"이 아니다 → 전체 보존(부분 삭제로 데모가 반쪽 나는 것도 방지)
-        assertThat(orderRepository.findById(realOrder.getId())).isPresent();
-        assertThat(allDemoOrderIds()).containsExactly(realOrder.getId());
+        // 결제행이 있으면 "시드가 만든 주문"이 아니다 → 그대로 보존(정산·대사가 물려 있을 수 있다)
+        Order preserved = orderRepository.findById(realOrder.getId()).orElseThrow();
+        assertThat(preserved.getOrderItems()).allSatisfy(item -> assertThat(item.getSellerId()).isNull());
+        // 그러면서도 시드 주문은 새로 생성돼 귀속된다(예전엔 이 한 건 때문에 전체가 미귀속으로 남았다)
+        List<Order> seeded = ordersOf("demo1@commerce.com").stream()
+                .filter(o -> !o.getId().equals(realOrder.getId()))
+                .toList();
+        assertThat(seeded).isNotEmpty();
+        assertThat(seeded).allSatisfy(order ->
+                assertThat(order.getOrderItems()).allSatisfy(item ->
+                        assertThat(item.getSellerId()).isNotNull()));
     }
 
     // === 헬퍼 ===================================================================
