@@ -15,6 +15,7 @@ import com.commerce.api.order.dto.OrderSearchCondition;
 import com.commerce.api.order.dto.OrderSummaryResponse;
 import com.commerce.api.order.entity.Order;
 import com.commerce.api.order.entity.OrderItem;
+import com.commerce.api.order.entity.OrderItemStatus;
 import com.commerce.api.order.entity.OrderStatus;
 import com.commerce.api.order.repository.OrderRepository;
 import java.util.List;
@@ -140,8 +141,8 @@ class OrderServiceTest {
     }
 
     @Test
-    @DisplayName("항목 취소(미결제) - 그 항목 재고만 항목별로 되돌린다")
-    void cancelItem_pending_undoesItemReservation() {
+    @DisplayName("항목 취소(미결제) - 결제 전 주문은 항목별 취소 불가(409) — 쿠폰 안분 몫 소멸로 인한 과다청구 차단")
+    void cancelItem_pending_blocked() {
         OrderItem line1 = itemOn(10L, 2);
         OrderItem line2 = itemOn(20L, 3);
         Order order = orderWithId(1L, 100L, line1, line2);   // PENDING, 항목 2개
@@ -149,10 +150,12 @@ class OrderServiceTest {
         ReflectionTestUtils.setField(line2, "id", 501L);
         given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
-        orderService.cancelItem(1L, 500L, 100L, false, null);
+        assertThatThrownBy(() -> orderService.cancelItem(1L, 500L, 100L, false, null))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("결제 전 주문은 항목별 취소");
 
-        verify(stockReservationService).undoForOrderItem(500L);              // 그 항목만
-        verify(stockReservationService, never()).undoForOrderItem(501L);
+        assertThat(line1.getStatus()).isEqualTo(OrderItemStatus.ACTIVE);      // 항목도 그대로
+        verify(stockReservationService, never()).undoForOrderItem(any());     // 재고도 안 건드림(롤백 불필요)
     }
 
     @Test

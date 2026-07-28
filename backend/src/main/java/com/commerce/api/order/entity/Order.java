@@ -315,8 +315,20 @@ public class Order extends BaseEntity {
         return cancelItem(orderItemId, changedBy, null);
     }
 
-    /** 항목 단위 취소 + 취소 사유 기록(#8). */
+    /**
+     * 항목 단위 취소 + 취소 사유 기록(#8).
+     *
+     * <p><b>결제 전(PENDING) 주문은 항목별 취소를 막는다</b>(오너 결정). {@link #discountShares()}의 안분 기준은
+     * "주문 시점 전체 항목"이라 결제 전에 일부만 취소하면 <b>그 항목이 물고 있던 할인 몫이 그대로 소멸</b>해
+     * 고객이 쿠폰 액면보다 적게 할인받는다(1만원 쿠폰·6만/4만 → 4만 취소 시 5만이 아니라 5.4만 청구).
+     * 안분 기준을 활성 항목으로 바꾸는 대안은 결제 후 환불 공식("Σ실효가=결제액")을 깨므로 택하지 않았다.
+     * 결제 전에는 주문 전체를 취소하고 다시 담는 것이 정책(실무 커머스의 일반적 동작이기도 하다).
+     */
     public OrderItem cancelItem(Long orderItemId, Long changedBy, CancelReason reason) {
+        if (this.status == OrderStatus.PENDING) {
+            throw new BusinessException(HttpStatus.CONFLICT,
+                    "결제 전 주문은 항목별 취소를 지원하지 않습니다. 주문을 취소한 뒤 다시 담아 주세요.");
+        }
         OrderItem target = orderItems.stream()
                 .filter(i -> orderItemId.equals(i.getId()))
                 .findFirst()
@@ -437,6 +449,17 @@ public class Order extends BaseEntity {
         this.status = OrderStatus.PAID;
         recordHistory(OrderStatus.PENDING, OrderStatus.PAID, null, "결제 완료");
         createShipmentsForPayment();
+    }
+
+    /**
+     * 아직 살아 있는(취소·반품되지 않은) 항목이 하나라도 있는가.
+     *
+     * <p>"이 주문에서 고객이 실제로 가져간 물건이 남아 있는가"의 단일 판정. 반품으로 전 항목이 빠져나가면
+     * 주문 status는 CANCELLED가 아니라 DELIVERED로 남으므로(원배송은 실제로 완료됐다), 쿠폰 복원처럼
+     * "전량 이탈" 여부를 물어야 하는 곳은 status가 아니라 이 값을 봐야 한다(오너 결정: 전량 이탈 시 쿠폰 복원).
+     */
+    public boolean hasActiveItems() {
+        return orderItems.stream().anyMatch(OrderItem::isActive);
     }
 
     /** 활성 항목의 셀러별 distinct 집합(insertion 순서 유지, null=플랫폼 버킷 포함) — shipment 팬아웃의 그룹 키. */

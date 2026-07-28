@@ -22,6 +22,9 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 /**
  * OrderExpiryWorker 단위 테스트 — 만료 주문 한 건의 취소(쿠폰 복원·예약 해제) + 멱등 스킵.
+ *
+ * <p>조회는 반드시 <b>부모 주문 비관락</b>(findByIdForUpdate)이어야 한다 — "상태를 바꾸는 모든 경로는 부모 주문 락"
+ * 불변식에 예외를 남기지 않기 위함(무락 findById를 스텁하지 않았으므로, 되돌아가면 이 테스트가 NPE로 깨진다).
  */
 @ExtendWith(MockitoExtension.class)
 class OrderExpiryWorkerTest {
@@ -45,7 +48,7 @@ class OrderExpiryWorkerTest {
     @DisplayName("PENDING이면 취소 + 쿠폰 복원 + 예약 해제")
     void expireOne_pending() {
         Order order = pendingOrder(1L, "WELCOME5000");
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         worker.expireOne(1L);
 
@@ -59,7 +62,7 @@ class OrderExpiryWorkerTest {
     void expireOne_notPending_skips() {
         Order order = pendingOrder(1L, null);
         order.markPaid();   // 결제됨(PAID)
-        given(orderRepository.findById(1L)).willReturn(Optional.of(order));
+        given(orderRepository.findByIdForUpdate(1L)).willReturn(Optional.of(order));
 
         worker.expireOne(1L);
 
@@ -71,7 +74,7 @@ class OrderExpiryWorkerTest {
     @Test
     @DisplayName("주문이 없으면 스킵")
     void expireOne_notFound_skips() {
-        given(orderRepository.findById(9L)).willReturn(Optional.empty());
+        given(orderRepository.findByIdForUpdate(9L)).willReturn(Optional.empty());
 
         worker.expireOne(9L);
 

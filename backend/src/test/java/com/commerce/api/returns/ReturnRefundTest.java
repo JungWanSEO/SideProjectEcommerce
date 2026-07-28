@@ -3,6 +3,13 @@ package com.commerce.api.returns;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.commerce.api.coupon.entity.Coupon;
+import com.commerce.api.coupon.entity.CouponFundedBy;
+import com.commerce.api.coupon.entity.CouponIssueType;
+import com.commerce.api.coupon.entity.DiscountType;
+import com.commerce.api.coupon.entity.MemberCoupon;
+import com.commerce.api.coupon.repository.CouponRepository;
+import com.commerce.api.coupon.repository.MemberCouponRepository;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.order.entity.Order;
 import com.commerce.api.order.entity.OrderItem;
@@ -41,6 +48,8 @@ class ReturnRefundTest {
     @Autowired private OrderRepository orderRepository;
     @Autowired private PaymentRepository paymentRepository;
     @Autowired private StockReservationRepository stockReservationRepository;
+    @Autowired private CouponRepository couponRepository;
+    @Autowired private MemberCouponRepository memberCouponRepository;
 
     private ReturnStatusUpdateRequest act(ReturnAction a) {
         return new ReturnStatusUpdateRequest(a, null);
@@ -118,6 +127,76 @@ class ReturnRefundTest {
 
         assertThat(refunded.refundAmount()).isEqualTo(4000L);   // gross 5000이 아니라 실효가 4000
         assertThat(paymentRepository.findById(paymentId).orElseThrow().getRefundedAmount()).isEqualTo(4000L);
+    }
+
+    // === 전량 이탈 시 쿠폰 복원(오너 결정) ==========================================
+    //   복원 조건이 "주문 status == CANCELLED"뿐이던 시절엔, 반품으로 전 항목이 빠져나가도 원배송이 DELIVERED로
+    //   남아 쿠폰이 소멸했다(같은 전액 환불인데 순수 전량취소와 대우가 달랐다). 판정을 "활성 항목 0"으로 통일한다.
+
+    /** 발급형 쿠폰 + 그 회원의 사용(USED) 지갑 1장을 만든다. 반환=[couponId, memberCouponId], code는 인자 그대로. */
+    private long[] usedIssuedCoupon(String code) {
+        Coupon coupon = couponRepository.saveAndFlush(Coupon.create(
+                code, "반품복원", DiscountType.FIXED_AMOUNT, 1000L, null, 0L,
+                CouponFundedBy.PLATFORM, null, CouponIssueType.ISSUED,
+                LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(30)));
+        MemberCoupon wallet = MemberCoupon.issue(100L, coupon.getId());
+        wallet.markUsed();   // 체크아웃에서 사용된 상태
+        memberCouponRepository.saveAndFlush(wallet);
+        return new long[] { coupon.getId(), wallet.getId() };
+    }
+
+    /** 쿠폰 적용 + 배송완료 + 결제까지 세팅한 주문(항목 N개). 반환=[orderId, itemId...]. */
+    private long[] deliveredWithCoupon(String code, long discount, long... prices) {
+        Order order = Order.create(100L);
+        for (long price : prices) {
+            order.addItem(OrderItem.builder().productId(1L).optionId(11L).sellerId(1L)
+                    .productName("P").size("M").orderPrice(price).quantity(1).build());
+        }
+        order.applyCoupon(code, discount, "PLATFORM", null);
+        order.markPaid();
+        order.advanceShipping(OrderStatus.SHIPPING, null, "CJ", "1");
+        order.advanceShipping(OrderStatus.DELIVERED, null, null, null);
+        Order saved = orderRepository.saveAndFlush(order);
+        long total = 0;
+        for (long price : prices) {
+            total += price;
+        }
+        Payment payment = Payment.ready(saved.getId(), total - discount, "MOCK", "TOSS", "key-c-" + saved.getId());
+        payment.markPaid("TOSS-tx-c-" + saved.getId());
+        paymentRepository.saveAndFlush(payment);
+
+        long[] ids = new long[prices.length + 1];
+        ids[0] = saved.getId();
+        for (int i = 0; i < prices.length; i++) {
+            ids[i + 1] = saved.getOrderItems().get(i).getId();
+        }
+        return ids;
+    }
+
+    @Test
+    @DisplayName("전량 반품(마지막 활성 항목) - 발급형 쿠폰을 복원한다(순수 전량취소와 같은 대우)")
+    void refund_lastActiveItem_releasesCoupon() {
+        long[] cp = usedIssuedCoupon("RET-ALL");
+        long[] ids = deliveredWithCoupon("RET-ALL", 1000L, 5000L);   // 항목 1개 = 이 반품이 곧 전량 이탈
+        ReturnResponse req = advanceToInspected(ids[0], ids[1], ReturnType.RETURN, null);
+
+        returnService.advanceForSeller(req.id(), 1L, act(ReturnAction.REFUND), 1L);
+
+        assertThat(memberCouponRepository.findById(cp[1]).orElseThrow().isUnused()).isTrue();
+        assertThat(orderRepository.findById(ids[0]).orElseThrow().hasActiveItems()).isFalse();
+    }
+
+    @Test
+    @DisplayName("부분 반품 - 활성 항목이 남으면 쿠폰은 그대로 사용 상태(싼 항목만 반품하고 재사용하는 어뷰징 차단)")
+    void refund_partial_keepsCouponUsed() {
+        long[] cp = usedIssuedCoupon("RET-PART");
+        long[] ids = deliveredWithCoupon("RET-PART", 1000L, 5000L, 4000L);   // 항목 2개 중 1개만 반품
+        ReturnResponse req = advanceToInspected(ids[0], ids[1], ReturnType.RETURN, null);
+
+        returnService.advanceForSeller(req.id(), 1L, act(ReturnAction.REFUND), 1L);
+
+        assertThat(memberCouponRepository.findById(cp[1]).orElseThrow().isUnused()).isFalse();
+        assertThat(orderRepository.findById(ids[0]).orElseThrow().hasActiveItems()).isTrue();
     }
 
     @Test

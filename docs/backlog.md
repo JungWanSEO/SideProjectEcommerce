@@ -18,10 +18,12 @@
 - ✅ **정산 payout 이중지급 동시성** — `PayoutService.create`. 비잠금 조회 + 조건절 없는 `assignPayout` setter라 같은 셀러·윈도우 동시 create가 같은 엔트리를 두 묶음에 이중 편입(lost update)→ 실송금 2회 가능이던 것을 **원자적 조건부 UPDATE `SettlementRepository.claimForPayout`(payout_id IS NULL 대상만)+편입수 검증(경합 시 409·롤백)**으로 교정(재고예약#2·쿠폰claim과 동형·**스키마 무변경**). `PayoutConcurrencyTest`(8스레드→정확히 1건·이중지급 0)+경합 패자 단위 테스트. ⚠️MySQL 스모크(조건부 UPDATE는 DB-agnostic이라 H2로 실증됨·복귀 후 확인은 선택).
 - ✅ **일괄 배송전진 운송장 복제** — `Order.advanceShipping`. 멀티셀러 일괄 전진이 하나의 운송장을 전 shipment에 복제하던 #1 회귀를, **전진 대상 2건+ && 송장 동반이면 400(per-shipment 유도)·단일셀러/상태-only 허용**으로 교정(오너 확정=선택적 거부안). `OrderTest` 가드 3종+컨트롤러 API 문서 갱신.
 
-**LOW (참고 · 미검증 · 전부 결정/런타임 필요):**
-- `OrderExpiryService.expireOne`(:91) 만 `findById`(무락)라 "모든 상태변경 경로 부모주문 비관락"(INV9) 유일 위반 — **현재 PENDING 전용이라 무해**(Order @Version이 경합 차단), 만료를 비-PENDING(미출고 PAID 자동취소 등)으로 확장하면 위험. `findByIdForUpdate` 통일 or INV9에 예외 명시(런타임 스모크 권장).
-- `Order.discountShares`(:247) 안분 basis가 **결제 전 취소된 항목까지 포함** → PENDING에서 항목 취소 후 결제 시 그 몫 소멸해 쿠폰 액면보다 과다청구(PENDING 부분취소 허용 여부/재계산 정책 결정).
-- 쿠폰 복원(`PaymentService`:178)이 `order.status==CANCELLED` 조건뿐 → 반품(RETURNED)+취소(CANCELLED) 혼합 전액환불 시 원배송 DELIVERED로 남으면 발급쿠폰 미복원(순수 전량취소와 대우 불일치·반품 시 쿠폰정책 결정).
+**LOW 3건 — ✅ 전부 완료(2026-07-29 오너 결정 + 교정, 715→718 tests·마이그0):**
+- ✅ **만료 배치 무락** → **락으로 통일**. `OrderExpiryWorker.expireOne`을 `findByIdForUpdate`로 바꿔 "상태 변경 모든 경로 부모주문 비관락"의 **유일한 예외 제거**(만료를 비-PENDING으로 확장해도 안전). 단위 테스트가 무락 스텁을 안 줘 회귀 시 깨진다.
+- ✅ **결제 전 부분취소 쿠폰 과다청구** → **결제 전 항목별 취소 금지**(`Order.cancelItem`이 PENDING이면 409, 엔티티 강제). 안분 basis를 활성 항목으로 바꾸는 대안은 결제 후 환불 공식·Σ실효가 불변식을 깨서 기각. FE는 이미 PAID에서만 노출 → 구멍은 API에만 있었다.
+- ✅ **반품 시 쿠폰 미복원** → **전량 이탈 시 복원**. 판정을 `order.status==CANCELLED`에서 `Order.hasActiveItems()`로 옮겨 취소·반품 경로를 통일(`ReturnService.refund` 말미). 부분 반품은 미복원이라 어뷰징 여지 없음.
+
+> **07-27 적대적 스캔 소진**: 확정 2건(07-27 교정) + LOW 3건(07-29 결정·교정) = 남은 항목 0.
 
 ## 함께 (외부 연동 · 학습 — 자율 금지)
 - 🔴 **[배포 선결·결정 필요] 데모 카탈로그를 새 DB에 어떻게 넣을까** (07-28 발견) — 상품 **P01~P07은 코드 어디에도 없다**. 오너 로컬 dev DB에만 존재하고 `DemoDataSeeder`는 "이미 있는 상품에 분류·셀러를 얹을" 뿐이며, 게다가 `@Profile("dev")`라 운영에선 아예 안 돈다. → **Oracle VM에 배포하면 상점이 텅 빈 채로 뜬다.** 선택지: ⓐ시드를 카탈로그 생성까지 확장 + 운영에서도 도는 프로파일/플래그(`app.demo-seed.enabled`) ⓑ로컬 DB에서 SQL 덤프 떠서 VM에 주입 ⓒ어드민 화면으로 수기 입력. 상품 이미지 호스팅(현재 URL 문자열)도 같이 정해야 함.
