@@ -57,8 +57,9 @@ services:
       MANAGEMENT_ENDPOINTS: ${MANAGEMENT_ENDPOINTS:-health}
       # 소셜 로그인 성공 후 돌아갈 FE 주소(소셜 켤 때 필수). 안 켜면 무시됨.
       APP_OAUTH2_REDIRECT: ${APP_OAUTH2_REDIRECT:-}
-      # 데모 시드(빈 사이트 방지). 비우려면 .env.prod에서 지운다.
-      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      # 데모 시드(빈 상점 방지) — 카탈로그·셀러·데모 계정·주문 신호를 기동 시 채운다(멱등).
+      #   운영을 dev 프로파일로 돌리지 않고 이 플래그만으로 켠다. 끄려면 .env.prod에서 false.
+      APP_DEMO_SEED_ENABLED: ${APP_DEMO_SEED_ENABLED:-false}
       # 소셜 로그인 자격증명(선택 — 비우면 소셜 비활성, 로컬 로그인만).
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
