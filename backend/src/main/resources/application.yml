@@ -134,6 +134,11 @@ app:
     enabled: ${APP_RATELIMIT_ENABLED:true}
     # 구현: memory(기본·인메모리 고정 윈도우) | redis(DIY 슬라이딩 윈도우 Lua) | redisson(토큰 버킷 RRateLimiter)
     provider: ${APP_RATELIMIT_PROVIDER:memory}
+  # 데모 시드(카탈로그 12종·셀러·데모 계정·주문 신호). 빈 DB를 라이브 데모 가능한 상태로 만든다.
+  #   기본 OFF — 실데이터가 있는 DB에 데모 상품이 섞이지 않게. 로컬 dev는 application-dev.yml이 ON으로 덮는다.
+  #   배포한 데모 서버를 채울 땐 APP_DEMO_SEED_ENABLED=true로 명시적으로 켠다(멱등이라 재기동에 안전).
+  demo-seed:
+    enabled: ${APP_DEMO_SEED_ENABLED:false}
   # 주문 정책
   order:
     # 결제 대기(PENDING) 유효시간(분). 이 시간이 지난 PENDING 주문은 만료 배치가 취소한다

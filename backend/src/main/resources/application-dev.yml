@@ -1,0 +1,8 @@
+# 로컬 개발(dev) 프로파일 — run.ps1이 SPRING_PROFILES_ACTIVE=dev로 띄운다.
+#
+# 여기 있는 값은 application.yml의 기본값을 "로컬에서만" 덮는다. 시크릿·접속정보는 여전히 .env(OS 환경변수)로.
+app:
+  # 데모 시드 ON — 로컬은 기동만 하면 카탈로그·셀러·데모 주문이 채워져 화면이 곧장 보인다.
+  #   (기본값은 OFF다. 운영에서 켤 땐 APP_DEMO_SEED_ENABLED=true로 명시 — 실수로 실데이터 DB에 섞이지 않게.)
+  demo-seed:
+    enabled: true

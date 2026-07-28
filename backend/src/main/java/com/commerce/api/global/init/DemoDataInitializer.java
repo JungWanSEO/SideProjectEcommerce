@@ -5,11 +5,12 @@ import com.commerce.api.recommendation.service.RecommendationBatchService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
-import org.springframework.context.annotation.Profile;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
- * 로컬 dev 데모 부트스트랩 — 기동 직후 데모 데이터를 시드하고 추천 배치를 즉시 1회 돌린다(@Profile("dev") 전용).
+ * 데모 부트스트랩 — 기동 직후 데모 데이터를 시드하고 추천 배치를 즉시 1회 돌린다.
+ * {@code app.demo-seed.enabled=true}일 때만 등록된다(로컬 dev 기본 ON · 그 외 기본 OFF — {@link DemoDataSeeder} 참조).
  *
  * <p>순서: {@link DemoDataSeeder#seed()}(트랜잭션 — 커밋) → "나를 위한 추천" 배치 → "함께 산 상품" 배치.
  * 시드를 별도 빈(seeder)을 통해 호출해 프록시 경유 트랜잭션을 보장하고, 배치는 커밋된 데이터를 각자 트랜잭션으로 읽는다
@@ -17,7 +18,7 @@ import org.springframework.stereotype.Component;
  */
 @Slf4j
 @Component
-@Profile("dev")
+@ConditionalOnProperty(name = "app.demo-seed.enabled", havingValue = "true")
 @RequiredArgsConstructor
 public class DemoDataInitializer implements CommandLineRunner {
 
