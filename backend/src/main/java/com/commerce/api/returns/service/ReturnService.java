@@ -1,5 +1,6 @@
 package com.commerce.api.returns.service;
 
+import com.commerce.api.coupon.service.MemberCouponService;
 import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.order.entity.Order;
 import com.commerce.api.order.entity.OrderItem;
@@ -49,6 +50,7 @@ public class ReturnService {
     private final StockReservationService stockReservationService;   // 반품 재입고·교환 재고(#3 P4/P6) — returns→product
     private final ProductOptionRepository productOptionRepository;   // 교환 대체 옵션 검증(#3 P6)
     private final ReturnEventEmitter returnEventEmitter;   // 상태 전이 → 구매자 알림 이벤트(#6 P2c)
+    private final MemberCouponService memberCouponService;   // 전량 이탈 시 쿠폰 복원 — returns→coupon 단방향
 
     /**
      * 구매자 반품/교환 요청 생성. 부모 주문 비관락으로 중복요청을 직렬화하고, 대상 항목 자격(ACTIVE·배송완료·기한)을
@@ -144,6 +146,21 @@ public class ReturnService {
         paymentService.refundForReturn(order.getId(), refundAmount);   // PG 환불 (외부 부작용)
         if (r.isRestock()) {
             stockReservationService.undoForOrderItem(r.getOrderItemId());   // 재입고(CONSUMED→실재고 복원). 검수확정 시점에만.
+        }
+        releaseCouponIfFullyWithdrawn(order);
+    }
+
+    /**
+     * 전량 이탈 시 발급형 쿠폰 복원(오너 결정) — 취소분·반품분을 합쳐 <b>활성 항목이 0</b>이 되면 쿠폰을 돌려준다.
+     *
+     * <p>기존 복원 조건은 "주문 status == CANCELLED"뿐이라, 반품으로 전 항목이 빠져나간 주문은 원배송이
+     * DELIVERED로 남아 <b>순수 전량취소와 대우가 달랐다</b>(같은 전액 환불인데 쿠폰만 소멸). 판정을
+     * {@link Order#hasActiveItems()}로 바꿔 두 경로를 통일한다. 부분 반품은 활성이 남아 복원되지 않으므로
+     * "싼 항목만 반품하고 쿠폰 재사용" 어뷰징 여지는 없다. release는 멱등이라 취소 경로와 겹쳐도 안전하다.
+     */
+    private void releaseCouponIfFullyWithdrawn(Order order) {
+        if (!order.hasActiveItems()) {
+            memberCouponService.release(order.getMemberId(), order.getCouponCode());
         }
     }
 

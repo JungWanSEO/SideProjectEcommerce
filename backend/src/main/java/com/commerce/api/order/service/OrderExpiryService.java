@@ -76,7 +76,7 @@ public class OrderExpiryService {
 
 /**
  * 만료 주문을 <b>한 건씩 자기 트랜잭션</b>으로 취소하는 워커 — OrderExpiryService가 프록시로 호출해 주문별 격리를 얻는다.
- * 재조회 후 여전히 PENDING일 때만 취소하고(멱등), Order @Version이 결제와의 경합을 커밋 시 충돌로 드러낸다.
+ * 재조회 후 여전히 PENDING일 때만 취소하고(멱등), 부모 주문 비관락이 결제·취소와 직렬화한다.
  */
 @Component
 @RequiredArgsConstructor
@@ -86,11 +86,20 @@ class OrderExpiryWorker {
     private final MemberCouponService memberCouponService;         // 만료 취소 시 발급형 쿠폰 복원(수동취소와 대칭)
     private final StockReservationService stockReservationService; // 만료 취소 시 재고 예약 해제(#2)
 
+    /**
+     * 부모 주문을 <b>비관적 쓰기 락</b>으로 잡고 만료 취소한다.
+     *
+     * <p>예전엔 무락 {@code findById} + Order @Version에 기대 "상태를 바꾸는 모든 경로는 부모 주문 비관락"이라는
+     * 불변식의 <b>유일한 예외</b>였다. PENDING 전용인 지금은 무해했지만, 만료를 비-PENDING(예: 미출고 PAID 자동취소)으로
+     * 넓히는 순간 shipment rollup의 stale-sibling lost update에 그대로 노출된다. <b>예외를 남기지 않는 쪽</b>을
+     * 택해 다른 상태 변경 경로(취소·전진·백필·반품)와 같은 락 규율로 통일한다 — 락 획득 후 상태를 다시 확인하므로
+     * 경합에서 진 쪽은 여전히 조용히 스킵된다.
+     */
     @Transactional
     public void expireOne(Long orderId) {
-        Order order = orderRepository.findById(orderId).orElse(null);
+        Order order = orderRepository.findByIdForUpdate(orderId).orElse(null);
         if (order == null || order.getStatus() != OrderStatus.PENDING) {
-            return;   // 그 사이 결제/취소/삭제됨 — 스킵(멱등)
+            return;   // 락 획득 사이에 결제/취소/삭제됨 — 스킵(멱등)
         }
         order.cancel(null, "결제 대기 만료");   // 시스템 취소 → changedBy=null. 커밋 시 @Version이 경합을 충돌로
         memberCouponService.release(order.getMemberId(), order.getCouponCode());

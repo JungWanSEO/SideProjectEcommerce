@@ -412,6 +412,25 @@ class OrderTest {
     }
 
     @Test
+    @DisplayName("cancelItem - 결제 전(PENDING) 주문은 항목별 취소 자체가 409(할인 몫 소멸 → 과다청구 차단)")
+    void cancelItem_pending_blocked() {
+        OrderItem s1 = item(1L, 6000L);
+        OrderItem s2 = item(2L, 4000L);
+        Order order = orderWith(s1, s2);   // PENDING(결제 전)
+        order.applyCoupon("WELCOME1000", 1000L, "PLATFORM", null);
+        ReflectionTestUtils.setField(s1, "id", 500L);
+        ReflectionTestUtils.setField(s2, "id", 501L);
+
+        assertThatThrownBy(() -> order.cancelItem(501L, 100L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("결제 전 주문은 항목별 취소");
+
+        // 막지 않았다면: 4000 취소 후 payable = 6000 − 600(안분 몫) = 5400 → 쿠폰 1000원을 다 못 받음(400원 과다청구).
+        assertThat(order.getPayableAmount()).isEqualTo(9000L);   // 두 항목 그대로 = 10000 − 1000
+        assertThat(s2.isActive()).isTrue();
+    }
+
+    @Test
     @DisplayName("cancelItem - 셀러의 마지막 활성 항목 취소 시 그 shipment도 CANCELLED, 전부 취소면 주문 CANCELLED")
     void cancelItem_lastSellerItem_cancelsShipmentAndOrder() {
         OrderItem s1 = item(1L, 5000L);

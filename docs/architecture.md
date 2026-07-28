@@ -284,7 +284,9 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 **취소/환불 불변식** (돈경로 무손상의 핵심):
 - **취소는 shipment-grain**: 출고 전(shipment PAID/미결제) 항목만 취소, 출고된 셀러 항목은 잔존(**부분 취소**). 셀러의 마지막 활성 항목이 취소되면 그 shipment도 CANCELLED → rollup.
 - **재고 되돌리기는 항목 예약상태로** 판정(`StockReservationService.undoForOrderItem`): `CONSUMED`(결제 실차감)→실재고 복원 / `ACTIVE`(예약만)→해제. 전체 `Order.status`가 아니라 항목별 실차감 여부로 봐, 다른 셀러 출고로 주문이 PAID를 벗어나도 재고가 정확히 복원(셀러 재고 영구누락 차단).
-- **부분환불 = 이번에 취소된 몫만**: `refundNow = (payment.amount − refundedAmount) − 취소후 남은 활성 실효가`. 출고된 셀러분 재환불 차단. 쿠폰 복원은 `status==CANCELLED`(전량취소)일 때만.
+- **부분환불 = 이번에 취소된 몫만**: `refundNow = (payment.amount − refundedAmount) − 취소후 남은 활성 실효가`. 출고된 셀러분 재환불 차단.
+- **쿠폰 복원 = 전량 이탈 시**(오너 결정 07-29): 취소분·반품분을 합쳐 **활성 항목이 0**이면 발급형 쿠폰을 되돌린다(`Order.hasActiveItems()`). 취소 경로는 `status==CANCELLED`, 반품 경로는 `ReturnService.refund` 말미에서 판정 — 반품은 원배송이 DELIVERED로 남아 status로는 판정할 수 없기 때문(예전엔 이 비대칭 때문에 전량 반품 시 쿠폰이 소멸했다). 부분 반품은 활성이 남아 복원되지 않으므로 "싼 항목만 반품하고 쿠폰 재사용" 어뷰징 여지가 없다. `release()`는 멱등이라 두 경로가 겹쳐도 안전.
+- **결제 전(PENDING) 항목별 취소 금지**(오너 결정 07-29): `discountShares()` 안분 기준이 "주문 시점 전체 항목"이라, 결제 전에 일부만 취소하면 그 항목이 물고 있던 할인 몫이 소멸해 **고객이 쿠폰 액면보다 적게 할인**받는다(1만원 쿠폰·6만/4만 → 4만 취소 시 5.4만 청구). 기준을 활성 항목으로 바꾸면 결제 후 환불 공식("Σ실효가=결제액")이 깨지므로, 대신 `Order.cancelItem`이 PENDING이면 409(전체 취소 후 재주문). 엔티티에서 막아 모든 경로(구매자·ADMIN·내부)가 동일.
 - **정산 역분개 보존**: 취소는 반드시 `OrderItem.status=CANCELLED`를 경유(정산 `reverseRefunds`가 활성-항목 기준). shipment만 취소하고 항목을 안 건드리면 과지급 → 금지.
 
 **엔드포인트**:
@@ -387,6 +389,8 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 | **shipment 상태 rollup** (#1, 파생 상태 + 부작용) | **비관적 쓰기 락**(부모 주문 `findByIdForUpdate`, PESSIMISTIC_WRITE + READ_COMMITTED) | `Order.status`가 shipment rollup 파생인데 rollup write가 **조건부**(값 바뀔 때만)라, 서로 다른 자식(shipment/항목)을 동시에 바꾸는 두 tx가 각자 형제를 stale로 읽어 둘 다 "변화 없음"으로 커밋되는 lost update가 난다. 상태/원장 변경 **모든 경로**(전진·취소·ADMIN 일괄·백필)가 부모 주문을 같은 락으로 잡아 **부작용(PG 환불) 이전에** 직렬화 — 늦은 tx는 로드 시점에 막혀 형제의 최신 상태로 rollup을 재계산. 취소는 PG 환불이 있어 낙관락 재시도가 부적합(재시도=이중환불)이라 비관락 채택 |
 
 > **왜 세 번째 전략인가**: 낙관락(재고)·원자 UPDATE(쿠폰)로 안 되는 케이스 — 파생 상태의 조건부 write + 외부 부작용(환불)이 겹친다. 적대적 리뷰가 "worker만 락, 취소·일괄·백필 무락"의 락 비대칭이 stale-sibling lost update를 냄을 확정 → 전 경로 비관락 통일로 교정. 검증: `ShipmentConcurrencyTest`(전진×취소→DELIVERED·취소×취소→CANCELLED 수렴)·`PaymentCancelConcurrencyTest`(두 환불 누적=결제액).
+
+> **예외 없음(07-29)**: PENDING 만료 배치(`OrderExpiryWorker.expireOne`)만 무락 `findById`로 읽어 이 규칙의 유일한 예외였다. PENDING 전용 + `Order @Version`이라 당시엔 무해했지만, 만료를 비-PENDING(예: 미출고 PAID 자동취소)으로 넓히는 순간 같은 stale-sibling lost update에 노출된다 → **`findByIdForUpdate`로 통일**해 "상태를 바꾸는 모든 경로는 부모 주문 비관락"을 예외 없는 규칙으로 만들었다. 락 획득 후 상태를 재확인하므로 경합에서 진 쪽은 여전히 조용히 스킵된다.
 
 > **반품/교환(#3)도 같은 전략**: 모든 반품 전이가 부모 주문을 `findByIdForUpdate`로 먼저 잡아 취소·배송과 직렬화한다(락 순서 항상 **ORDER→RETURN** — 부모 orderId를 스칼라로 먼저 조회해 데드락 회피). 추가로 **교환**은 원/새 `product_option` 두 행을 순차 UPDATE하므로, 서로 다른 주문의 미러 교환(같은 두 옵션·반대 방향)이 행 락을 역순으로 잡아 데드락날 수 있다 → 두 옵션을 **id 오름차순으로 먼저 비관락**해 획득 순서를 통일한다(재고 원자 UPDATE 경로의 락 순서 철학과 동형).
 
