@@ -31,6 +31,12 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
     Optional<Payment> findByOrderIdAndStatus(Long orderId, PaymentStatus status);
 
     /**
+     * 이 주문에 결제 시도가 하나라도 있었는지(상태 무관). 데모 시드가 "내가 만든 신호용 주문"과
+     * "실제 결제를 거친 주문"(정산·대사가 물려 있음)을 구분하는 안전장치로 읽는다 — 후자는 절대 건드리지 않는다.
+     */
+    boolean existsByOrderId(Long orderId);
+
+    /**
      * <b>순매출</b>(환불 차감) 합 — 결제의 {@code amount − refundedAmount} 합. 대시보드 "완료 매출" KPI.
      *
      * <p>주문 기준 gross(totalPrice−discount)는 부분취소된 항목까지 매출로 세 결제·정산 net과 어긋난다.
