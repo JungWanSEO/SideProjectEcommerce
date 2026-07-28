@@ -74,7 +74,8 @@ VM 한 대에 Docker로 BE+MySQL을 올린다. **이 스택에 가장 잘 맞는
 | `APP_COOKIE_SAME_SITE` | `None`(경로 B) / `Lax`(경로 A·같은 상위도메인) | 크로스사이트면 None+Secure 한 쌍 |
 | `SERVER_FORWARD_HEADERS_STRATEGY` | `framework` (리버스 프록시 뒤) | **Caddy/nginx 뒤 필수** — 안 넣으면 OAuth2 `redirect_uri`가 내부 `http://…:8080`로 생성돼 소셜 로그인 실패. 프록시 없이 직접 노출이면 생략 |
 | `APP_OAUTH2_REDIRECT` | `https://<your-app>.vercel.app` | **소셜 로그인 켤 때 필수** — 로그인 성공 후 돌아갈 FE 주소. 안 넣으면 `localhost:3000`으로 리다이렉트돼 깨짐 |
-| `APP_DEMO_SEED_ENABLED` | `true` *(데모 사이트면 필수)* | **빈 상점 방지** — 카탈로그 12종·브랜드/셀러·데모 계정·주문 신호를 기동 시 시드(멱등이라 재기동 안전). 기본 `false`. ⚠️ 예전엔 이 목적으로 `SPRING_PROFILES_ACTIVE=dev`를 켰는데, 운영을 dev 프로파일로 돌리는 부작용이 있어 전용 플래그로 분리했다 |
+| `APP_DEMO_SEED_ENABLED` | `true` *(데모 사이트면 필수)* | **빈 상점 방지** — 카탈로그 **60종**(세일·품절·재고임박·판매중지 섞임)·브랜드/셀러·리뷰/평점/찜·데모 계정·주문 신호를 기동 시 시드(멱등이라 재기동 안전). 기본 `false`. ⚠️ 예전엔 이 목적으로 `SPRING_PROFILES_ACTIVE=dev`를 켰는데, 운영을 dev 프로파일로 돌리는 부작용이 있어 전용 플래그로 분리했다 |
+| `APP_DEMO_SEED_ADMIN_PASSWORD` | *(선택 · 강한 값)* | 넣으면 `admin@commerce.com`(ADMIN) 데모 계정을 만든다 — 어드민 대시보드·정산·감사로그를 보여주려면 필요. **비우면 만들지 않는다**(기본): 공개 데모에 "누구나 아는 관리자"가 있으면 상품 삭제·회원 권한 변경까지 열린다. 셀러/구매자 데모 계정(`seller1·2@`, `buyer@`, `demo1~3@`)은 `demopass1234` 고정 — 권한이 제한적이라 그대로 둔다 |
 | `PORT` | *(플랫폼 자동)* | `server.port=${PORT:8080}`가 받음 |
 
 ### 프론트 (Vercel)

@@ -6,3 +6,6 @@ app:
   #   (기본값은 OFF다. 운영에서 켤 땐 APP_DEMO_SEED_ENABLED=true로 명시 — 실수로 실데이터 DB에 섞이지 않게.)
   demo-seed:
     enabled: true
+    # 로컬 편의 — 어드민 화면(대시보드·정산·감사로그)을 바로 열어보도록 admin@commerce.com 계정을 만든다.
+    #   운영에는 기본값이 없다(비우면 계정 자체를 안 만듦) — 공개 데모에 "누구나 아는 관리자"를 두지 않기 위함.
+    admin-password: demopass1234
