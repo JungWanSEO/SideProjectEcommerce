@@ -22,6 +22,9 @@ public interface OrderRepository extends JpaRepository<Order, Long>, OrderReposi
     /** 특정 회원의 주문을 페이지로 조회 (정렬·페이지 크기는 Pageable에 따름). */
     Page<Order> findByMemberId(Long memberId, Pageable pageable);
 
+    /** 여러 회원의 주문 전체 — 데모 시드가 "데모 회원들의 주문"을 한 번에 판정할 때 사용(dev 전용, 건수 소량). */
+    List<Order> findByMemberIdIn(Collection<Long> memberIds);
+
     /** 멱등키로 주문 조회 — 체크아웃 중복 제출 판정(같은 키면 새로 만들지 않고 기존 주문을 돌려준다). */
     Optional<Order> findByIdempotencyKey(String idempotencyKey);
 

@@ -11,11 +11,15 @@ import com.commerce.api.member.entity.Role;
 import com.commerce.api.member.repository.MemberRepository;
 import com.commerce.api.order.entity.Order;
 import com.commerce.api.order.entity.OrderItem;
+import com.commerce.api.order.entity.OrderStatus;
 import com.commerce.api.order.repository.OrderRepository;
+import com.commerce.api.payment.repository.PaymentRepository;
 import com.commerce.api.product.entity.Product;
 import com.commerce.api.product.entity.ProductOption;
 import com.commerce.api.product.repository.ProductRepository;
 import com.commerce.api.recommendation.repository.RecommendationRepository;
+import com.commerce.api.seller.entity.Seller;
+import com.commerce.api.seller.repository.SellerRepository;
 import com.commerce.api.wishlist.service.WishlistService;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -26,7 +30,6 @@ import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Profile;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -52,6 +55,8 @@ public class DemoDataSeeder {
     private final ProductRepository productRepository;
     private final MemberRepository memberRepository;
     private final OrderRepository orderRepository;
+    private final SellerRepository sellerRepository;
+    private final PaymentRepository paymentRepository;   // 재귀속 안전장치(실결제 주문 식별)
     private final ActivityLogRepository activityLogRepository;
     private final RecommendationRepository recommendationRepository;
     private final WishlistService wishlistService;
@@ -59,6 +64,32 @@ public class DemoDataSeeder {
 
     private static final List<String> CATEGORIES = List.of("아우터", "상의", "하의", "신발", "액세서리");
     private static final List<String> BRANDS = List.of("Maison Clay", "Daily Form", "Nord Atelier");
+
+    /**
+     * 데모 셀러(입점사) — 정산 수취 주체. 2곳을 두는 이유는 데모에서 <b>멀티셀러 주문</b>(한 주문 → 셀러별 shipment
+     * 팬아웃·셀러별 알림)이 실제로 보이게 하기 위함이다. 셀러 1곳이 브랜드 2개를 운영해 seller 1:N brand도 함께 드러난다.
+     */
+    private static final List<DemoSeller> DEMO_SELLERS = List.of(
+            new DemoSeller("메종클레이", 0.10, "데모은행 110-000-100001", "123-45-67890"),
+            new DemoSeller("노드폼컴퍼니", 0.12, "데모은행 110-000-100002", "234-56-78901"));
+
+    /**
+     * 브랜드 → 셀러 귀속. 결제 시점 셀러 스냅샷이 타는 바로 그 링크다
+     * ({@code OrderProcessor}: 상품 → brandId → {@code Brand.sellerId} → {@code OrderItem.sellerId}).
+     * 이 매핑이 비어 있으면 실제 체크아웃으로 주문해도 항목이 미귀속(null)이라 셀러 콘솔이 텅 빈다.
+     */
+    private static final Map<String, String> BRAND_SELLER = Map.of(
+            "Maison Clay", "메종클레이",
+            "Daily Form", "노드폼컴퍼니",
+            "Nord Atelier", "노드폼컴퍼니");
+
+    /** 셀러 콘솔 로그인용 운영자 계정 — 이메일 → 셀러명. password=demopass1234, role=SELLER. */
+    private static final Map<String, String> SELLER_ACCOUNTS = Map.of(
+            "seller1@commerce.com", "메종클레이",
+            "seller2@commerce.com", "노드폼컴퍼니");
+
+    private record DemoSeller(String name, double commissionRate, String payoutAccount, String businessNumber) {
+    }
 
     /** 상품명 → [카테고리, 브랜드]. 기존 카탈로그(P01~P07)를 분류한다. */
     private static final Map<String, String[]> PRODUCT_TAXONOMY = Map.of(
@@ -96,10 +127,12 @@ public class DemoDataSeeder {
     public void seed() {
         cleanupTestData();
         Map<String, Category> categories = ensureCategories();
-        Map<String, Brand> brands = ensureBrands();
+        Map<String, Seller> sellers = ensureSellers();
+        Map<String, Brand> brands = ensureBrands(sellers);
         Map<String, Product> products = mapProductTaxonomy(categories, brands);
+        ensureSellerAccounts(sellers);
         List<Member> demoMembers = ensureDemoMembers();
-        seedDemoOrders(demoMembers, products);
+        seedDemoOrders(demoMembers, products, brands);
         seedBuyerSignals(products);
     }
 
@@ -134,13 +167,56 @@ public class DemoDataSeeder {
         return byName;
     }
 
-    private Map<String, Brand> ensureBrands() {
+    /** 데모 셀러(없으면 생성). 이름이 자연키(UNIQUE)라 재기동해도 중복 생성되지 않는다. */
+    private Map<String, Seller> ensureSellers() {
+        Map<String, Seller> byName = new HashMap<>();
+        for (DemoSeller spec : DEMO_SELLERS) {
+            Seller seller = sellerRepository.findByName(spec.name())
+                    .orElseGet(() -> sellerRepository.save(Seller.create(
+                            spec.name(), spec.commissionRate(), spec.payoutAccount(), spec.businessNumber())));
+            byName.put(spec.name(), seller);
+        }
+        return byName;
+    }
+
+    /**
+     * 데모 브랜드(없으면 생성) + <b>셀러 귀속</b>. 카테고리/브랜드 매핑과 같은 철학으로 매 기동 시 기대값으로 맞춘다
+     * (더티 체킹 flush). 이 귀속이 있어야 이후 체크아웃이 항목에 sellerId 스냅샷을 남긴다.
+     */
+    private Map<String, Brand> ensureBrands(Map<String, Seller> sellers) {
         Map<String, Brand> byName = new HashMap<>();
         brandRepository.findAll().forEach(b -> byName.put(b.getName(), b));
         for (String name : BRANDS) {
-            byName.computeIfAbsent(name, n -> brandRepository.save(Brand.create(n)));
+            Brand brand = byName.computeIfAbsent(name, n -> brandRepository.save(Brand.create(n)));
+            Seller owner = sellers.get(BRAND_SELLER.get(name));
+            if (owner != null && !owner.getId().equals(brand.getSellerId())) {
+                brand.assignSeller(owner.getId());
+            }
         }
         return byName;
+    }
+
+    /**
+     * 셀러 콘솔 로그인용 운영자 계정(없으면 생성) — role=SELLER + sellerId 연결.
+     * 승격은 반드시 {@link Member#assignAsSeller(Long)}로 한다(셀러 연결 없는 SELLER = 빈 스코프로 콘솔이 깨짐).
+     */
+    private void ensureSellerAccounts(Map<String, Seller> sellers) {
+        SELLER_ACCOUNTS.forEach((email, sellerName) -> {
+            Seller seller = sellers.get(sellerName);
+            if (seller == null) {
+                return;
+            }
+            Member operator = memberRepository.findByEmail(email).orElseGet(() ->
+                    memberRepository.save(Member.builder()
+                            .email(email)
+                            .password(passwordEncoder.encode("demopass1234"))
+                            .nickname(sellerName + " 운영자")
+                            .role(Role.SELLER)
+                            .build()));
+            if (!seller.getId().equals(operator.getSellerId())) {
+                operator.assignAsSeller(seller.getId());   // 신규 생성분의 sellerId 연결 + 기존 계정 재연결
+            }
+        });
     }
 
     /** 기존 카탈로그 상품에 카테고리/브랜드 부여(dirty-checking flush로 저장). 반환=상품명→상품 맵. */
@@ -180,14 +256,20 @@ public class DemoDataSeeder {
         return members;
     }
 
-    /** 데모 다중항목 PAID 주문 — 이미 있으면(첫 데모회원이 주문 보유) 건너뛴다. 재고는 건드리지 않는다(신호용 이력). */
-    private void seedDemoOrders(List<Member> demoMembers, Map<String, Product> products) {
+    /**
+     * 데모 다중항목 PAID 주문 — 이미 있으면 건너뛴다. 재고는 건드리지 않는다(신호용 이력).
+     *
+     * <p>항목의 sellerId는 실제 체크아웃과 <b>같은 규칙</b>(상품 → brandId → {@code Brand.sellerId})으로 채운다.
+     * 이 스냅샷이 있어야 {@link Order#markPaid()}의 팬아웃이 셀러별 shipment를 만들고, 셀러 콘솔·셀러 알림·
+     * 셀러 반품 화면에 데모 데이터가 실제로 보인다.
+     */
+    private void seedDemoOrders(List<Member> demoMembers, Map<String, Product> products, Map<String, Brand> brands) {
         if (demoMembers.isEmpty()) {
             return;
         }
-        Member first = demoMembers.get(0);
-        if (orderRepository.findByMemberId(first.getId(), PageRequest.of(0, 1)).hasContent()) {
-            return; // 이미 시드됨
+        Map<Long, Long> sellerByProductId = sellerByProductId(products, brands);
+        if (!ensureDemoOrdersAttributable(demoMembers, sellerByProductId)) {
+            return; // 이미 시드됨(귀속 완료) 또는 사람이 만든 주문이 섞여 있음
         }
         int created = 0;
         for (DemoOrder spec : DEMO_ORDERS) {
@@ -203,7 +285,7 @@ public class DemoDataSeeder {
                         .productId(p.getId())
                         .optionId(opt.getId())
                         .brandId(p.getBrandId())
-                        .sellerId(null)
+                        .sellerId(sellerByProductId.get(p.getId()))   // 체크아웃과 동일한 셀러 귀속 스냅샷
                         .productName(p.getName())
                         .size(opt.getSize())
                         .orderPrice(p.getPrice())
@@ -213,11 +295,71 @@ public class DemoDataSeeder {
             if (order.getOrderItems().size() < 2) {
                 continue; // 함께 산 신호엔 2개 이상 필요
             }
-            order.markPaid();
+            order.markPaid();   // 셀러별 shipment 팬아웃(멀티셀러 주문이면 2건)
             orderRepository.save(order);
             created++;
         }
-        log.info("[demo-seed] 데모 다중항목 PAID 주문 {}건 생성", created);
+        log.info("[demo-seed] 데모 다중항목 PAID 주문 {}건 생성(셀러 귀속)", created);
+    }
+
+    /** 상품ID → 셀러ID. 체크아웃과 같은 경로(상품 → brandId → Brand.sellerId)를 미리 펼쳐둔 조회표. */
+    private Map<Long, Long> sellerByProductId(Map<String, Product> products, Map<String, Brand> brands) {
+        Map<Long, Long> sellerByBrandId = new HashMap<>();
+        brands.values().stream()
+                .filter(b -> b.getSellerId() != null)
+                .forEach(b -> sellerByBrandId.put(b.getId(), b.getSellerId()));
+        Map<Long, Long> byProduct = new HashMap<>();
+        for (Product p : products.values()) {
+            Long sellerId = p.getBrandId() == null ? null : sellerByBrandId.get(p.getBrandId());
+            if (sellerId != null) {
+                byProduct.put(p.getId(), sellerId);
+            }
+        }
+        return byProduct;
+    }
+
+    /**
+     * 데모 주문을 (재)생성해도 되는 상태로 만든다. 셀러 귀속 이전에 시드된 주문은 항목 sellerId가 전부 null이라
+     * 셀러 콘솔·셀러 알림·셀러 반품이 <b>영구히 빈 화면</b>이 된다 — 그런 주문만 지우고 아래에서 다시 만든다.
+     *
+     * <p>안전장치(하나라도 어긋나면 아무것도 지우지 않는다): ① 데모 회원의 주문일 것 ② 상태가 PAID일 것
+     * (배송·취소·반품이 진행된 주문 제외) ③ 결제행이 없을 것(= 정산·대사가 물린 실주문 제외) ④ 모든 항목이
+     * 미귀속일 것 ⑤ 그중 최소 하나는 지금 귀속 가능할 것(브랜드에 셀러가 붙어 있을 것). 사람이 만든 주문이
+     * 하나라도 섞여 있으면 <b>전체를 보존</b>하고 건너뛴다(부분 삭제로 데모가 반쪽 나는 것 방지).
+     *
+     * @return true면 "데모 주문 없음" 상태이므로 새로 생성해야 한다
+     */
+    private boolean ensureDemoOrdersAttributable(List<Member> demoMembers, Map<Long, Long> sellerByProductId) {
+        List<Long> memberIds = demoMembers.stream().map(Member::getId).toList();
+        List<Order> existing = orderRepository.findByMemberIdIn(memberIds);
+        if (existing.isEmpty()) {
+            return true;
+        }
+        boolean allReplaceable = existing.stream().allMatch(o -> isUnattributedSeedOrder(o, sellerByProductId));
+        if (!allReplaceable) {
+            return false;   // 이미 귀속됐거나(정상) 실주문이 섞임 → 그대로 둔다
+        }
+        orderRepository.deleteAll(existing);   // 항목·이력·shipment는 cascade + orphanRemoval로 함께 삭제
+        orderRepository.flush();               // 재생성 INSERT보다 DELETE가 먼저 나가도록 명시적 flush
+        log.info("[demo-seed] 셀러 미귀속 데모 주문 {}건 삭제 — 귀속본으로 재생성", existing.size());
+        return true;
+    }
+
+    /** 이 주문이 "셀러 귀속 이전 시드가 만든 것"으로 판정되는가(위 ②~⑤ 조건). */
+    private boolean isUnattributedSeedOrder(Order order, Map<Long, Long> sellerByProductId) {
+        if (order.getStatus() != OrderStatus.PAID || paymentRepository.existsByOrderId(order.getId())) {
+            return false;
+        }
+        boolean anyAttributable = false;
+        for (OrderItem item : order.getOrderItems()) {
+            if (item.getSellerId() != null) {
+                return false;
+            }
+            if (sellerByProductId.containsKey(item.getProductId())) {
+                anyAttributable = true;
+            }
+        }
+        return anyAttributable;
     }
 
     /** buyer 개인화 신호(없을 때만 초기 시드). 기존 신호가 있으면 보존한다. */
