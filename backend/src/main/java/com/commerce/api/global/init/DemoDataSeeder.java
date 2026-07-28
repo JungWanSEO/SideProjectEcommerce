@@ -67,6 +67,11 @@ public class DemoDataSeeder {
     private final RecommendationRepository recommendationRepository;
     private final WishlistService wishlistService;
     private final PasswordEncoder passwordEncoder;
+    private final DemoLegacyCleanup legacyCleanup;         // 초기 볼륨 테스트용 더미 상품 정리
+    private final DemoEngagementSeeder engagementSeeder;   // 리뷰·평점·찜(정렬·분포 데모)
+
+    /** 정리 대상 — 예전에 볼륨 테스트용으로 찍어낸 더미 상품 접두어. 지금은 시드가 카탈로그를 직접 만든다. */
+    private static final List<String> LEGACY_PRODUCT_PREFIXES = List.of("DEMO-SEED-");
 
     private static final List<String> CATEGORIES = List.of("아우터", "상의", "하의", "원피스", "신발", "액세서리");
     private static final List<String> BRANDS = List.of("Maison Clay", "Daily Form", "Nord Atelier");
@@ -93,6 +98,19 @@ public class DemoDataSeeder {
     private static final Map<String, String> SELLER_ACCOUNTS = Map.of(
             "seller1@commerce.com", "메종클레이",
             "seller2@commerce.com", "노드폼컴퍼니");
+
+    /** 데모 공용 비밀번호(구매자·셀러 계정). ADMIN만 별도 — 아래 {@code adminPassword} 참조. */
+    private static final String DEMO_PASSWORD = "demopass1234";
+
+    /**
+     * 어드민 데모 계정 비밀번호. <b>비어 있으면 ADMIN 계정을 만들지 않는다</b>(기본값 없음).
+     *
+     * <p>왜 분리했나: 공개된 데모 사이트에 "누구나 아는 비밀번호의 관리자"가 있으면 상품 삭제·회원 권한 변경까지
+     * 열린다. 로컬(dev)은 {@code application-dev.yml}이 공용 비밀번호를 넣어 편의를 유지하고, 배포에서는
+     * {@code APP_DEMO_SEED_ADMIN_PASSWORD}를 <b>의도적으로</b> 넣을 때만 어드민 계정이 생긴다.
+     */
+    @org.springframework.beans.factory.annotation.Value("${app.demo-seed.admin-password:}")
+    private String adminPassword;
 
     private record DemoSeller(String name, double commissionRate, String payoutAccount, String businessNumber) {
     }
@@ -138,7 +156,82 @@ public class DemoDataSeeder {
      * 할인율 정렬을 데모에서 보이게 한다. 판매가는 결제·정산의 기준이고 정가는 표시 전용(#5 불변식).
      */
     private record DemoProduct(String name, String category, String brand, long price, Double saleMarkup,
-            List<String> sizes, int stockPerSize) {
+            List<String> sizes, int stockPerSize, ProductStatus status) {
+
+        /** 대표 상품용 축약 생성자 — 상태는 판매중. */
+        DemoProduct(String name, String category, String brand, long price, Double saleMarkup,
+                List<String> sizes, int stockPerSize) {
+            this(name, category, brand, price, saleMarkup, sizes, stockPerSize, ProductStatus.ON_SALE);
+        }
+    }
+
+    // === 볼륨 카탈로그 생성 =======================================================
+    //   대표 12종만으로는 목록이 한 페이지에 다 들어가 페이지네이션·무한스크롤·필터 조합·정렬이 데모에서
+    //   의미를 잃는다. 아래 조합으로 상품을 더 찍어내되 이름 키워드는 유지해 이미지 폴백이 계속 맞물리게 한다.
+
+    /** 품목 라인 — 명사(이미지 키워드)·카테고리·사이즈 체계·기준가. */
+    private record ProductLine(String noun, String category, List<String> sizes, long basePrice) {
+    }
+
+    private static final List<ProductLine> LINES = List.of(
+            new ProductLine("후디", "상의", List.of("S", "M", "L"), 89_000L),
+            new ProductLine("티셔츠", "상의", List.of("S", "M", "L"), 39_000L),
+            new ProductLine("니트", "상의", List.of("S", "M", "L"), 129_000L),
+            new ProductLine("자켓", "아우터", List.of("S", "M", "L"), 219_000L),
+            new ProductLine("코트", "아우터", List.of("S", "M", "L"), 289_000L),
+            new ProductLine("슬랙스", "하의", List.of("28", "30", "32"), 79_000L),
+            new ProductLine("스커트", "하의", List.of("S", "M", "L"), 69_000L),
+            new ProductLine("원피스", "원피스", List.of("S", "M", "L"), 119_000L),
+            new ProductLine("스니커즈", "신발", List.of("250", "260", "270"), 159_000L),
+            new ProductLine("볼캡", "액세서리", List.of("FREE"), 29_000L),
+            new ProductLine("머플러", "액세서리", List.of("FREE"), 39_000L),
+            new ProductLine("토트백", "액세서리", List.of("FREE"), 149_000L),
+            new ProductLine("선글라스", "액세서리", List.of("FREE"), 89_000L));
+
+    /** 스타일 수식어 — 이름 다양성 + 검색(상품명) 데모용. */
+    private static final List<String> STYLES = List.of(
+            "코튼", "린넨", "울", "캐시미어", "오버핏", "크롭", "클래식", "미니멀", "빈티지", "소프트", "와이드", "라이트");
+
+    /** 생성 상품 수(대표 12종과 합쳐 총 60종 — 20개씩 3페이지라 페이지네이션·무한스크롤이 살아난다). */
+    private static final int GENERATED_COUNT = 48;
+
+    /**
+     * 볼륨 카탈로그 생성 — 결정적(난수 없음)이라 재기동해도 같은 상품 집합이 나온다(이름이 자연키라 멱등).
+     *
+     * <p>테스트가 필요한 상태를 <b>의도적으로</b> 섞는다: 세일(4개 중 1개·할인율 3종)·재고 임박(2개)·
+     * 품절(0개·SOLD_OUT)·판매중지(공개 목록에서 빠지고 어드민 상태 필터에만 보임)·가격 변동(정렬).
+     */
+    /** 시드가 보장하는 전체 상품 정의(대표 + 생성) — <b>정의 순서</b>가 곧 결정적 처리 순서다. */
+    private static List<DemoProduct> allSpecs() {
+        List<DemoProduct> specs = new ArrayList<>(CATALOG);
+        specs.addAll(generatedCatalog());
+        return specs;
+    }
+
+    private static List<DemoProduct> generatedCatalog() {
+        Set<String> curated = CATALOG.stream().map(DemoProduct::name).collect(Collectors.toSet());
+        List<DemoProduct> generated = new ArrayList<>();
+        for (int n = 0; generated.size() < GENERATED_COUNT && n < LINES.size() * STYLES.size(); n++) {
+            ProductLine line = LINES.get(n % LINES.size());
+            String name = STYLES.get((n / LINES.size()) % STYLES.size()) + " " + line.noun();
+            if (curated.contains(name)) {
+                continue;   // 대표 상품과 이름 충돌 회피(자연키 유일성)
+            }
+            int i = generated.size();
+            int stock = (i % 11 == 5) ? 0 : (i % 9 == 3) ? 2 : 20 + (i % 5) * 10;   // 품절·재고임박·일반
+            ProductStatus status = stock == 0 ? ProductStatus.SOLD_OUT
+                    : (i % 17 == 7 ? ProductStatus.DISCONTINUED : ProductStatus.ON_SALE);
+            generated.add(new DemoProduct(
+                    name,
+                    line.category(),
+                    BRANDS.get(i % BRANDS.size()),
+                    line.basePrice() + (i % 7) * 5_000L,
+                    i % 4 == 0 ? 1.15 + (i % 3) * 0.1 : null,
+                    line.sizes(),
+                    stock,
+                    status));
+        }
+        return generated;
     }
 
     /** 데모 구매 회원 이메일. password=demopass1234. */
@@ -163,14 +256,28 @@ public class DemoDataSeeder {
     @Transactional
     public void seed() {
         cleanupTestData();
+        legacyCleanup.purgeProductsNamedWith(LEGACY_PRODUCT_PREFIXES);
         Map<String, Category> categories = ensureCategories();
         Map<String, Seller> sellers = ensureSellers();
         Map<String, Brand> brands = ensureBrands(sellers);
         Map<String, Product> products = ensureCatalog(categories, brands);
+        // 상품 변경을 여기서 확정한다. 아래 단계들(찜·평점)이 비정규화 카운터를 <b>벌크 UPDATE</b>로 올리는데,
+        // 그 뒤에 dirty 상품이 flush되면 Hibernate가 전체 컬럼을 쓰면서 방금 올린 카운터를 stale 값으로 덮는다.
+        productRepository.flush();
         ensureSellerAccounts(sellers);
+        ensureExperienceAccounts();
         List<Member> demoMembers = ensureDemoMembers();
         seedDemoOrders(demoMembers, products, brands);
         seedBuyerSignals(products);
+        engagementSeeder.seed(catalogProductsInOrder(products), demoMembers);
+    }
+
+    /** 시드가 정의한 상품만, 정의 순서대로(참여 신호를 결정적으로 심기 위한 안정된 순서). */
+    private List<Product> catalogProductsInOrder(Map<String, Product> byName) {
+        return allSpecs().stream()
+                .map(spec -> byName.get(spec.name()))
+                .filter(java.util.Objects::nonNull)
+                .toList();
     }
 
     /** 1) 테스트 잔재 제거(상품 RecProdA/B·RecTestBrand·RecTestCat + 그 상품 참조 행). 이미 없으면 no-op. */
@@ -272,15 +379,16 @@ public class DemoDataSeeder {
         }
         renameLegacyProducts(byName);
 
-        for (DemoProduct spec : CATALOG) {
+        for (DemoProduct spec : allSpecs()) {
             Product product = byName.get(spec.name());
             if (product == null) {
                 product = productRepository.save(Product.builder()
                         .name(spec.name())
                         .price(spec.price())
-                        .description(spec.category() + " · " + spec.brand() + " 데모 상품")
+                        .description(spec.brand() + "의 " + spec.name() + " — " + spec.category()
+                                + " 라인. 데일리로 입기 좋은 데모 상품입니다.")
                         .imageUrl(null)               // FE가 상품명 키워드로 일러스트를 고른다(productImage.ts)
-                        .status(ProductStatus.ON_SALE)
+                        .status(spec.status())        // 품절·판매중지도 섞여 있어야 상태 필터·재고 리포트가 데모된다
                         .build());
                 byName.put(spec.name(), product);
             }
@@ -329,13 +437,40 @@ public class DemoDataSeeder {
             Member m = memberRepository.findByEmail(email).orElseGet(() ->
                     memberRepository.save(Member.builder()
                             .email(email)
-                            .password(passwordEncoder.encode("demopass1234"))
+                            .password(passwordEncoder.encode(DEMO_PASSWORD))
                             .nickname("데모회원" + idx)
                             .role(Role.USER)
                             .build()));
             members.add(m);
         }
         return members;
+    }
+
+    /**
+     * 데모 체험 계정 — 구매자(`buyer@commerce.com`)와 어드민(`admin@commerce.com`).
+     *
+     * <p>새 DB에는 <b>ADMIN이 한 명도 없어</b> 어드민 대시보드·정산·감사로그 화면을 아예 열 수 없다(개인화 신호가
+     * 붙는 buyer도 마찬가지로 없었다). 다만 어드민은 공개 데모에서 위험하므로 비밀번호가 설정된 경우에만 만든다.
+     */
+    private void ensureExperienceAccounts() {
+        memberRepository.findByEmail("buyer@commerce.com").orElseGet(() ->
+                memberRepository.save(Member.builder()
+                        .email("buyer@commerce.com")
+                        .password(passwordEncoder.encode(DEMO_PASSWORD))
+                        .nickname("데모 구매자")
+                        .role(Role.USER)
+                        .build()));
+        if (adminPassword == null || adminPassword.isBlank()) {
+            log.info("[demo-seed] 어드민 데모 계정 생략 — app.demo-seed.admin-password 미설정(공개 배포 기본값)");
+            return;
+        }
+        memberRepository.findByEmail("admin@commerce.com").orElseGet(() ->
+                memberRepository.save(Member.builder()
+                        .email("admin@commerce.com")
+                        .password(passwordEncoder.encode(adminPassword))
+                        .nickname("데모 관리자")
+                        .role(Role.ADMIN)
+                        .build()));
     }
 
     /**

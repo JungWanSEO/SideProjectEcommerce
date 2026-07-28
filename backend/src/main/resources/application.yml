@@ -139,6 +139,10 @@ app:
   #   배포한 데모 서버를 채울 땐 APP_DEMO_SEED_ENABLED=true로 명시적으로 켠다(멱등이라 재기동에 안전).
   demo-seed:
     enabled: ${APP_DEMO_SEED_ENABLED:false}
+    # 어드민 데모 계정(admin@commerce.com) 비밀번호. **비우면 계정을 만들지 않는다**(기본).
+    #   공개 데모에 "누구나 아는 관리자"가 있으면 상품 삭제·권한 변경까지 열리므로, 배포에서 어드민 화면을
+    #   보여주려는 경우에만 APP_DEMO_SEED_ADMIN_PASSWORD로 강한 값을 명시한다. 로컬은 application-dev.yml.
+    admin-password: ${APP_DEMO_SEED_ADMIN_PASSWORD:}
   # 주문 정책
   order:
     # 결제 대기(PENDING) 유효시간(분). 이 시간이 지난 PENDING 주문은 만료 배치가 취소한다
