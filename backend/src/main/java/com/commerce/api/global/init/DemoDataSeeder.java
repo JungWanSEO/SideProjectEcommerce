@@ -404,32 +404,41 @@ public class DemoDataSeeder {
      * 데모 주문을 (재)생성해도 되는 상태로 만든다. 셀러 귀속 이전에 시드된 주문은 항목 sellerId가 전부 null이라
      * 셀러 콘솔·셀러 알림·셀러 반품이 <b>영구히 빈 화면</b>이 된다 — 그런 주문만 지우고 아래에서 다시 만든다.
      *
-     * <p>안전장치(하나라도 어긋나면 아무것도 지우지 않는다): ① 데모 회원의 주문일 것 ② 상태가 PAID일 것
-     * (배송·취소·반품이 진행된 주문 제외) ③ 결제행이 없을 것(= 정산·대사가 물린 실주문 제외) ④ 모든 항목이
-     * 미귀속일 것 ⑤ 그중 최소 하나는 지금 귀속 가능할 것(브랜드에 셀러가 붙어 있을 것). 사람이 만든 주문이
-     * 하나라도 섞여 있으면 <b>전체를 보존</b>하고 건너뛴다(부분 삭제로 데모가 반쪽 나는 것 방지).
+     * <p><b>판정은 주문 단위</b>다: 사람이 만든 주문(실결제·배송/취소 진행분)은 손대지 않고 남기며, 그 존재가
+     * 시드 주문의 재귀속을 막지도 않는다. (처음엔 "하나라도 섞이면 전체 보존"이었는데, 실제 로컬 DB에서
+     * 검증 흔적 주문 1건 때문에 시드 주문 6건이 영영 미귀속으로 남는 것을 확인하고 정밀화했다.)
      *
-     * @return true면 "데모 주문 없음" 상태이므로 새로 생성해야 한다
+     * @return true면 "시드가 만든 데모 주문이 없는" 상태이므로 새로 생성해야 한다
      */
     private boolean ensureDemoOrdersAttributable(List<Member> demoMembers, Map<Long, Long> sellerByProductId) {
         List<Long> memberIds = demoMembers.stream().map(Member::getId).toList();
         List<Order> existing = orderRepository.findByMemberIdIn(memberIds);
-        if (existing.isEmpty()) {
-            return true;
+        List<Order> stale = existing.stream()
+                .filter(o -> isUnattributedSeedOrder(o, sellerByProductId))
+                .toList();
+        if (!stale.isEmpty()) {
+            orderRepository.deleteAll(stale);   // 항목·이력·shipment는 cascade + orphanRemoval로 함께 삭제
+            orderRepository.flush();            // 재생성 INSERT보다 DELETE가 먼저 나가도록 명시적 flush
+            log.info("[demo-seed] 셀러 미귀속 데모 주문 {}건 삭제 — 귀속본으로 재생성", stale.size());
         }
-        boolean allReplaceable = existing.stream().allMatch(o -> isUnattributedSeedOrder(o, sellerByProductId));
-        if (!allReplaceable) {
-            return false;   // 이미 귀속됐거나(정상) 실주문이 섞임 → 그대로 둔다
-        }
-        orderRepository.deleteAll(existing);   // 항목·이력·shipment는 cascade + orphanRemoval로 함께 삭제
-        orderRepository.flush();               // 재생성 INSERT보다 DELETE가 먼저 나가도록 명시적 flush
-        log.info("[demo-seed] 셀러 미귀속 데모 주문 {}건 삭제 — 귀속본으로 재생성", existing.size());
-        return true;
+        Set<Long> deletedIds = stale.stream().map(Order::getId).collect(Collectors.toSet());
+        boolean seedOrdersRemain = existing.stream()
+                .filter(o -> !deletedIds.contains(o.getId()))
+                .anyMatch(this::isSeedOrder);
+        return !seedOrdersRemain;   // 이미 (귀속된) 시드 주문이 남아 있으면 재생성하지 않는다(멱등)
     }
 
-    /** 이 주문이 "셀러 귀속 이전 시드가 만든 것"으로 판정되는가(위 ②~⑤ 조건). */
+    /**
+     * "이 시드가 만든 주문"의 표식 — 데모 회원 + PAID + <b>결제행 없음</b>.
+     * 실제 체크아웃을 거친 주문에는 Payment가 남으므로, 정산·대사가 물린 주문을 시드가 건드리는 일이 없다.
+     */
+    private boolean isSeedOrder(Order order) {
+        return order.getStatus() == OrderStatus.PAID && !paymentRepository.existsByOrderId(order.getId());
+    }
+
+    /** 시드가 만든 주문이면서 <b>전 항목 미귀속</b>이고 지금은 귀속 가능한가(=지우고 다시 만들 대상). */
     private boolean isUnattributedSeedOrder(Order order, Map<Long, Long> sellerByProductId) {
-        if (order.getStatus() != OrderStatus.PAID || paymentRepository.existsByOrderId(order.getId())) {
+        if (!isSeedOrder(order)) {
             return false;
         }
         boolean anyAttributable = false;
