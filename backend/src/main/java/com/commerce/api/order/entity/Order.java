@@ -301,11 +301,6 @@ public class Order extends BaseEntity {
         return cancellable;
     }
 
-    /** 항목 단위 취소 — 주체 미상. */
-    public OrderItem cancelItem(Long orderItemId) {
-        return cancelItem(orderItemId, null, null);
-    }
-
     /**
      * 항목 단위 취소(부분환불, #1 c안) — 그 항목의 셀러 shipment가 <b>미출고(PAID)</b>이거나 shipment 없음(PENDING)일 때만.
      * 출고 시작(SHIPPING/DELIVERED)됐으면 409. 셀러의 마지막 활성 항목이면 그 shipment도 CANCELLED가 되고,
