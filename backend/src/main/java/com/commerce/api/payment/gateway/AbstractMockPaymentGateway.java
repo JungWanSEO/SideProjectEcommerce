@@ -59,4 +59,17 @@ public abstract class AbstractMockPaymentGateway implements PaymentGateway {
         // PG가 처리한 거래 전체(원장 스냅샷)를 정산 리포트로 돌려준다.
         return List.copyOf(ledger.values());
     }
+
+    /**
+     * <b>원장 복원(모의 전용)</b> — 이미 처리된 거래를 원장에 되살린다. 새 승인이 아니므로 거래 ID를 만들지 않고
+     * 주어진 레코드를 그대로 넣는다(이미 있으면 덮지 않는다).
+     *
+     * <p>왜 필요한가: 이 원장은 인메모리라 앱을 껐다 켜면 비어 버린다. 그러면 DB에 남은 우리 정산 기록만 살아남아
+     * <b>대사가 모든 거래를 "PG 측 누락"으로 오판</b>한다 — 실제 PG였다면 PG 쪽에 남아 있었을 데이터다.
+     * 데모 시드가 기동 시 기존 결제로 원장을 채워, 재기동 후에도 대사 화면이 실제 상태를 보여주게 한다.
+     * (운영 어댑터에는 이런 메서드가 필요 없다 — 원장은 PG가 갖고 있다.)
+     */
+    public void restore(PgSettlementRecord record) {
+        ledger.putIfAbsent(record.pgTransactionId(), record);
+    }
 }

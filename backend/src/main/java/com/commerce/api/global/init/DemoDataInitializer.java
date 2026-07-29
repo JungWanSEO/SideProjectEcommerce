@@ -23,12 +23,16 @@ import org.springframework.stereotype.Component;
 public class DemoDataInitializer implements CommandLineRunner {
 
     private final DemoDataSeeder seeder;
+    private final DemoMoneyFlowSeeder moneyFlowSeeder;
     private final RecommendationBatchService recommendationBatchService;
     private final CoOccurrenceBatchService coOccurrenceBatchService;
 
     @Override
     public void run(String... args) {
         seeder.seed();
+        // 돈 흐름은 시드 트랜잭션이 커밋된 뒤에 — 결제가 낙관락 재시도를 위해 자기 트랜잭션 경계를 직접 관리하므로
+        // 바깥 트랜잭션에 묶으면 재시도가 깨진다(그래서 별도 호출이고, 이 시더는 @Transactional이 없다).
+        moneyFlowSeeder.seed();
         int personalized = recommendationBatchService.run();
         int coOccurrence = coOccurrenceBatchService.run();
         log.info("[demo-seed] 완료 — 추천 {}건, 함께 산 상품 {}건 계산", personalized, coOccurrence);

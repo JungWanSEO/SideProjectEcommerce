@@ -74,6 +74,20 @@ class DemoDataSeederTest {
     @Autowired private WishlistRepository wishlistRepository;
     @Autowired private CouponRepository couponRepository;
     @Autowired private MemberCouponRepository memberCouponRepository;
+    @Autowired private com.commerce.api.address.repository.AddressRepository addressRepository;
+    @Autowired private com.commerce.api.cart.service.CartService cartService;
+    @Autowired private com.commerce.api.order.service.OrderProcessor orderProcessor;
+    @Autowired private com.commerce.api.order.service.OrderService orderService;
+    @Autowired private com.commerce.api.payment.service.PaymentService paymentService;
+    @Autowired private com.commerce.api.payment.gateway.PaymentGatewayRouter paymentGatewayRouter;
+    @Autowired private com.commerce.api.settlement.service.SettlementService settlementService;
+    @Autowired private com.commerce.api.settlement.service.PayoutService payoutService;
+    @Autowired private com.commerce.api.settlement.service.ReconciliationService reconciliationService;
+    @Autowired private com.commerce.api.settlement.repository.SettlementRepository settlementRepository;
+    @Autowired private com.commerce.api.settlement.repository.PayoutRepository payoutRepository;
+    @Autowired private com.commerce.api.settlement.repository.MismatchRepository mismatchRepository;
+    @Autowired private com.commerce.api.returns.service.ReturnService returnService;
+    @Autowired private com.commerce.api.returns.repository.ReturnRequestRepository returnRequestRepository;
     @Autowired private WishlistService wishlistService;
     @Autowired private PasswordEncoder passwordEncoder;
     @PersistenceContext private EntityManager em;
@@ -96,6 +110,37 @@ class DemoDataSeederTest {
                 new DemoLegacyCleanup(em, productRepository),
                 new DemoEngagementSeeder(reviewRepository, productRepository, wishlistRepository, wishlistService),
                 new DemoCouponSeeder(couponRepository, memberCouponRepository));
+    }
+
+    @Test
+    @DisplayName("돈 흐름 시드 — 결제→(결제×셀러)정산→지급묶음→대사가 실제 데이터로 채워진다")
+    void seedsMoneyFlow() {
+        seeder.seed();
+
+        moneyFlowSeeder().seed();
+
+        // 결제는 실제 경로(체크아웃→PG 라우팅)를 탄다 — PG 원장에 기록이 남아야 대사가 의미를 갖는다
+        assertThat(paymentRepository.findByIdempotencyKey("demo-pay-0")).isPresent();
+        // 정산은 (결제×셀러)로 분해 — 셀러 귀속 항목이 있어야 셀러 정산 화면이 채워진다
+        assertThat(settlementRepository.findAll()).anySatisfy(e -> assertThat(e.getSellerId()).isNotNull());
+        // 환불(전체취소·반품)분은 역분개로 상계 → 음수 net 항목이 존재
+        assertThat(settlementRepository.findAll()).anySatisfy(e -> assertThat(e.getNetAmount()).isNegative());
+        assertThat(payoutRepository.count()).isPositive();          // 지급 묶음
+        assertThat(returnRequestRepository.count()).isPositive();   // 반품 워크플로 완주 1건
+        // 정산 후 환불 → PG 원장은 REFUNDED인데 우리 정산은 그대로 → 상태 불일치가 예외 큐에 쌓인다
+        assertThat(mismatchRepository.count()).isPositive();
+    }
+
+    @Test
+    @DisplayName("돈 흐름 시드는 멱등 — 재실행해도 결제가 중복되지 않는다")
+    void moneyFlowIsIdempotent() {
+        seeder.seed();
+        moneyFlowSeeder().seed();
+        long paymentsAfterFirst = paymentRepository.count();
+
+        moneyFlowSeeder().seed();
+
+        assertThat(paymentRepository.count()).isEqualTo(paymentsAfterFirst);
     }
 
     @Test
@@ -358,6 +403,17 @@ class DemoDataSeederTest {
     }
 
     // === 헬퍼 ===================================================================
+
+    /**
+     * 돈 흐름 시더 — 운영에선 시드 트랜잭션 <b>커밋 뒤</b>에 도는 별도 빈이라(결제가 자기 트랜잭션을 관리) 여기서도
+     * 직접 조립한다. 테스트는 한 트랜잭션 안에서 돌지만 시드 상황엔 경합이 없어 결제 경로가 그대로 성립한다.
+     */
+    private DemoMoneyFlowSeeder moneyFlowSeeder() {
+        return new DemoMoneyFlowSeeder(memberRepository, em, addressRepository, cartService, orderProcessor,
+                orderService, paymentService, paymentRepository, paymentGatewayRouter, settlementService,
+                payoutService, payoutRepository, reconciliationService, returnService, returnRequestRepository,
+                sellerRepository);
+    }
 
     private Set<String> productNames() {
         return productRepository.findAll().stream().map(Product::getName).collect(Collectors.toSet());
