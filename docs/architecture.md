@@ -174,7 +174,7 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 | `recommendation` | personalization | 멤버별 "나를위한" 사전계산 | member_id+product_id UNIQUE · score |
 | `product_cooccurrence` | personalization | "함께 산 상품" 사전계산 | reference_product_id+product_id UNIQUE · co_buy_count · score |
 
-### 5.3 스키마 진화 (Flyway 52개, 에포크별)
+### 5.3 스키마 진화 (Flyway 53개, 에포크별)
 
 | 에포크 | 마이그레이션 | 내용 |
 |---|---|---|
@@ -196,6 +196,7 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 | P 배송비(#4) | V49~V50 | orders.shipping_fee(스냅샷·플랫폼 수익) / settlement_entry.shipping(플랫폼 배송비 엔트리 플래그) |
 | Q 게스트 카트(#7) | V51 | cart.member_id NULL 허용 + cart_token UNIQUE(게스트 토큰 카트·로그인 병합) |
 | R 취소·환불 사유(#8) | V52 | order_item.cancel_reason·return_request.reason_code(구조화 사유 taxonomy·add-only·nullable·기록집계 전용) |
+| S 알림 인박스(#6) | V53 | notification_log에 수신자(recipient_type/id)·읽음(read_at)·성격(category)·딥링크 + **멱등키를 event_id 단독 → (event_id, recipient_type, recipient_id) 복합 UNIQUE로 교체**(1 이벤트→N 셀러 팬아웃 차단 해제) |
 
 ---
 
