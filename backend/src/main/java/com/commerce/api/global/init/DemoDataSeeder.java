@@ -69,9 +69,15 @@ public class DemoDataSeeder {
     private final PasswordEncoder passwordEncoder;
     private final DemoLegacyCleanup legacyCleanup;         // 초기 볼륨 테스트용 더미 상품 정리
     private final DemoEngagementSeeder engagementSeeder;   // 리뷰·평점·찜(정렬·분포 데모)
+    private final DemoCouponSeeder couponSeeder;           // 쿠폰 4종 + 발급형 쿠폰함
 
     /** 정리 대상 — 예전에 볼륨 테스트용으로 찍어낸 더미 상품 접두어. 지금은 시드가 카탈로그를 직접 만든다. */
     private static final List<String> LEGACY_PRODUCT_PREFIXES = List.of("DEMO-SEED-");
+
+    /** 정리 대상 — k6 부하 테스트가 가입시킨 회원(200명)·발급한 쿠폰·스모크 테스트가 남긴 빈 카테고리. */
+    private static final List<String> LOAD_TEST_MEMBER_PREFIXES = List.of("load-");
+    private static final List<String> LOAD_TEST_COUPON_PREFIXES = List.of("부하테스트");
+    private static final List<String> SMOKE_TEST_CATEGORIES = List.of("AuditSmoke");
 
     private static final List<String> CATEGORIES = List.of("아우터", "상의", "하의", "원피스", "신발", "액세서리");
     private static final List<String> BRANDS = List.of("Maison Clay", "Daily Form", "Nord Atelier");
@@ -257,6 +263,9 @@ public class DemoDataSeeder {
     public void seed() {
         cleanupTestData();
         legacyCleanup.purgeProductsNamedWith(LEGACY_PRODUCT_PREFIXES);
+        legacyCleanup.purgeCouponsNamedWith(LOAD_TEST_COUPON_PREFIXES);     // 회원보다 먼저(발급 이력 동반 삭제)
+        legacyCleanup.purgeMembersWithEmailPrefix(LOAD_TEST_MEMBER_PREFIXES);
+        legacyCleanup.purgeEmptyCategoriesNamed(SMOKE_TEST_CATEGORIES);
         Map<String, Category> categories = ensureCategories();
         Map<String, Seller> sellers = ensureSellers();
         Map<String, Brand> brands = ensureBrands(sellers);
@@ -270,6 +279,8 @@ public class DemoDataSeeder {
         seedDemoOrders(demoMembers, products, brands);
         seedBuyerSignals(products);
         engagementSeeder.seed(catalogProductsInOrder(products), demoMembers);
+        Seller firstSeller = sellers.get(DEMO_SELLERS.get(0).name());
+        couponSeeder.seed(firstSeller == null ? null : firstSeller.getId(), demoMembers);
     }
 
     /** 시드가 정의한 상품만, 정의 순서대로(참여 신호를 결정적으로 심기 위한 안정된 순서). */

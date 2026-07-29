@@ -7,6 +7,13 @@ import com.commerce.api.brand.entity.Brand;
 import com.commerce.api.brand.repository.BrandRepository;
 import com.commerce.api.category.entity.Category;
 import com.commerce.api.category.repository.CategoryRepository;
+import com.commerce.api.coupon.entity.Coupon;
+import com.commerce.api.coupon.entity.CouponFundedBy;
+import com.commerce.api.coupon.entity.CouponIssueType;
+import com.commerce.api.coupon.entity.DiscountType;
+import com.commerce.api.coupon.entity.MemberCoupon;
+import com.commerce.api.coupon.repository.CouponRepository;
+import com.commerce.api.coupon.repository.MemberCouponRepository;
 import com.commerce.api.member.entity.Member;
 import com.commerce.api.member.entity.Role;
 import com.commerce.api.member.repository.MemberRepository;
@@ -28,6 +35,7 @@ import com.commerce.api.wishlist.repository.WishlistRepository;
 import com.commerce.api.wishlist.service.WishlistService;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -64,6 +72,8 @@ class DemoDataSeederTest {
     @Autowired private RecommendationRepository recommendationRepository;
     @Autowired private ReviewRepository reviewRepository;
     @Autowired private WishlistRepository wishlistRepository;
+    @Autowired private CouponRepository couponRepository;
+    @Autowired private MemberCouponRepository memberCouponRepository;
     @Autowired private WishlistService wishlistService;
     @Autowired private PasswordEncoder passwordEncoder;
     @PersistenceContext private EntityManager em;
@@ -84,7 +94,49 @@ class DemoDataSeederTest {
                 orderRepository, sellerRepository, paymentRepository, activityLogRepository,
                 recommendationRepository, wishlistService, passwordEncoder,
                 new DemoLegacyCleanup(em, productRepository),
-                new DemoEngagementSeeder(reviewRepository, productRepository, wishlistRepository, wishlistService));
+                new DemoEngagementSeeder(reviewRepository, productRepository, wishlistRepository, wishlistService),
+                new DemoCouponSeeder(couponRepository, memberCouponRepository));
+    }
+
+    @Test
+    @DisplayName("부하 테스트 회원·쿠폰을 정리하되, 이력이 있는 회원은 남긴다")
+    void purgesLoadTestMembersAndCoupons() {
+        Member disposable = saveMember("load-1@commerce.com", Role.USER);
+        Member withHistory = saveMember("load-2@commerce.com", Role.USER);
+        Product product = saveProduct("리뷰대상", 10_000L);
+        reviewRepository.save(com.commerce.api.review.entity.Review.builder()
+                .memberId(withHistory.getId()).productId(product.getId()).rating(5).content("좋아요").build());
+        Coupon loadCoupon = couponRepository.save(Coupon.create("LOADTEST-1", "부하테스트 쿠폰",
+                DiscountType.FIXED_AMOUNT, 1_000L, null, 0L, CouponFundedBy.PLATFORM, null,
+                CouponIssueType.ISSUED, LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(1), 100));
+        memberCouponRepository.save(MemberCoupon.issue(disposable.getId(), loadCoupon.getId()));
+
+        seeder.seed();
+
+        assertThat(memberRepository.findByEmail("load-1@commerce.com")).isEmpty();      // 흔적뿐인 회원은 정리
+        assertThat(memberRepository.findByEmail("load-2@commerce.com")).isPresent();    // 리뷰 이력이 있으면 보존
+        assertThat(couponRepository.findByCode("LOADTEST-1")).isEmpty();                // 부하 테스트 쿠폰도 정리
+        assertThat(memberCouponRepository.findByMemberIdAndCouponId(disposable.getId(), loadCoupon.getId()))
+                .isEmpty();                                                            // 발급 이력도 함께
+    }
+
+    @Test
+    @DisplayName("데모 쿠폰 4종을 심고 선착순 발급형은 회원 쿠폰함에 넣는다(부담 주체·정률·한정수량 축을 모두 덮음)")
+    void seedsDemoCoupons() {
+        seeder.seed();
+
+        assertThat(couponRepository.findByCode("WELCOME5000")).isPresent();   // 정액·플랫폼 부담
+        assertThat(couponRepository.findByCode("SPRING10")).isPresent();      // 정률+상한
+        Coupon sellerCoupon = couponRepository.findByCode("MAISON15").orElseThrow();
+        assertThat(sellerCoupon.getFundedBy()).isEqualTo(CouponFundedBy.SELLER);
+        assertThat(sellerCoupon.getSellerId()).isEqualTo(
+                sellerRepository.findByName("메종클레이").orElseThrow().getId());
+
+        Coupon firstCome = couponRepository.findByCode("FIRSTCOME10K").orElseThrow();
+        assertThat(firstCome.getIssueType()).isEqualTo(CouponIssueType.ISSUED);
+        assertThat(firstCome.getTotalQuantity()).isEqualTo(100);
+        Member demo1 = memberRepository.findByEmail("demo1@commerce.com").orElseThrow();
+        assertThat(memberCouponRepository.findByMemberIdAndCouponId(demo1.getId(), firstCome.getId())).isPresent();
     }
 
     @Test
