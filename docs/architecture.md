@@ -494,13 +494,17 @@ push/PR(`dev`·`main`) 시 2잡: **backend**(JDK 21, `gradlew test`, H2 — 시�
 
 ---
 
-## 12. 인증 확장: OAuth2 / 소셜 로그인 (설계 — 스키마 prep만)
+## 12. 인증 확장: OAuth2 / 소셜 로그인 (구글·카카오 구현 완료)
 
-로컬(email/password)에 더해 구글·카카오·네이버 소셜 로그인을 위한 설계. **유저 모델은 V2로 미리 대비**(provider/providerId/nullable password)했으나 **소셜 로그인 구현 자체는 후속**이다.
+로컬(email/password)에 더해 **구글·카카오 소셜 로그인을 실제로 구현**했다(2026-07-01, 브라우저 실로그인 검증). 유저 모델은 V2에서 미리 대비해 둔 `provider`/`providerId`/nullable password를 그대로 썼다 — 스키마 변경 0.
 
-- **원칙**: 검증 주체(IdP)만 갈아끼우고, 인증 성공 *이후*에는 로컬과 동일하게 우리 JWT 쿠키를 발급 → 기존 인증/인가 파이프라인 전부 재사용.
-- **식별자 = (provider, providerId)** (email은 제공자 측 변경 가능 → 보조 키). 단일 테이블 채택, 다중 연동 요구 시 `social_account` 분리로 확장.
-- 계정 연동·email 유니크 정책(자동 연동 vs provider별 별개)은 구현 시 확정. 의존성 `spring-boot-starter-oauth2-client`, client-id/secret은 환경변수.
+- **원칙 그대로**: 검증 주체(IdP)만 갈아끼우고, 인증 성공 *이후*에는 로컬과 동일하게 `AuthService.issueTokens`로 우리 JWT 쿠키를 발급 → 기존 인증/인가 파이프라인 전부 재사용.
+- **식별자 = (provider, providerId)**로 find-or-create(email은 제공자 측 변경 가능 → 보조 키). 검증된 email이면 자동 연동.
+- **스테이트리스 유지**: 앱이 `SessionCreationPolicy.STATELESS`라 세션에 인가요청을 저장할 수 없어 **쿠키 기반 `HttpCookieOAuth2AuthorizationRequestRepository`**를 직접 구현(state를 쿠키에 직렬화).
+- **provider별 opt-in**: `spring.security.oauth2.client.*`를 쓰면 Boot가 **빈 registration까지 검증**해 한쪽만 채우면 부팅이 실패한다 → 자격증명을 `app.oauth2.*`로 받아 **client-id가 채워진 provider만** `ClientRegistrationRepository`에 등록(`OAuth2ClientConfig`). 둘 다 비면 소셜 로그인 자체가 비활성(로컬 로그인만).
+- **카카오 특이사항**: 내장 provider가 아니라 엔드포인트를 직접 지정(`kauth`/`kapi`·user-name-attribute `id`)하고, email 미제공 계정은 플레이스홀더(`kakao_<id>@social.local`)로 생성해 NOT NULL·UNIQUE를 만족시킨다.
+- **프록시 뒤 배포**: `{baseUrl}/login/oauth2/code/*`가 내부 http로 생성되지 않도록 `server.forward-headers-strategy=framework`(Caddy 뒤)가 필요하다(§배포).
+- 게스트 카트 병합도 소셜 경로에 함께 배선돼 있다(§6.11).
 
 ---
 
@@ -512,10 +516,10 @@ push/PR(`dev`·`main`) 시 2잡: **backend**(JDK 21, `gradlew test`, H2 — 시�
 - **Alertmanager 미배선** — Prometheus alert 규칙 6개는 평가되어 `/alerts`에 뜨지만 **알림 채널(Slack/메일)은 없음**(후속). 관측성 스택 자체는 opt-in 프로파일로 구동.
 - **Redis 캐시·분산 락 기본 OFF** — Caffeine(기본)/NoOp 락(기본). Redis/Redisson 코드·도커는 완비, `app.cache.provider`/`app.lock.provider` + `--profile redis`로 활성.
 - **RabbitMQ opt-in** — 기본 발행은 in-process. `outbox.publisher` 토글 시 실제 브로커 사용(SKIP LOCKED는 MySQL 전용 → 런타임 검증, 단위 테스트는 H2라 제외).
-- **실배포는 prep까지** — Dockerfile·env화·CORS/쿠키·CI 완료, 실제 클라우드 배포(IaC/플랫폼 설정)는 후속.
-- **OAuth2/소셜** — 유저 모델 prep만(§12).
-- **FE 갭** — 회원가입 페이지 없음(로그인만), 이미지 URL 입력 방식(업로드 없음), 셀러 콘솔은 정산 조회 전용, FE 자동 테스트 없음(tsc/lint + 브라우저 확인).
+- **실배포는 prep까지** — Dockerfile·env화·CORS/쿠키·CI·VM 런북(`deploy/`)·prod compose 완료, 실제 클라우드 기동(계정·도메인)은 후속. 데모 데이터는 시드가 코드로 만든다(`app.demo-seed.enabled`)라 "배포했더니 빈 상점" 문제는 해소.
+- **이미지 업로드 없음** — 상품 이미지는 URL 문자열(로컬 정적 자산 경로 또는 외부 URL). 시드 상품은 비워 두고 FE가 상품명 키워드로 일러스트를 고른다(`frontend/src/lib/productImage.ts`) — 스토리지·CDN 도입은 후속.
+- **FE 자동 테스트 없음** — tsc/lint + 브라우저 확인으로 대체(E2E는 후속). 백엔드는 724 tests.
+- **알림은 인앱 인박스만** — 이메일·알림톡·푸시 등 외부 채널 어댑터는 후속(포트는 열려 있음). 재입고 알림(구독 모델)도 미착수.
 - **의도적 단순화** — `Payment` 엔티티가 `HttpStatus`(웹 개념)를 import(도메인 예외 + `@ExceptionHandler` 분리는 후속). 정산 `(payment_id, seller_id)` UNIQUE는 V24에서 역분개 허용 위해 제거(멱등성은 앱 `existsByPaymentId`).
 
 > 최신 진행 이력은 [docs/dev-log.md](dev-log.md), 개별 결정의 상세 근거는 ADR(`docs/private/adr/`) 참고.
-</content>

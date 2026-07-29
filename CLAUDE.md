@@ -15,7 +15,8 @@
 - **도메인형 구조**: `member` · `product` · `cart` · `order` · `auth` (각각 controller/service/repository/entity/dto) + `global`(config/exception/common/security)
 
 ## 명령어 (backend/ 에서)
-- DB 실행 `docker compose up -d` (MySQL) · 실행 `./gradlew bootRun` · 빌드 `./gradlew build` · 테스트 `./gradlew test`
+- DB 실행 `docker compose up -d` (MySQL **3307**) · 실행 **`./run.ps1`**(⚠️ `gradlew bootRun`은 `.env` 미로드로 `${MYSQL_USER}` 미치환 → Access denied) · 빌드 `./gradlew build` · 테스트 `./gradlew test`
+- dev 프로파일이면 데모 시드가 자동 실행(`app.demo-seed.enabled`) — 카탈로그 60종·셀러·체험 계정. 계정 목록은 오답노트 참조.
 - DB: 앱은 MySQL(Docker), 테스트는 H2(`backend/src/test/resources/application.yml`)로 분리
 
 ## 작업 원칙
