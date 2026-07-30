@@ -50,6 +50,11 @@ app:
     free-shipping-threshold: 0
     expiry:
       enabled: false
+  # 게스트 카트 정리 배치 OFF — 만료 배치와 같은 이유(테스트가 만든 게스트 카트를 배치가 지워 flaky).
+  #   TTL 경계는 GuestCartCleanupServiceTest가 서비스를 직접 호출해 검증한다.
+  cart:
+    guest-cleanup:
+      enabled: false
   # shipment 백필 러너 OFF — 기동 시 자동 소급 생성 방지(백필 로직은 ShipmentBackfillServiceTest로 직접 검증).
   shipment:
     backfill:

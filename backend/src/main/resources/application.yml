@@ -143,6 +143,11 @@ app:
     #   공개 데모에 "누구나 아는 관리자"가 있으면 상품 삭제·권한 변경까지 열리므로, 배포에서 어드민 화면을
     #   보여주려는 경우에만 APP_DEMO_SEED_ADMIN_PASSWORD로 강한 값을 명시한다. 로컬은 application-dev.yml.
     admin-password: ${APP_DEMO_SEED_ADMIN_PASSWORD:}
+  # 장바구니 정책
+  cart:
+    # 게스트 카트 유효기간(일). 마지막 활동(updatedAt) 후 이 기간이 지나면 정리 배치가 삭제한다.
+    #   게스트 카트는 쿠키 토큰으로만 도달하므로 쿠키가 사라지면 영구 고아가 된다 → 주기적 정리.
+    guest-ttl-days: ${APP_CART_GUEST_TTL_DAYS:30}
   # 주문 정책
   order:
     # 결제 대기(PENDING) 유효시간(분). 이 시간이 지난 PENDING 주문은 만료 배치가 취소한다
