@@ -1,10 +1,14 @@
 package com.commerce.api.dashboard.service;
 
+import com.commerce.api.dashboard.dto.CancelReasonStatsResponse;
+import com.commerce.api.dashboard.dto.CancelReasonStatsResponse.FaultCount;
+import com.commerce.api.dashboard.dto.CancelReasonStatsResponse.ReasonCount;
 import com.commerce.api.dashboard.dto.DashboardResponse;
 import com.commerce.api.dashboard.dto.DashboardResponse.DailyRevenue;
 import com.commerce.api.dashboard.dto.DashboardResponse.Kpi;
 import com.commerce.api.dashboard.dto.DashboardResponse.OrderStatusCount;
 import com.commerce.api.dashboard.dto.LowStockResponse;
+import com.commerce.api.global.common.CancelReason;
 import com.commerce.api.global.config.CacheConfig;
 import com.commerce.api.member.repository.MemberRepository;
 import com.commerce.api.order.entity.OrderStatus;
@@ -13,12 +17,15 @@ import com.commerce.api.payment.entity.PaymentStatus;
 import com.commerce.api.payment.repository.PaymentRepository;
 import com.commerce.api.product.entity.ProductStatus;
 import com.commerce.api.product.repository.ProductRepository;
+import com.commerce.api.returns.repository.ReturnRequestRepository;
 import com.commerce.api.settlement.entity.SettlementStatus;
 import com.commerce.api.settlement.repository.SettlementRepository;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -57,6 +64,7 @@ public class DashboardService {
     private final SettlementRepository settlementRepository;
     private final MemberRepository memberRepository;
     private final ProductRepository productRepository;
+    private final ReturnRequestRepository returnRequestRepository;   // 반품 사유 집계(#8 후속)
 
     /** 대시보드 한 화면(KPI + 주문 상태 분포 + 최근 days일 매출 추이). 비싼 집계라 30초 캐시(준실시간·days별). */
     @Cacheable(value = CacheConfig.DASHBOARD, key = "#days")
@@ -92,6 +100,59 @@ public class DashboardService {
                 productRepository.countOptionsWithStockBetween(RESTOCKABLE, 0, 0),          // 품절
                 productRepository.countOptionsWithStockBetween(RESTOCKABLE, 1, bound),      // 임박(1~bound)
                 productRepository.findLowStockOptions(RESTOCKABLE, bound, size));
+    }
+
+    /**
+     * 취소·반품 사유 집계(#8 후속) — 취소(order_item)와 반품(return_request)의 사유를 <b>한 축으로 합친다</b>.
+     *
+     * <p>사유가 enum으로 구조화돼 있어 group-by 두 번이면 끝난다(자유텍스트였다면 셀 수 없었다). 귀책(fault)은
+     * 사유가 들고 있는 메타를 접어 만들고, <b>사유 미기록</b> 건수는 따로 노출해 "사유별 합계 &lt; 전체"가
+     * 오류로 보이지 않게 한다(사유는 add-only·nullable로 도입됐다).
+     *
+     * <p>기간 필터는 두지 않았다 — 취소 시각을 별도로 보관하지 않아(항목 updatedAt은 교환 스왑 등에도 갱신됨)
+     * "언제 취소됐는지"의 기준을 새로 정해야 하고, 그건 별도 결정이라 전체 기간 집계로 시작한다.
+     * 캐시도 하지 않는다(호출 빈도가 낮고 운영 판단에 최신값이 낫다).
+     */
+    public CancelReasonStatsResponse getCancelReasonStats() {
+        Map<CancelReason, Long> cancels = toReasonMap(orderRepository.countCancelledItemsByReason());
+        Map<CancelReason, Long> returns = toReasonMap(returnRequestRepository.countByReasonCode());
+
+        long unrecordedCancels = cancels.getOrDefault(null, 0L);
+        long unrecordedReturns = returns.getOrDefault(null, 0L);
+
+        List<ReasonCount> byReason = Arrays.stream(CancelReason.values())
+                .map(reason -> new ReasonCount(
+                        reason.name(),
+                        reason.getFault().name(),
+                        cancels.getOrDefault(reason, 0L),
+                        returns.getOrDefault(reason, 0L),
+                        cancels.getOrDefault(reason, 0L) + returns.getOrDefault(reason, 0L)))
+                .filter(r -> r.total() > 0)   // 0건 사유는 표를 늘리기만 한다(상태 분포와 달리 고정 축이 아님)
+                .sorted(Comparator.comparingLong(ReasonCount::total).reversed())
+                .toList();
+
+        List<FaultCount> byFault = byReason.stream()
+                .collect(Collectors.groupingBy(ReasonCount::fault, Collectors.summingLong(ReasonCount::total)))
+                .entrySet().stream()
+                .map(e -> new FaultCount(e.getKey(), e.getValue()))
+                .sorted(Comparator.comparingLong(FaultCount::total).reversed())
+                .toList();
+
+        return new CancelReasonStatsResponse(
+                sum(cancels), sum(returns), unrecordedCancels, unrecordedReturns, byReason, byFault);
+    }
+
+    /** [reason, count] 행을 맵으로 — 사유 미기록(null) 키도 그대로 담는다(HashMap은 null 키 허용). */
+    private static Map<CancelReason, Long> toReasonMap(List<Object[]> rows) {
+        Map<CancelReason, Long> map = new HashMap<>();
+        for (Object[] row : rows) {
+            map.put((CancelReason) row[0], (Long) row[1]);
+        }
+        return map;
+    }
+
+    private static long sum(Map<CancelReason, Long> map) {
+        return map.values().stream().mapToLong(Long::longValue).sum();
     }
 
     /** 모든 OrderStatus를 enum 순서로 — 한 건도 없는 상태는 0으로 채워 분포가 늘 같은 모양이게. */

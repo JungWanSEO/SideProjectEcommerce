@@ -593,6 +593,35 @@ export interface LowStockReport {
   items: LowStockOption[]; // 재고 적은 순 상위 목록
 }
 
+/** 취소·반품 사유 1건 (CancelReasonStatsResponse.ReasonCount) — 취소·반품을 나눠 보여주고 합계로 정렬 */
+export interface CancelReasonCount {
+  reason: string; // CancelReason 코드 (CHANGE_OF_MIND 등)
+  fault: string; // 귀책 — CUSTOMER | SELLER | PLATFORM | NONE
+  cancelCount: number;
+  returnCount: number;
+  total: number;
+}
+
+/** 귀책별 합계 (CancelReasonStatsResponse.FaultCount) */
+export interface CancelFaultCount {
+  fault: string;
+  total: number;
+}
+
+/**
+ * 취소·반품 사유 집계 (CancelReasonStatsResponse) — GET /api/dashboard/cancel-reasons (ADMIN).
+ * 사유는 add-only·nullable로 도입돼 이전 데이터엔 없다 → unrecorded* 를 따로 표시해야
+ * "사유별 합계 < 전체"가 오류로 보이지 않는다.
+ */
+export interface CancelReasonStats {
+  totalCancelledItems: number;
+  totalReturns: number;
+  unrecordedCancels: number;
+  unrecordedReturns: number;
+  byReason: CancelReasonCount[];
+  byFault: CancelFaultCount[];
+}
+
 /** 회원 권한 (Role) — SELLER는 셀러 운영자 지정 API로만 부여된다(셀러 연결이 필요). */
 export type MemberRole = "USER" | "SELLER" | "ADMIN";
 

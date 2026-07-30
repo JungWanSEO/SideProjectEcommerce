@@ -43,4 +43,11 @@ public interface ReturnRequestRepository extends JpaRepository<ReturnRequest, Lo
 
     /** 구매자: 내 반품 목록. */
     Page<ReturnRequest> findByMemberId(Long memberId, Pageable pageable);
+
+    /**
+     * 반품/교환 요청의 <b>사유별</b> 건수 — [reasonCode, count]. 상태 무관(거부된 요청도 사유 통계엔 의미가 있다)이며
+     * reasonCode는 nullable이라 미기록 건은 null 행으로 나온다. 취소 사유 집계(OrderRepository)와 짝이다(#8 후속).
+     */
+    @Query("select r.reasonCode, count(r) from ReturnRequest r group by r.reasonCode")
+    List<Object[]> countByReasonCode();
 }
