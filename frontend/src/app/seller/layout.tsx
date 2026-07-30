@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 import Skeleton from "@/components/ui/Skeleton";
+import NotificationBell from "@/components/NotificationBell";
 
 // 셀러 콘솔 내비게이션. /seller = 정산(랜딩), /seller/orders = 내 주문.
 const NAV = [
@@ -64,6 +65,8 @@ export default function SellerLayout({ children }: { children: ReactNode }) {
         <header className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-3">
           <span className="text-sm text-gray-500">셀러 콘솔</span>
           <div className="flex items-center gap-4 text-sm">
+            {/* 셀러 알림 벨(#6) — 새 주문·반품 요청이 여기로 온다. 스코핑은 백엔드가 sellerId로 강제. */}
+            <NotificationBell basePath="/api/seller/me/notifications" tone="console" />
             <span className="text-gray-600">{user.email}</span>
             <button onClick={() => logout()} className="text-gray-500 hover:underline">
               로그아웃
