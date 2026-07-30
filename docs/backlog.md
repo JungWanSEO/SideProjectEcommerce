@@ -25,6 +25,15 @@
 
 > **07-27 적대적 스캔 소진**: 확정 2건(07-27 교정) + LOW 3건(07-29 결정·교정) = 남은 항목 0.
 
+## 🧩 자율 진행 중 발견 — FE·API 갭 (2026-07-30 · 결정 필요라 자율 금지)
+> `자율진행` 위임으로 무결정 후속 4건(셀러 벨·취소사유 집계·게스트 카트 TTL·반품 FE 3면)을 처리하는 동안 드러난 갭.
+> **전부 새 API 설계 또는 응답 범위 결정이 필요**해 손대지 않았다(자율 금지 항목: 새로운 의미 있는 결정).
+
+- 🔴 **셀러 출고 전진 UI** — 백엔드 `PATCH /api/seller/me/shipments/{id}/status`(#1 P5)는 있는데 **셀러가 자기 shipment 목록을 볼 조회 API가 없다**. `/seller/orders`는 `OrderSummaryResponse`(shipment 정보 없음)라 전진 대상 id를 알 수 없어 화면이 조회 전용으로 남아 있다. 필요한 결정=셀러 shipment 목록 API의 **응답 범위**(P5에서 타 셀러 품목·구매자 PII 비노출로 좁힌 원칙을 목록에도 어떻게 적용할지)·필터(상태별)·페이지네이션. 현재는 출고를 ADMIN만 할 수 있어 **셀러 콘솔의 핵심 동작이 비어 있다**.
+- 🟠 **어드민 반품 관리 화면** — ADMIN 대행 전이 API(`PATCH /api/orders/{orderId}/returns/{returnId}/status`)는 있으나 **전체 반품 목록 조회 API가 없다**(구매자 `/returns/me`·셀러 `/seller/me/returns`만). 필요한 결정=목록 API의 필터(상태·셀러·기간)와 노출 범위.
+- 🟡 **교환 신청 UI(구매자)** — 백엔드는 교환(옵션 스왑)을 지원하는데 FE는 반품만 신청 가능. 대체 옵션 선택 UI(같은 상품의 다른 사이즈 재고 조회·선택)가 필요.
+- 🟡 **취소사유 집계 기간 필터** — 지금은 전체 기간. 취소 시각을 따로 보관하지 않아(항목 `updatedAt`은 교환 스왑 등에도 갱신) "언제 취소됐는지"의 기준을 정해야 한다(전용 컬럼 추가 vs 상태 이력 조인).
+
 ## 함께 (외부 연동 · 학습 — 자율 금지)
 - ✅ **[배포 선결] 데모 카탈로그를 코드로 + 운영 플래그** — **완료(07-29, ⓐ안)**. `DemoDataSeeder`가 카탈로그 **12종**(상품·옵션·재고·세일가·카테고리 6개)을 직접 생성 → 새 DB로 배포해도 상점이 비지 않는다. 게이트는 `@Profile("dev")` → **`app.demo-seed.enabled`**(기본 OFF·`application-dev.yml`이 로컬만 ON·운영은 `APP_DEMO_SEED_ENABLED=true`)로 교체 — 시드를 켜려고 운영을 dev 프로파일로 돌리던 편법 제거(deploy.md §5·`.env.prod.example`·`docker-compose.prod.yml` 갱신). 초기 P01~P07은 **rename**이라 주문·리뷰·찜 참조 보존. **이미지 호스팅은 불필요**로 판명 — FE `productImage.ts`가 상품명 키워드로 `public/products/*.svg`를 고르므로 `imageUrl=null`로 충분.
 - 🚧 **배포 ($0 라이브 데모) — 경로 A(Oracle VM) 확정** — 준비물 완료: env화·`Dockerfile`·`docs/deploy.md`(`feature/deploy-prep`) + **prod 산출물·배선 보강**(`feature/deploy-prep-hardening`→dev `06e7ff8`): `backend/docker-compose.prod.yml`(앱+MySQL)·`.env.prod.example`·datasource `${SPRING_DATASOURCE_USERNAME:${MYSQL_USER}}` 체인·`APP_OAUTH2_REDIRECT` 행·`.gitignore` `.env.prod` 차단. 로컬 검증=`bootJar`·`next build` PASS. **결정=경로 A**(Oracle Always Free VM: Vercel FE + VM에 Spring Boot+MySQL; 콜드스타트 없음·진짜 MySQL·쿠키 first-party). ⚠️경로 B는 Koyeb 무료 폐쇄(Mistral 인수)로 약화. **다음=사용자 계정 단계**: Oracle A1 VM 생성→레포 clone→`.env.prod`→`docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build`→Caddy HTTPS→Vercel FE→쿠키전략(Vercel rewrites `/api/*` 프록시=first-party 추천)→로그인 확인. MySQL 실런타임 검증=VM 첫 기동. **VM 준비물 `deploy/`**(vm-setup.sh·Caddyfile·README) + 프록시 뒤 OAuth2 헤더(`server.forward-headers-strategy`) 추가(`feature/deploy-vm-runbook`→dev `2832ed5`). (가이드=docs/deploy.md §3, deploy/README.md)
@@ -45,9 +54,9 @@
    - ✅ **P2(buyer 거래알림, 07-27)** — 배송시작/완료(P2a `abddc0b`, `ORDER_STATUS_CHANGED`)·전체취소/환불(P2b `52b5f63`, CANCELLED 재사용)·반품 승인~환불/교환완료(P2c `ce3ec58`, `RETURN_STATUS_CHANGED`). emitter가 상태 전이와 같은 트랜잭션에서 발행(아웃박스 원자성). **687→701 tests**. 부분취소+부분환불 알림은 후속(주문 status 불변이라 별도 환불 이벤트 필요).
    - ✅ **P3(seller 알림, 07-27)** — P3a 새 주문 fan-out(`SellerNewOrderHandler`, PAYMENT_COMPLETED 두 번째 구독자·1 이벤트→N 셀러·복합키 실증·dev `9b56bd5`)·P3b 반품요청(`SellerReturnRequestedHandler`, REQUESTED만 셀러로·`446a92a`). `GET/PATCH /api/seller/me/notifications*`(SELLER 스코프·IDOR). **701→709 tests**. **#6 백엔드 P1~P3 완성.**
    - ✅ **FE 벨(구매자, 07-27, dev `27d2575`)** — 헤더 안읽음 뱃지(30초 폴링)+드롭다운 인박스·낙관적 읽음·딥링크·모두읽음. 구매자 `/api/notifications` 연동. tsc/lint 0. **#6 MVP(P1+P2+P3+FE 벨) 완성 — 이벤트 루프 엔드투엔드.**
-   - (후속) 셀러 콘솔 벨(`/api/seller/me/notifications`·셀러 레이아웃)·재입고(P4·`stock_subscription`·마케팅성/구독)·수신설정(preference)·부분취소 환불 알림·외부 채널(이메일·카카오 알림톡=오너 트랙). ✅ V53(및 누적 V40~V53) MySQL 스모크 **PASS**(07-27 스택 기동·Flyway 14개 클린·now at v53).
+   - ✅ **셀러 콘솔 벨 완료(07-30)** — 구매자 벨을 `basePath`·`tone` 주입으로 재사용(복제 없음)·셀러 레이아웃 헤더 배치. (후속) 재입고(P4·`stock_subscription`·마케팅성/구독)·수신설정(preference)·부분취소 환불 알림·외부 채널(이메일·카카오 알림톡=오너 트랙). ✅ V53(및 누적 V40~V53) MySQL 스모크 **PASS**(07-27 스택 기동·Flyway 14개 클린·now at v53).
 7. ✅ **게스트 장바구니** — **완료(07-26, c안: 서버 토큰 카트+로그인 병합)** → DONE. cart_token 쿠키(UUID·httpOnly)·로그인 시 회원 카트로 수량 합산·`/api/carts` 게스트 허용. 남은 후속: 게스트 카트 TTL 정리 배치(고아 카트)·첫담기 동시성 레이스(v1 한계).
-8. ✅ **취소·환불 사유 taxonomy** — **완료(07-26, 기록·집계 전용안) → DONE**. `CancelReason` enum 7종(+`Fault` 귀책 메타)·취소(`order_item.cancel_reason`)+반품(`return_request.reason_code`) 공통·**V52 add-only·nullable**. **돈 경로 무연동(v1)** — Fault 메타는 향후 정산 귀책/왕복배송비 부담 연동용 확장 지점. 남은 후속(유예): 사유별 집계 대시보드·Fault→정산 귀책/왕복배송비 부담 연동·사유 필수화 정책.
+8. ✅ **취소·환불 사유 taxonomy** — **완료(07-26, 기록·집계 전용안) → DONE**. `CancelReason` enum 7종(+`Fault` 귀책 메타)·취소(`order_item.cancel_reason`)+반품(`return_request.reason_code`) 공통·**V52 add-only·nullable**. **돈 경로 무연동(v1)** — Fault 메타는 향후 정산 귀책/왕복배송비 부담 연동용 확장 지점. ✅**사유별 집계 완료(07-30)**: `GET /api/dashboard/cancel-reasons`(사유×귀책·미기록 분리)+어드민 위젯. 남은 후속(유예): Fault→정산 귀책/왕복배송비 부담 연동·사유 필수화 정책·집계 기간 필터(위 갭 참조).
 9. ✅ **대시보드 매출 KPI = 환불 반영** — **완료(07-23, b안: 순매출)** → DONE. (Payment.amount−refundedAmount 순수 SQL로 해결 — 엔티티 순회 불요.)
 
 > 그 외 정책 대기: 회원 탈퇴(보존기간·PII 마스킹)·적립금/등급·상품 일괄작업 부분실패 정책·셀러 자가수정 범위·`next/image` 도입(이미지 호스팅처).
