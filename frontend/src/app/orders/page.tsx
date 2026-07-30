@@ -54,7 +54,13 @@ export default function OrdersPage() {
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
-      <h1 className="mb-8 text-3xl font-bold text-ink">주문 내역</h1>
+      <div className="mb-8 flex items-end justify-between">
+        <h1 className="text-3xl font-bold text-ink">주문 내역</h1>
+        {/* 반품은 배송완료 주문에서 신청하고, 진행 상황은 이 목록에서 본다(#3). */}
+        <Link href="/account/returns" className="text-sm text-muted underline transition hover:text-clay">
+          내 반품 · 교환
+        </Link>
+      </div>
 
       {orders.length === 0 ? (
         <div className="rounded-2xl border border-line bg-paper p-12 text-center">

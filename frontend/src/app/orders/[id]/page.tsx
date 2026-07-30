@@ -20,6 +20,14 @@ const CANCEL_REASONS = [
   { code: "OTHER", label: "기타" },
 ];
 
+/** 반품 사유 선택지(#3+#8) — 배송 후 맥락이라 취소 사유와 구성이 다르다(불량·오배송 포함). */
+const RETURN_REASONS = [
+  { code: "CHANGE_OF_MIND", label: "단순 변심" },
+  { code: "DEFECTIVE", label: "상품 불량" },
+  { code: "WRONG_DELIVERY", label: "오배송" },
+  { code: "OTHER", label: "기타" },
+];
+
 /** 주문 상세 (/orders/[id]). 본인 주문만(서버가 403으로 차단). PENDING=결제/취소, PAID=취소(환불). */
 export default function OrderDetailPage() {
   const params = useParams();
@@ -32,6 +40,11 @@ export default function OrderDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [cancelReason, setCancelReason] = useState("CHANGE_OF_MIND"); // 취소 사유(#8, 기록·집계)
+  // 반품 신청(#3) — 대상 항목 id가 있으면 모달을 띄운다. 교환은 대체 옵션 선택 UI가 필요해 v1은 반품만.
+  const [returnTarget, setReturnTarget] = useState<number | null>(null);
+  const [returnReason, setReturnReason] = useState("CHANGE_OF_MIND");
+  const [returnDetail, setReturnDetail] = useState("");
+  const [returning, setReturning] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !user) router.replace(loginHref(window.location.pathname + window.location.search));
@@ -44,6 +57,34 @@ export default function OrderDetailPage() {
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
   }, [user, id]);
+
+  /**
+   * 반품 신청(#3) — 자격(활성 항목·배송완료·기한 7일)의 최종 판정은 서버가 한다.
+   * 신청이 접수되면 셀러가 승인→수거→검수→환불로 진행하므로, 여기선 접수 결과만 알려주고 목록으로 안내한다.
+   */
+  const requestReturn = async () => {
+    if (returnTarget == null) return;
+    setReturning(true);
+    setError(null);
+    try {
+      await apiPost(`/api/orders/${id}/returns`, {
+        orderItemId: returnTarget,
+        type: "RETURN",
+        reason: returnDetail.trim() || null,
+        reasonCode: returnReason,
+        exchangeOptionId: null,
+      });
+      setReturnTarget(null);
+      setReturnDetail("");
+      alert("반품 신청이 접수되었습니다. 셀러 확인 후 수거가 진행됩니다.");
+      const refreshed = await apiGet<Order>(`/api/orders/${id}`);
+      setOrder(refreshed);
+    } catch (e) {
+      setError((e as Error).message); // 기한 초과·중복 요청(409) 등 서버 문구 그대로
+    } finally {
+      setReturning(false);
+    }
+  };
 
   const cancel = async () => {
     // PAID 주문 취소는 환불까지 동반 → 문구로 구분
@@ -154,7 +195,7 @@ export default function OrderDetailPage() {
           <li
             key={it.id}
             className={`flex items-center justify-between px-5 py-4 ${i > 0 ? "border-t border-line" : ""} ${
-              it.status === "CANCELLED" ? "opacity-50" : ""
+              it.status !== "ACTIVE" ? "opacity-50" : ""
             }`}
           >
             <div>
@@ -162,6 +203,9 @@ export default function OrderDetailPage() {
                 {it.productName}
                 {it.status === "CANCELLED" && (
                   <span className="ml-2 rounded bg-line px-1.5 py-0.5 text-xs text-muted">취소됨</span>
+                )}
+                {it.status === "RETURNED" && (
+                  <span className="ml-2 rounded bg-line px-1.5 py-0.5 text-xs text-muted">반품됨</span>
                 )}
               </p>
               <p className="mt-0.5 text-sm text-muted">
@@ -178,6 +222,15 @@ export default function OrderDetailPage() {
                   className="rounded-full border border-line px-3 py-1 text-xs text-muted transition hover:border-danger hover:text-danger disabled:opacity-50"
                 >
                   취소
+                </button>
+              )}
+              {/* 배송완료(DELIVERED) 항목만 반품 신청 — 자격(활성·배송완료·7일)의 최종 판정은 서버가 한다(#3). */}
+              {order.status === "DELIVERED" && it.status === "ACTIVE" && (
+                <button
+                  onClick={() => setReturnTarget(it.id)}
+                  className="rounded-full border border-line px-3 py-1 text-xs text-muted transition hover:border-clay hover:text-clay"
+                >
+                  반품 신청
                 </button>
               )}
             </div>
@@ -305,6 +358,62 @@ export default function OrderDetailPage() {
           </>
         )}
       </div>
+
+      {/* 반품 신청 모달(#3) — 사유는 구조화 코드(집계용) + 상세 텍스트. 교환은 대체 옵션 선택이 필요해 후속. */}
+      {returnTarget != null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-paper p-6">
+            <h2 className="font-serif text-xl text-ink">반품 신청</h2>
+            <p className="mt-1 text-sm text-muted">
+              접수 후 셀러가 확인하면 수거가 진행됩니다. 검수가 끝나면 환불됩니다.
+            </p>
+
+            <label className="mt-5 block text-sm text-ink">
+              반품 사유
+              <select
+                value={returnReason}
+                onChange={(e) => setReturnReason(e.target.value)}
+                disabled={returning}
+                className="mt-1 w-full rounded-lg border border-line bg-cream px-3 py-2 text-sm text-ink"
+              >
+                {RETURN_REASONS.map((r) => (
+                  <option key={r.code} value={r.code}>{r.label}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="mt-4 block text-sm text-ink">
+              상세 사유 <span className="text-muted">(선택)</span>
+              <textarea
+                value={returnDetail}
+                onChange={(e) => setReturnDetail(e.target.value)}
+                disabled={returning}
+                rows={3}
+                maxLength={500}
+                placeholder="예) 사이즈가 생각보다 작아요"
+                className="mt-1 w-full resize-none rounded-lg border border-line bg-cream px-3 py-2 text-sm text-ink"
+              />
+            </label>
+
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                onClick={() => setReturnTarget(null)}
+                disabled={returning}
+                className="rounded-full border border-line px-4 py-2 text-sm text-muted transition hover:text-ink disabled:opacity-50"
+              >
+                닫기
+              </button>
+              <button
+                onClick={requestReturn}
+                disabled={returning}
+                className={buttonClass()}
+              >
+                {returning ? "접수 중…" : "반품 신청"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
