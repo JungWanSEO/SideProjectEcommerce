@@ -65,6 +65,16 @@ public interface OrderRepository extends JpaRepository<Order, Long>, OrderReposi
     List<Object[]> countGroupByStatus();
 
     /**
+     * 취소된 항목의 <b>사유별</b> 건수 — [cancelReason, count]. 사유는 nullable(#8 add-only)이라
+     * 미기록 건은 reason=null 행으로 함께 나온다(서비스가 "미기록"으로 분리한다).
+     * 취소 사유가 구조화돼 있으니 집계는 group-by 한 번으로 끝난다 — 엔티티 순회 불필요.
+     */
+    @Query("select oi.cancelReason, count(oi) from Order o join o.orderItems oi "
+            + "where oi.status = com.commerce.api.order.entity.OrderItemStatus.CANCELLED "
+            + "group by oi.cancelReason")
+    List<Object[]> countCancelledItemsByReason();
+
+    /**
      * shipment가 아직 없는 PURCHASED(PAID/SHIPPING/DELIVERED) 주문 — #1 P2 백필 대상.
      * per-order 멱등: 이미 shipment가 있는 주문(P2 이후 결제분)은 제외해 재실행에 안전하다.
      */

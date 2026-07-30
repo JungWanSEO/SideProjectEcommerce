@@ -12,7 +12,7 @@ import {
 } from "recharts";
 import Link from "next/link";
 import { apiGet } from "@/lib/api";
-import { CacheStats, Dashboard, LowStockReport } from "@/lib/types";
+import { CacheStats, CancelReasonStats, Dashboard, LowStockReport } from "@/lib/types";
 import { ORDER_STATUS_BADGE, ORDER_STATUS_LABEL } from "@/lib/orderStatus";
 import DashboardSkeleton from "@/components/admin/DashboardSkeleton";
 
@@ -28,6 +28,7 @@ export default function AdminDashboardPage() {
   const [cacheStats, setCacheStats] = useState<CacheStats[]>([]); // 캐시 적중률(부가 정보)
   const [lowStock, setLowStock] = useState<LowStockReport | null>(null);
   const [threshold, setThreshold] = useState(5); // 임박 기준 재고(이하)
+  const [reasons, setReasons] = useState<CancelReasonStats | null>(null); // 취소·반품 사유 집계(#8)
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,6 +45,13 @@ export default function AdminDashboardPage() {
     apiGet<CacheStats[]>("/api/monitoring/caches")
       .then(setCacheStats)
       .catch(() => setCacheStats([]));
+  }, []);
+
+  // 취소·반품 사유 집계 — 부가 정보라 실패는 무시(위젯만 숨김). 전체 기간 기준이라 파라미터 없음.
+  useEffect(() => {
+    apiGet<CancelReasonStats>("/api/dashboard/cancel-reasons")
+      .then(setReasons)
+      .catch(() => setReasons(null));
   }, []);
 
   // 재고 임박·품절 — 기준 재고를 바꾸면 다시 조회.
@@ -151,6 +159,63 @@ export default function AdminDashboardPage() {
                 </Link>
                 의 옵션 수정에서 합니다.
               </p>
+            </section>
+          )}
+
+          {/* 취소·반품 사유(#8) — "왜 이탈했는가". 사유가 enum으로 구조화돼 있어 집계가 가능하다.
+              귀책(fault)은 사유가 들고 있는 메타 — 셀러 귀책 비중이 높아지면 정책(정산 귀책·왕복 배송비)으로 이어질 지점. */}
+          {reasons && reasons.byReason.length > 0 && (
+            <section className="rounded-2xl border border-gray-200 bg-white p-5">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <h2 className="text-sm font-semibold text-gray-500">취소·반품 사유</h2>
+                  <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700">
+                    취소 {reasons.totalCancelledItems.toLocaleString()}건
+                  </span>
+                  <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700">
+                    반품 {reasons.totalReturns.toLocaleString()}건
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  {reasons.byFault.map((f) => (
+                    <span key={f.fault} className={`rounded-full px-2.5 py-0.5 font-medium ${FAULT_BADGE[f.fault] ?? "bg-gray-100 text-gray-700"}`}>
+                      {FAULT_LABEL[f.fault] ?? f.fault} {f.total.toLocaleString()}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <ul className="flex flex-col gap-2">
+                {reasons.byReason.map((r) => {
+                  const max = reasons.byReason[0].total || 1; // 최다 사유 기준 상대 막대
+                  return (
+                    <li key={r.reason} className="flex items-center gap-3">
+                      <span className="w-28 shrink-0 text-sm text-gray-700">{REASON_LABEL[r.reason] ?? r.reason}</span>
+                      <span className={`w-14 shrink-0 rounded-full px-2 py-0.5 text-center text-[11px] font-medium ${FAULT_BADGE[r.fault] ?? "bg-gray-100 text-gray-700"}`}>
+                        {FAULT_LABEL[r.fault] ?? r.fault}
+                      </span>
+                      <span className="h-2 flex-1 overflow-hidden rounded-full bg-gray-100">
+                        <span
+                          className="block h-full rounded-full bg-gray-800"
+                          style={{ width: `${Math.round((r.total / max) * 100)}%` }}
+                        />
+                      </span>
+                      <span className="w-24 shrink-0 text-right text-xs text-gray-500">
+                        취소 {r.cancelCount} · 반품 {r.returnCount}
+                      </span>
+                      <span className="w-10 shrink-0 text-right text-sm font-medium text-ink">{r.total}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+
+              {(reasons.unrecordedCancels > 0 || reasons.unrecordedReturns > 0) && (
+                <p className="mt-3 text-xs text-gray-400">
+                  사유 미기록 — 취소 {reasons.unrecordedCancels.toLocaleString()}건 · 반품{" "}
+                  {reasons.unrecordedReturns.toLocaleString()}건 (사유 도입 이전 데이터·시스템 취소). 사유별 합계와
+                  더해야 전체 건수가 됩니다.
+                </p>
+              )}
             </section>
           )}
 
@@ -293,3 +358,29 @@ function formatWonCompact(n: number): string {
   if (n >= 10000) return `${Math.round(n / 10000).toLocaleString()}만`;
   return n.toLocaleString();
 }
+
+/** 사유 코드 → 한글 라벨(백엔드 CancelReason enum과 1:1). 없는 코드는 코드 그대로 표시된다. */
+const REASON_LABEL: Record<string, string> = {
+  CHANGE_OF_MIND: "단순 변심",
+  WRONG_ORDER: "주문 실수",
+  DELIVERY_DELAY: "배송 지연",
+  OUT_OF_STOCK: "품절",
+  DEFECTIVE: "상품 불량",
+  WRONG_DELIVERY: "오배송",
+  OTHER: "기타",
+};
+
+/** 귀책 라벨·색 — 셀러 귀책은 눈에 띄어야 한다(정책·비용 부담으로 이어지는 신호). */
+const FAULT_LABEL: Record<string, string> = {
+  CUSTOMER: "고객",
+  SELLER: "셀러",
+  PLATFORM: "플랫폼",
+  NONE: "기타",
+};
+
+const FAULT_BADGE: Record<string, string> = {
+  CUSTOMER: "bg-blue-50 text-blue-700",
+  SELLER: "bg-amber-50 text-amber-700",
+  PLATFORM: "bg-purple-50 text-purple-700",
+  NONE: "bg-gray-100 text-gray-700",
+};

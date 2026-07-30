@@ -2,12 +2,16 @@ package com.commerce.api.dashboard.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.commerce.api.dashboard.dto.CancelReasonStatsResponse;
+import com.commerce.api.dashboard.dto.CancelReasonStatsResponse.FaultCount;
+import com.commerce.api.dashboard.dto.CancelReasonStatsResponse.ReasonCount;
 import com.commerce.api.dashboard.dto.DashboardResponse;
 import com.commerce.api.dashboard.dto.DashboardResponse.DailyRevenue;
 import com.commerce.api.dashboard.dto.DashboardResponse.OrderStatusCount;
 import com.commerce.api.dashboard.dto.LowStockResponse;
 import com.commerce.api.product.dto.LowStockOption;
 import com.commerce.api.product.entity.ProductOption;
+import com.commerce.api.global.common.CancelReason;
 import com.commerce.api.member.entity.Member;
 import com.commerce.api.member.entity.Role;
 import com.commerce.api.member.repository.MemberRepository;
@@ -20,6 +24,9 @@ import com.commerce.api.payment.repository.PaymentRepository;
 import com.commerce.api.product.entity.Product;
 import com.commerce.api.product.entity.ProductStatus;
 import com.commerce.api.product.repository.ProductRepository;
+import com.commerce.api.returns.entity.ReturnRequest;
+import com.commerce.api.returns.entity.ReturnType;
+import com.commerce.api.returns.repository.ReturnRequestRepository;
 import com.commerce.api.settlement.entity.SettlementEntry;
 import com.commerce.api.settlement.repository.SettlementRepository;
 import java.time.LocalDate;
@@ -49,6 +56,7 @@ class DashboardServiceTest {
     @Autowired private MemberRepository memberRepository;
     @Autowired private ProductRepository productRepository;
     @Autowired private SettlementRepository settlementRepository;
+    @Autowired private ReturnRequestRepository returnRequestRepository;
 
     private static final AtomicLong SEQ = new AtomicLong();
 
@@ -182,6 +190,64 @@ class DashboardServiceTest {
         return Member.builder()
                 .email("dash-" + seq() + "@commerce.com").password("ENCODED")
                 .nickname("dash").role(Role.USER).build();
+    }
+
+    @Test
+    @DisplayName("getCancelReasonStats - 취소·반품 사유를 한 축으로 합치고 귀책으로 접는다(미기록은 분리)")
+    void getCancelReasonStats_mergesCancelAndReturnByReason() {
+        CancelReasonStatsResponse before = dashboardService.getCancelReasonStats();
+
+        // 취소 2건: 변심(고객 귀책) + 불량(셀러 귀책) / 사유 미기록 1건
+        orderRepository.save(cancelledOrder(CancelReason.CHANGE_OF_MIND));
+        orderRepository.save(cancelledOrder(CancelReason.DEFECTIVE));
+        orderRepository.save(cancelledOrder(null));
+        // 반품 1건: 같은 변심 사유 → 사유 축에서 취소분과 합산돼야 한다
+        returnRequestRepository.save(returnRequest(CancelReason.CHANGE_OF_MIND));
+
+        CancelReasonStatsResponse after = dashboardService.getCancelReasonStats();
+
+        assertThat(after.totalCancelledItems()).isEqualTo(before.totalCancelledItems() + 3);
+        assertThat(after.totalReturns()).isEqualTo(before.totalReturns() + 1);
+        assertThat(after.unrecordedCancels()).isEqualTo(before.unrecordedCancels() + 1);   // 사유 없는 취소는 따로
+
+        ReasonCount mind = reasonOf(after, "CHANGE_OF_MIND");
+        ReasonCount mindBefore = reasonOf(before, "CHANGE_OF_MIND");
+        assertThat(mind.cancelCount()).isEqualTo(mindBefore.cancelCount() + 1);
+        assertThat(mind.returnCount()).isEqualTo(mindBefore.returnCount() + 1);            // 두 소스 합산
+        assertThat(mind.total()).isEqualTo(mind.cancelCount() + mind.returnCount());
+        assertThat(mind.fault()).isEqualTo("CUSTOMER");                                    // 사유 enum의 귀책 메타
+
+        // 귀책 접기: 셀러 귀책(불량)이 1 늘었다
+        assertThat(faultTotal(after, "SELLER")).isEqualTo(faultTotal(before, "SELLER") + 1);
+        // 건수 0인 사유는 목록에 넣지 않는다(표를 늘리기만 한다)
+        assertThat(after.byReason()).allSatisfy(r -> assertThat(r.total()).isPositive());
+        // 사유별 합계 + 미기록 = 전체(둘을 합쳐야 전체가 되는 관계를 화면이 설명할 수 있어야 한다)
+        long reasonSum = after.byReason().stream().mapToLong(ReasonCount::total).sum();
+        assertThat(reasonSum + after.unrecordedCancels() + after.unrecordedReturns())
+                .isEqualTo(after.totalCancelledItems() + after.totalReturns());
+    }
+
+    private ReasonCount reasonOf(CancelReasonStatsResponse stats, String reason) {
+        return stats.byReason().stream().filter(r -> r.reason().equals(reason)).findFirst()
+                .orElse(new ReasonCount(reason, "NONE", 0, 0, 0));
+    }
+
+    private long faultTotal(CancelReasonStatsResponse stats, String fault) {
+        return stats.byFault().stream().filter(f -> f.fault().equals(fault)).findFirst()
+                .map(FaultCount::total).orElse(0L);
+    }
+
+    /** 항목 1개를 사유와 함께 취소한 주문(전체 취소). 사유 null이면 "미기록" 케이스. */
+    private Order cancelledOrder(CancelReason reason) {
+        Order o = paidOrder(10_000L);
+        o.cancel(100L, "테스트 취소", reason);
+        return o;
+    }
+
+    /** 반품 요청 1건(사유 코드만 의미 있음 — 집계는 상태와 무관). */
+    private ReturnRequest returnRequest(CancelReason reasonCode) {
+        long seq = SEQ.incrementAndGet();
+        return ReturnRequest.create(seq, seq, seq, 1L, 100L, ReturnType.RETURN, "사유", reasonCode, 1, null);
     }
 
     private Product product(ProductStatus status) {
