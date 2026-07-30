@@ -7,10 +7,11 @@ import { useAuth } from "@/lib/auth";
 import Skeleton from "@/components/ui/Skeleton";
 import NotificationBell from "@/components/NotificationBell";
 
-// 셀러 콘솔 내비게이션. /seller = 정산(랜딩), /seller/orders = 내 주문.
+// 셀러 콘솔 내비게이션. /seller = 정산(랜딩), /seller/orders = 내 주문, /seller/returns = 반품·교환 처리.
 const NAV = [
   { href: "/seller", label: "내 정산" },
   { href: "/seller/orders", label: "내 주문" },
+  { href: "/seller/returns", label: "반품 · 교환" },
 ];
 
 /**

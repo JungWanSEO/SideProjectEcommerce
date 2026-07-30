@@ -217,7 +217,8 @@ export interface OrderItem {
   orderPrice: number;
   quantity: number;
   subtotal: number;
-  status: "ACTIVE" | "CANCELLED"; // 부분환불 시 CANCELLED
+  status: "ACTIVE" | "CANCELLED" | "RETURNED"; // 부분환불 시 CANCELLED · 반품 확정 시 RETURNED(#3)
+  cancelReason: string | null; // 취소 사유(#8) — 취소된 항목만, 없으면 null
 }
 
 /** 주문 배송지 스냅샷 (OrderResponse.shipping) — 주문 시점에 주소록에서 복사. 없으면 null. */
@@ -620,6 +621,53 @@ export interface CancelReasonStats {
   unrecordedReturns: number;
   byReason: CancelReasonCount[];
   byFault: CancelFaultCount[];
+}
+
+// ─── 반품/교환 (#3) ────────────────────────────────────────────────────
+
+/** 반품 유형 — RETURN(환불) / EXCHANGE(같은 상품 다른 옵션으로 교환) */
+export type ReturnType = "RETURN" | "EXCHANGE";
+
+/** 반품 진행 상태(forward-only). REJECTED는 요청 거부·검수 불합격 양쪽에서 도달한다. */
+export type ReturnStatus =
+  | "REQUESTED"
+  | "APPROVED"
+  | "PICKED_UP"
+  | "INSPECTED"
+  | "REFUNDED"
+  | "COMPLETED"
+  | "REJECTED";
+
+/** 셀러/어드민이 취할 수 있는 전이 액션 — 서버가 상태머신으로 검증한다(잘못된 순서면 409). */
+export type ReturnAction = "APPROVE" | "REJECT" | "PICK_UP" | "INSPECT" | "REFUND" | "COMPLETE";
+
+/** 반품 상태 전이 이력 1건 (ReturnResponse.StatusHistoryResponse) */
+export interface ReturnStatusHistory {
+  fromStatus: ReturnStatus | null;
+  toStatus: ReturnStatus;
+  changedBy: number | null;
+  memo: string | null;
+  createdAt: string;
+}
+
+/** 반품/교환 요청 (ReturnResponse) — 셀러 `/api/seller/me/returns`, 구매자 `/api/returns/me` */
+export interface ReturnRequest {
+  id: number;
+  orderId: number;
+  orderItemId: number;
+  sellerId: number | null;
+  memberId: number;
+  type: ReturnType;
+  status: ReturnStatus;
+  reason: string | null;
+  reasonCode: string | null; // 구조화된 사유(#8) — 없으면 null
+  quantity: number;
+  refundAmount: number | null; // 검수 확정 후 확정(RETURN), 그 전엔 null
+  restock: boolean;
+  exchangeOptionId: number | null;
+  exchangeShipmentId: number | null;
+  statusHistory: ReturnStatusHistory[];
+  createdAt: string;
 }
 
 /** 회원 권한 (Role) — SELLER는 셀러 운영자 지정 API로만 부여된다(셀러 연결이 필요). */
