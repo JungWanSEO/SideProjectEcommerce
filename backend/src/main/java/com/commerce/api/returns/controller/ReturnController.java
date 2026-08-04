@@ -6,6 +6,8 @@ import com.commerce.api.global.common.PageResponse;
 import com.commerce.api.global.security.SecurityUtil;
 import com.commerce.api.returns.dto.ReturnCreateRequest;
 import com.commerce.api.returns.dto.ReturnResponse;
+import com.commerce.api.returns.entity.ReturnStatus;
+import com.commerce.api.returns.entity.ReturnType;
 import com.commerce.api.returns.service.ReturnQueryService;
 import com.commerce.api.returns.service.ReturnService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -22,6 +24,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -58,5 +61,19 @@ public class ReturnController {
             @ParameterObject @PageableDefault(size = 20, sort = "id", direction = Direction.DESC) Pageable pageable) {
         return ResponseEntity.ok(ApiResponse.success(
                 returnQueryService.getMyReturns(SecurityUtil.getCurrentMemberId(), pageable)));
+    }
+
+    @Operation(summary = "반품/교환 전체 검색(ADMIN)",
+            description = "운영자용 전체 반품·교환 목록. status·type·sellerId로 필터(생략 시 전체), 최신순. "
+                    + "대행 처리는 PATCH /api/orders/{orderId}/returns/{returnId}/status. "
+                    + "구매자/셀러 목록과 달리 소유로 좁히지 않으므로 경로 인가(ADMIN)가 유일한 방어선이다.")
+    @GetMapping("/returns/admin")
+    public ResponseEntity<ApiResponse<PageResponse<ReturnResponse>>> searchForAdmin(
+            @RequestParam(required = false) ReturnStatus status,
+            @RequestParam(required = false) ReturnType type,
+            @RequestParam(required = false) Long sellerId,
+            @ParameterObject @PageableDefault(size = 20, sort = "id", direction = Direction.DESC) Pageable pageable) {
+        return ResponseEntity.ok(ApiResponse.success(
+                returnQueryService.searchForAdmin(status, type, sellerId, pageable)));
     }
 }

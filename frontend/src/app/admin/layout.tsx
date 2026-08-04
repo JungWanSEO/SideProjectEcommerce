@@ -20,6 +20,7 @@ const NAV = [
   { href: "/admin/categories", label: "카테고리" },
   { href: "/admin/brands", label: "브랜드" },
   { href: "/admin/orders", label: "주문" },
+  { href: "/admin/returns", label: "반품 · 교환" },
   { href: "/admin/members", label: "회원" },
   { href: "/admin/settlements", label: "정산" },
   { href: "/admin/payouts", label: "지급" },
