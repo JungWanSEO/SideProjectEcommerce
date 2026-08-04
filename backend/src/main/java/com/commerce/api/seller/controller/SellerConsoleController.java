@@ -9,6 +9,7 @@ import com.commerce.api.order.dto.OrderSearchCondition;
 import com.commerce.api.order.dto.OrderSummaryResponse;
 import com.commerce.api.order.dto.SellerShipmentResponse;
 import com.commerce.api.order.dto.ShipmentStatusUpdateRequest;
+import com.commerce.api.order.entity.ShipmentStatus;
 import com.commerce.api.returns.dto.ReturnResponse;
 import com.commerce.api.returns.dto.ReturnStatusUpdateRequest;
 import com.commerce.api.seller.dto.SellerResponse;
@@ -132,6 +133,18 @@ public class SellerConsoleController {
             Pageable pageable) {
         return ResponseEntity.ok(ApiResponse.success(
                 sellerConsoleService.getMyOrders(SecurityUtil.getCurrentMemberId(), condition, pageable)));
+    }
+
+    @Operation(summary = "내 배송 목록",
+            description = "내 셀러의 배송 건(shipment) 목록 — 무엇을 포장해 보낼지 보는 화면. status로 상태 필터"
+                    + "(PAID=출고 대기 / SHIPPING=배송중 / DELIVERED=완료 / CANCELLED). 셀러 스코프는 쿼리가 강제하며, "
+                    + "응답은 전진 API와 같은 셀러 스코프(내 항목만·구매자 식별자 없이 배송지만).")
+    @GetMapping("/me/shipments")
+    public ResponseEntity<ApiResponse<PageResponse<SellerShipmentResponse>>> getMyShipments(
+            @RequestParam(required = false) ShipmentStatus status,
+            @ParameterObject @PageableDefault(size = 20, sort = "id", direction = Direction.DESC) Pageable pageable) {
+        return ResponseEntity.ok(ApiResponse.success(
+                sellerConsoleService.getMyShipments(SecurityUtil.getCurrentMemberId(), status, pageable)));
     }
 
     @Operation(summary = "내 배송 상태 전진",

@@ -104,6 +104,15 @@ public class SellerConsoleService {
         return shipmentService.advanceForSeller(shipmentId, sellerId, next, memberId, courier, trackingNumber);
     }
 
+    /**
+     * 내 배송 목록(셀러 콘솔 "출고 관리") — 자기 sellerId의 shipment만. 스코프는 쿼리가 강제한다
+     * (전이 API의 소유권 검증과 이중 방어). 전진 대상 shipmentId를 여기서 얻는다.
+     */
+    public PageResponse<SellerShipmentResponse> getMyShipments(
+            Long memberId, ShipmentStatus status, Pageable pageable) {
+        return shipmentService.getSellerShipments(requireSellerId(memberId), status, pageable);
+    }
+
     /** 내 반품/교환 목록(셀러 스코프). */
     public PageResponse<ReturnResponse> getMyReturns(Long memberId, Pageable pageable) {
         return returnQueryService.getSellerReturns(requireSellerId(memberId), pageable);

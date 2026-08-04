@@ -22,6 +22,8 @@ public record SellerShipmentResponse(
         Long shipmentId,
         Long sellerId,             // null = 플랫폼 직매입(셀러 경로에선 도달 불가 — advanceForSeller가 403)
         ShipmentStatus status,
+        com.commerce.api.order.entity.ShipmentKind kind,   // ORIGINAL(원배송) / EXCHANGE(교환 재출고) — 목록에서 구분해야 셀러가 무엇을 보내는지 안다
+        java.time.LocalDateTime deliveredAt,               // 배송완료 시각(반품 기한 기산점) — 없으면 null
         String courier,
         String trackingNumber,
         List<SellerLine> items,    // 이 셀러의 항목만(무엇을 포장해 보낼지)
@@ -37,6 +39,8 @@ public record SellerShipmentResponse(
                 shipment.getId(),
                 shipment.getSellerId(),
                 shipment.getStatus(),
+                shipment.getKind(),
+                shipment.getDeliveredAt(),
                 shipment.getCourier(),
                 shipment.getTrackingNumber(),
                 lines,

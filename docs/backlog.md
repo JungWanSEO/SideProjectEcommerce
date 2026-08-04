@@ -29,7 +29,7 @@
 > `자율진행` 위임으로 무결정 후속 4건(셀러 벨·취소사유 집계·게스트 카트 TTL·반품 FE 3면)을 처리하는 동안 드러난 갭.
 > **전부 새 API 설계 또는 응답 범위 결정이 필요**해 손대지 않았다(자율 금지 항목: 새로운 의미 있는 결정).
 
-- 🔴 **셀러 출고 전진 UI** — 백엔드 `PATCH /api/seller/me/shipments/{id}/status`(#1 P5)는 있는데 **셀러가 자기 shipment 목록을 볼 조회 API가 없다**. `/seller/orders`는 `OrderSummaryResponse`(shipment 정보 없음)라 전진 대상 id를 알 수 없어 화면이 조회 전용으로 남아 있다. 필요한 결정=셀러 shipment 목록 API의 **응답 범위**(P5에서 타 셀러 품목·구매자 PII 비노출로 좁힌 원칙을 목록에도 어떻게 적용할지)·필터(상태별)·페이지네이션. 현재는 출고를 ADMIN만 할 수 있어 **셀러 콘솔의 핵심 동작이 비어 있다**.
+- ✅ **셀러 출고 전진 UI — 완료(07-30, 오너 승인)**. 결정=목록 응답도 **P5의 셀러 스코프 원칙 그대로**(내 항목만·구매자 식별자 없이 배송지만) → 전진 응답 DTO(`SellerShipmentResponse`) 재사용 + `kind`(원배송/교환 재출고)·`deliveredAt` 추가. `GET /api/seller/me/shipments?status=`(쿼리가 sellerId로 스코프 강제 = 조회 IDOR 차단, 전이의 소유권 검증과 이중 방어·부모 주문 fetch join으로 N+1 회피) + FE `/seller/shipments`(상태 필터·출고 시작 시 택배사/운송장 입력·배송완료 처리). `/seller/orders`의 "출고는 어드민이 담당" 안내도 교정.
 - 🟠 **어드민 반품 관리 화면** — ADMIN 대행 전이 API(`PATCH /api/orders/{orderId}/returns/{returnId}/status`)는 있으나 **전체 반품 목록 조회 API가 없다**(구매자 `/returns/me`·셀러 `/seller/me/returns`만). 필요한 결정=목록 API의 필터(상태·셀러·기간)와 노출 범위.
 - 🟡 **교환 신청 UI(구매자)** — 백엔드는 교환(옵션 스왑)을 지원하는데 FE는 반품만 신청 가능. 대체 옵션 선택 UI(같은 상품의 다른 사이즈 재고 조회·선택)가 필요.
 - 🟡 **취소사유 집계 기간 필터** — 지금은 전체 기간. 취소 시각을 따로 보관하지 않아(항목 `updatedAt`은 교환 스왑 등에도 갱신) "언제 취소됐는지"의 기준을 정해야 한다(전용 컬럼 추가 vs 상태 이력 조인).
