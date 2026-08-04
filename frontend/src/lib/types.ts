@@ -670,6 +670,52 @@ export interface ReturnRequest {
   createdAt: string;
 }
 
+// ─── 셀러 배송(shipment, #1) ───────────────────────────────────────────
+
+/** 배송 상태 — forward-only PAID→SHIPPING→DELIVERED. 전량 취소되면 CANCELLED. */
+export type ShipmentStatus = "PAID" | "SHIPPING" | "DELIVERED" | "CANCELLED";
+
+/** 배송 종류 — 원배송 / 교환 재출고(#3 P6). 교환분은 주문 상태 rollup에서 제외된다. */
+export type ShipmentKind = "ORIGINAL" | "EXCHANGE";
+
+/** 셀러가 보낼 품목 1줄 (SellerShipmentResponse.SellerLine) — 내 셀러 항목만 담긴다. */
+export interface SellerShipmentLine {
+  orderItemId: number;
+  productId: number;
+  optionId: number;
+  productName: string;
+  size: string;
+  quantity: number;
+  status: "ACTIVE" | "CANCELLED" | "RETURNED";
+}
+
+/** 배송지(출고에 필요한 만큼만) — 구매자 식별자는 담기지 않는다(셀러 스코프). */
+export interface SellerShipmentShipping {
+  recipient: string;
+  phone: string;
+  zipcode: string;
+  address1: string;
+  address2: string | null;
+  deliveryMemo: string | null;
+}
+
+/**
+ * 셀러 배송 건 (SellerShipmentResponse) — GET /api/seller/me/shipments · PATCH .../{id}/status 응답.
+ * 응답 범위는 셀러 스코프: 내 항목만, 구매자 식별자 없이 배송지만.
+ */
+export interface SellerShipment {
+  orderId: number;
+  shipmentId: number;
+  sellerId: number | null;
+  status: ShipmentStatus;
+  kind: ShipmentKind;
+  deliveredAt: string | null;
+  courier: string | null;
+  trackingNumber: string | null;
+  items: SellerShipmentLine[];
+  shipping: SellerShipmentShipping | null;
+}
+
 /** 회원 권한 (Role) — SELLER는 셀러 운영자 지정 API로만 부여된다(셀러 연결이 필요). */
 export type MemberRole = "USER" | "SELLER" | "ADMIN";
 

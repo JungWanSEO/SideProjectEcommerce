@@ -20,6 +20,23 @@ import org.springframework.stereotype.Service;
 public class ShipmentService {
 
     private final ShipmentTransitionWorker worker;
+    private final com.commerce.api.order.repository.ShipmentRepository shipmentRepository;
+
+    /**
+     * 셀러의 배송 목록(셀러 콘솔 "출고 관리") — 무엇을 언제 보내야 하는지 보는 화면의 데이터.
+     *
+     * <p>전진 API만 있고 목록이 없어 셀러가 자기 shipmentId를 알 방법이 없었다(주문 목록 DTO엔 배송 정보가 없다).
+     * 응답은 전진 응답과 <b>같은 셀러 스코프 DTO</b>를 쓴다 — 자기 셀러 항목만·구매자 식별자 없이 배송지만
+     * (P5 리뷰에서 정한 원칙을 목록에도 그대로 적용). 스코프는 쿼리(sellerId)와 전이 시 소유권 검증으로 이중 방어.
+     */
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
+    public com.commerce.api.global.common.PageResponse<com.commerce.api.order.dto.SellerShipmentResponse>
+            getSellerShipments(Long sellerId, ShipmentStatus status,
+                    org.springframework.data.domain.Pageable pageable) {
+        return com.commerce.api.global.common.PageResponse.from(
+                shipmentRepository.findSellerShipments(sellerId, status, pageable)
+                        .map(s -> com.commerce.api.order.dto.SellerShipmentResponse.of(s.getOrder(), s)));
+    }
 
     @Retryable(
             retryFor = ConcurrencyFailureException.class,

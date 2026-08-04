@@ -9,9 +9,8 @@ import { ORDER_STATUS_BADGE, ORDER_STATUS_LABEL } from "@/lib/orderStatus";
  * 셀러 "내 주문" (/seller/orders, SELLER).
  * 내 셀러 상품이 하나라도 든 주문을 본다 — 무엇을 포장해 보낼지. 셀러 스코프는 서버가 강제한다.
  *
- * 조회 전용: 출고 상태 전이는 여기서 하지 않는다. 한 주문에 여러 셀러 상품이 섞이면 Order 전체 status를
- * 한 셀러가 움직이는 게 맞는지가 아직 미결(멀티셀러 주문의 상태 단위 = 오너 결정 대기)이라, 그 전까지
- * 출고 처리는 ADMIN(/admin/orders)이 한다.
+ * 조회 전용: 출고는 주문 단위가 아니라 <b>셀러별 배송 단위</b>(shipment)로 하므로 "출고 관리"(/seller/shipments)에서
+ * 처리한다. 한 주문에 여러 셀러가 섞여도 각자 자기 몫만 전진시킨다(#1).
  */
 const FILTERS: { value: OrderStatus | "ALL"; label: string }[] = [
   { value: "ALL", label: "전체" },
@@ -61,7 +60,7 @@ export default function SellerOrdersPage() {
       <div className="mb-6">
         <h1 className="text-xl font-bold">내 주문</h1>
         <p className="text-sm text-gray-500">
-          내 셀러 상품이 포함된 주문입니다. 출고 처리는 현재 운영자(어드민)가 담당합니다.
+          내 셀러 상품이 포함된 주문입니다. 출고는 <b>출고 관리</b>에서 내 배송 건만 따로 처리합니다.
         </p>
       </div>
 
