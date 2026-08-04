@@ -50,4 +50,20 @@ public interface ReturnRequestRepository extends JpaRepository<ReturnRequest, Lo
      */
     @Query("select r.reasonCode, count(r) from ReturnRequest r group by r.reasonCode")
     List<Object[]> countByReasonCode();
+
+    /**
+     * 어드민 반품/교환 검색 — 전체 스코프(구매자/셀러 목록과 달리 소유 제한이 없다).
+     *
+     * <p>필터는 <b>nullable 바인딩</b>: null이면 그 조건을 건너뛴다(대사 윈도우 쿼리와 같은 방식). 상태·유형·셀러로
+     * 좁히는 게 운영 동선(예: "REQUESTED만 모아 대행 승인")이라 이 셋만 둔다. 기간은 후속 — 반품은 건수가 적고
+     * 최신순 페이지로 충분하다.
+     */
+    @Query("select r from ReturnRequest r where "
+            + "(:status is null or r.status = :status) and "
+            + "(:type is null or r.type = :type) and "
+            + "(:sellerId is null or r.sellerId = :sellerId)")
+    Page<ReturnRequest> searchForAdmin(@Param("status") ReturnStatus status,
+            @Param("type") ReturnType type,
+            @Param("sellerId") Long sellerId,
+            Pageable pageable);
 }

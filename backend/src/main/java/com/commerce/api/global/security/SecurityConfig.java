@@ -132,6 +132,9 @@ public class SecurityConfig {
                         // 반품/교환 ADMIN 대행(#3) — 셀러 자기 처리는 /api/seller/me/returns/*/status(SELLER).
                         //   구매자 요청 POST /api/orders/*/returns·GET /api/returns/me는 아래 authenticated()가 커버(서비스가 소유권 강제).
                         .requestMatchers(HttpMethod.PATCH, "/api/orders/*/returns/*/status").hasRole("ADMIN")
+                        // 반품 전체 검색(운영 화면) — 소유로 좁히지 않는 유일한 반품 조회라 ADMIN 고정.
+                        //   본인/셀러 목록(/api/returns/me·/api/seller/me/returns)과 경로가 갈려 완화 위험이 없다.
+                        .requestMatchers(HttpMethod.GET, "/api/returns/admin").hasRole("ADMIN")
                         // 어드민 회원 관리(목록·검색·권한 변경) → ADMIN
                         //  (회원가입 POST /api/members는 위에서 공개, 본인 조회·수정 /me는 아래 authenticated)
                         .requestMatchers(HttpMethod.GET, "/api/members/admin").hasRole("ADMIN")
