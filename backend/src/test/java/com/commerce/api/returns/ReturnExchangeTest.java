@@ -123,14 +123,42 @@ class ReturnExchangeTest {
     @Test
     @DisplayName("교환 대체품 품절 - 409로 전체 롤백(원품·옵션 미변경, 자동 환불 전환 없음)")
     void exchange_outOfStock() {
-        long[] ids = setup(5, 0);   // 대체품 L 재고 0
+        // 신청 시점엔 L이 1개 남아 통과하고, 검수 사이에 그 1개가 빠져 확정에서 품절이 되는 경로.
+        // 신청 시점 검증(가용재고)은 스냅샷이라 이 레이스를 막지 못한다 — 진짜 게이트는 확정의 원자적 소진이다.
+        long[] ids = setup(5, 1);
         long orderId = ids[0], itemId = ids[1], optionM = ids[2], optionL = ids[3];
         ReturnResponse req = toInspectedExchange(orderId, itemId, optionL);
+
+        em.createQuery("update ProductOption o set o.stock = 0 where o.id = :id")
+                .setParameter("id", optionL).executeUpdate();   // 그 사이 다른 주문이 마지막 1개를 가져감
+        em.clear();
 
         assertThatThrownBy(() -> returnService.advanceForSeller(req.id(), 1L, act(ReturnAction.COMPLETE), 1L))
                 .isInstanceOf(BusinessException.class).extracting("status").isEqualTo(HttpStatus.CONFLICT);
         // 품절은 consumeForExchange 첫 단계라 원 항목/옵션 미변경
         assertThat(orderRepository.findById(orderId).orElseThrow().requireItem(itemId).getOptionId()).isEqualTo(optionM);
+    }
+
+    @Test
+    @DisplayName("교환 신청 - 대체 옵션이 품절이면 신청 단계에서 409(수거·검수까지 갔다가 막히지 않게)")
+    void createExchange_soldOutOption() {
+        long[] ids = setup(5, 0);   // 대체품 L 재고 0
+        long orderId = ids[0], itemId = ids[1], optionL = ids[3];
+
+        assertThatThrownBy(() -> returnService.create(100L, false, orderId,
+                new ReturnCreateRequest(itemId, ReturnType.EXCHANGE, "사이즈 교환", null, optionL)))
+                .isInstanceOf(BusinessException.class).extracting("status").isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    @DisplayName("교환 신청 - 현재와 같은 옵션이면 400(신청 단계에서 차단)")
+    void createExchange_sameOption() {
+        long[] ids = setup(5, 5);
+        long orderId = ids[0], itemId = ids[1], optionM = ids[2];
+
+        assertThatThrownBy(() -> returnService.create(100L, false, orderId,
+                new ReturnCreateRequest(itemId, ReturnType.EXCHANGE, "사이즈 교환", null, optionM)))
+                .isInstanceOf(BusinessException.class).extracting("status").isEqualTo(HttpStatus.BAD_REQUEST);
     }
 
     @Test
@@ -148,7 +176,7 @@ class ReturnExchangeTest {
     }
 
     @Test
-    @DisplayName("교환 검증 - 다른 상품 옵션으로는 교환 불가(400)")
+    @DisplayName("교환 검증 - 다른 상품 옵션으로는 교환 불가(400, 신청 단계에서 차단)")
     void exchange_differentProduct() {
         long[] ids = setup(5, 5);
         long orderId = ids[0], itemId = ids[1];
@@ -157,8 +185,9 @@ class ReturnExchangeTest {
         other.addOption(ProductOption.create("FREE", 5));
         long otherOption = productRepository.save(other).getOptions().get(0).getId();
 
-        ReturnResponse req = toInspectedExchange(orderId, itemId, otherOption);
-        assertThatThrownBy(() -> returnService.advanceForSeller(req.id(), 1L, act(ReturnAction.COMPLETE), 1L))
+        // 신청·확정이 같은 규칙(requireExchangeOption)을 쓰므로, 규칙 위반은 더 이른 신청 단계에서 걸린다
+        assertThatThrownBy(() -> returnService.create(100L, false, orderId,
+                new ReturnCreateRequest(itemId, ReturnType.EXCHANGE, "사이즈 교환", null, otherOption)))
                 .isInstanceOf(BusinessException.class).extracting("status").isEqualTo(HttpStatus.BAD_REQUEST);
     }
 }

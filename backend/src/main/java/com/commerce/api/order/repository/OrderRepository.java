@@ -68,11 +68,17 @@ public interface OrderRepository extends JpaRepository<Order, Long>, OrderReposi
      * 취소된 항목의 <b>사유별</b> 건수 — [cancelReason, count]. 사유는 nullable(#8 add-only)이라
      * 미기록 건은 reason=null 행으로 함께 나온다(서비스가 "미기록"으로 분리한다).
      * 취소 사유가 구조화돼 있으니 집계는 group-by 한 번으로 끝난다 — 엔티티 순회 불필요.
+     *
+     * <p>기간은 <b>nullable 바인딩</b>(대사 윈도우 쿼리와 같은 방식): null이면 그 경계를 건너뛴다.
+     * 축은 {@code cancelled_at}(취소 시각)이며 to는 <b>배타</b>(서비스가 다음날 00:00으로 넘긴다).
+     * 시각이 없는 행(V54 백필 이전 데이터)은 기간을 지정하면 빠진다 — 전체 기간 조회는 그대로 다 센다.
      */
     @Query("select oi.cancelReason, count(oi) from Order o join o.orderItems oi "
             + "where oi.status = com.commerce.api.order.entity.OrderItemStatus.CANCELLED "
+            + "and (:from is null or oi.cancelledAt >= :from) "
+            + "and (:to is null or oi.cancelledAt < :to) "
             + "group by oi.cancelReason")
-    List<Object[]> countCancelledItemsByReason();
+    List<Object[]> countCancelledItemsByReason(@Param("from") LocalDateTime from, @Param("to") LocalDateTime to);
 
     /**
      * shipment가 아직 없는 PURCHASED(PAID/SHIPPING/DELIVERED) 주문 — #1 P2 백필 대상.

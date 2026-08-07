@@ -19,8 +19,12 @@ import com.commerce.api.order.repository.OrderRepository;
 import com.commerce.api.payment.entity.Payment;
 import com.commerce.api.payment.entity.PaymentStatus;
 import com.commerce.api.payment.repository.PaymentRepository;
+import com.commerce.api.product.entity.Product;
+import com.commerce.api.product.entity.ProductOption;
+import com.commerce.api.product.entity.ProductStatus;
 import com.commerce.api.product.entity.StockReservation;
 import com.commerce.api.product.entity.StockReservationStatus;
+import com.commerce.api.product.repository.ProductRepository;
 import com.commerce.api.product.repository.StockReservationRepository;
 import com.commerce.api.returns.dto.ReturnAction;
 import com.commerce.api.returns.dto.ReturnCreateRequest;
@@ -48,6 +52,7 @@ class ReturnRefundTest {
     @Autowired private OrderRepository orderRepository;
     @Autowired private PaymentRepository paymentRepository;
     @Autowired private StockReservationRepository stockReservationRepository;
+    @Autowired private ProductRepository productRepository;
     @Autowired private CouponRepository couponRepository;
     @Autowired private MemberCouponRepository memberCouponRepository;
 
@@ -57,8 +62,13 @@ class ReturnRefundTest {
 
     /** 셀러1 항목(price·discount) 배송완료 주문 + PAID 결제 + CONSUMED 예약 세팅 → [orderId, orderItemId, paymentId, reservationId]. */
     private long[] deliveredWithPaymentAndReservation(long price, long discount) {
+        return deliveredWithPaymentAndReservation(price, discount, 1L, 11L);
+    }
+
+    /** 상품·옵션 id를 지정하는 변형 — 교환 신청은 실재하는 옵션이 필요해서(신청 시점 검증) 실제 Product를 물린다. */
+    private long[] deliveredWithPaymentAndReservation(long price, long discount, long productId, long optionId) {
         Order order = Order.create(100L);
-        OrderItem item = OrderItem.builder().productId(1L).optionId(11L).sellerId(1L)
+        OrderItem item = OrderItem.builder().productId(productId).optionId(optionId).sellerId(1L)
                 .productName("P").size("M").orderPrice(price).quantity(1).build();
         order.addItem(item);
         if (discount > 0) {
@@ -76,7 +86,7 @@ class ReturnRefundTest {
         payment.markPaid("TOSS-tx-" + orderId);
         paymentRepository.saveAndFlush(payment);
 
-        StockReservation res = StockReservation.active(orderId, itemId, 11L, 1, LocalDateTime.now().plusMinutes(30));
+        StockReservation res = StockReservation.active(orderId, itemId, optionId, 1, LocalDateTime.now().plusMinutes(30));
         res.markConsumed();   // 결제로 실차감된 상태(반품 재입고 대상)
         stockReservationRepository.saveAndFlush(res);
 
@@ -202,9 +212,18 @@ class ReturnRefundTest {
     @Test
     @DisplayName("타입 가드 - 교환(EXCHANGE) 요청에 REFUND 액션은 409(flip·PG 이전 조기 차단)")
     void refund_typeMismatch() {
-        long[] ids = deliveredWithPaymentAndReservation(5000L, 0L);
+        // 교환 신청이 실재 옵션을 요구하므로(신청 시점 검증) 실제 상품 M/L을 만들어 물린다
+        Product product = Product.builder().name("셔츠").price(5000L).description("d")
+                .status(ProductStatus.ON_SALE).build();
+        product.addOption(ProductOption.create("M", 5));
+        product.addOption(ProductOption.create("L", 5));
+        Product saved = productRepository.save(product);
+
+        long[] ids = deliveredWithPaymentAndReservation(
+                5000L, 0L, saved.getId(), saved.getOptions().get(0).getId());
         long orderId = ids[0], itemId = ids[1];
-        ReturnResponse req = advanceToInspected(orderId, itemId, ReturnType.EXCHANGE, 22L);
+        ReturnResponse req = advanceToInspected(orderId, itemId, ReturnType.EXCHANGE,
+                saved.getOptions().get(1).getId());
 
         assertThatThrownBy(() -> returnService.advanceForSeller(req.id(), 1L, act(ReturnAction.REFUND), 1L))
                 .isInstanceOf(BusinessException.class).extracting("status").isEqualTo(HttpStatus.CONFLICT);

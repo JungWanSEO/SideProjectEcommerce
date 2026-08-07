@@ -158,17 +158,14 @@ class ReturnWorkflowTest {
     }
 
     @Test
-    @DisplayName("교환 확정 - 존재하지 않는 교환 옵션이면 404(옵션 스왑 정합, 스왑·재출고 성립 테스트는 ReturnExchangeTest)")
-    void completeUnknownOption() {
+    @DisplayName("교환 신청 - 존재하지 않는 교환 옵션이면 신청 단계에서 404(수거·검수까지 갔다가 막히지 않게)")
+    void createUnknownExchangeOption() {
         Order order = deliveredOrder();
         long itemId = order.getOrderItems().get(0).getId();
-        ReturnResponse req = returnService.create(100L, false, order.getId(),
-                new ReturnCreateRequest(itemId, ReturnType.EXCHANGE, "사이즈 교환", null, 999_999L));   // 없는 옵션
-        returnService.advanceForSeller(req.id(), 1L, action(ReturnAction.APPROVE), 1L);
-        returnService.advanceForSeller(req.id(), 1L, action(ReturnAction.PICK_UP), 1L);
-        returnService.advanceForSeller(req.id(), 1L, action(ReturnAction.INSPECT), 1L);
 
-        assertThatThrownBy(() -> returnService.advanceForSeller(req.id(), 1L, action(ReturnAction.COMPLETE), 1L))
+        // 예전엔 이 신청이 통과해 승인→수거→검수를 다 거친 뒤 확정에서야 404가 났다. 신청 시점 검증으로 앞당긴다.
+        assertThatThrownBy(() -> returnService.create(100L, false, order.getId(),
+                new ReturnCreateRequest(itemId, ReturnType.EXCHANGE, "사이즈 교환", null, 999_999L)))
                 .isInstanceOf(BusinessException.class).extracting("status").isEqualTo(HttpStatus.NOT_FOUND);
     }
 }
