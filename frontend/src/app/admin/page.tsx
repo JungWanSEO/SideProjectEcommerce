@@ -29,6 +29,7 @@ export default function AdminDashboardPage() {
   const [lowStock, setLowStock] = useState<LowStockReport | null>(null);
   const [threshold, setThreshold] = useState(5); // 임박 기준 재고(이하)
   const [reasons, setReasons] = useState<CancelReasonStats | null>(null); // 취소·반품 사유 집계(#8)
+  const [reasonRange, setReasonRange] = useState<number | null>(null); // 사유 집계 기간(일). null=전체 기간
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,12 +48,13 @@ export default function AdminDashboardPage() {
       .catch(() => setCacheStats([]));
   }, []);
 
-  // 취소·반품 사유 집계 — 부가 정보라 실패는 무시(위젯만 숨김). 전체 기간 기준이라 파라미터 없음.
+  // 취소·반품 사유 집계 — 부가 정보라 실패는 무시(위젯만 숨김). 기간을 바꾸면 다시 조회한다.
+  //   기준은 "이탈이 발생한 시각"(취소=취소 시각, 반품=요청 시각)이라 최근 N일이 곧 "최근 N일에 생긴 이탈"이다.
   useEffect(() => {
-    apiGet<CancelReasonStats>("/api/dashboard/cancel-reasons")
+    apiGet<CancelReasonStats>(`/api/dashboard/cancel-reasons${reasonRangeQuery(reasonRange)}`)
       .then(setReasons)
       .catch(() => setReasons(null));
-  }, []);
+  }, [reasonRange]);
 
   // 재고 임박·품절 — 기준 재고를 바꾸면 다시 조회.
   useEffect(() => {
@@ -164,7 +166,8 @@ export default function AdminDashboardPage() {
 
           {/* 취소·반품 사유(#8) — "왜 이탈했는가". 사유가 enum으로 구조화돼 있어 집계가 가능하다.
               귀책(fault)은 사유가 들고 있는 메타 — 셀러 귀책 비중이 높아지면 정책(정산 귀책·왕복 배송비)으로 이어질 지점. */}
-          {reasons && reasons.byReason.length > 0 && (
+          {/* 기간을 걸어 0건이 되면 위젯이 통째로 사라져 되돌릴 수 없으므로, 필터가 걸린 동안엔 빈 결과도 보여준다. */}
+          {reasons && (reasons.byReason.length > 0 || reasonRange !== null) && (
             <section className="rounded-2xl border border-gray-200 bg-white p-5">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-3">
@@ -185,6 +188,27 @@ export default function AdminDashboardPage() {
                 </div>
               </div>
 
+              {/* 기간 칩 — 취소 시각(V54) 기준이라 "이번 주에 무슨 일이 있었나"를 볼 수 있다. */}
+              <div className="mb-3 flex items-center gap-1 text-xs text-gray-500">
+                <span>기간</span>
+                {REASON_RANGES.map((r) => (
+                  <button
+                    key={r.label}
+                    onClick={() => setReasonRange(r.days)}
+                    className={`rounded-full px-3 py-1 ${
+                      reasonRange === r.days ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-100"
+                    }`}
+                  >
+                    {r.label}
+                  </button>
+                ))}
+              </div>
+
+              {reasons.byReason.length === 0 ? (
+                <p className="py-6 text-center text-sm text-gray-400">
+                  이 기간에 기록된 취소·반품 사유가 없습니다.
+                </p>
+              ) : (
               <ul className="flex flex-col gap-2">
                 {reasons.byReason.map((r) => {
                   const max = reasons.byReason[0].total || 1; // 최다 사유 기준 상대 막대
@@ -208,6 +232,7 @@ export default function AdminDashboardPage() {
                   );
                 })}
               </ul>
+              )}
 
               {(reasons.unrecordedCancels > 0 || reasons.unrecordedReturns > 0) && (
                 <p className="mt-3 text-xs text-gray-400">
@@ -384,3 +409,29 @@ const FAULT_BADGE: Record<string, string> = {
   PLATFORM: "bg-purple-50 text-purple-700",
   NONE: "bg-gray-100 text-gray-700",
 };
+
+/** 사유 집계 기간 프리셋. days=null이면 전체 기간(파라미터 없이 조회). */
+const REASON_RANGES: { label: string; days: number | null }[] = [
+  { label: "전체", days: null },
+  { label: "7일", days: 7 },
+  { label: "30일", days: 30 },
+  { label: "90일", days: 90 },
+];
+
+/**
+ * 최근 N일 → `?from=&to=` 쿼리. 오늘을 포함하므로 N일이면 오늘부터 N−1일 전까지다(서버가 to 당일을 포함).
+ * toISOString은 UTC로 밀려 한국 시간대에서 하루가 어긋나므로 로컬 날짜를 직접 조립한다.
+ */
+function reasonRangeQuery(days: number | null): string {
+  if (days == null) return "";
+  const to = new Date();
+  const from = new Date();
+  from.setDate(to.getDate() - (days - 1));
+  return `?from=${toDateParam(from)}&to=${toDateParam(to)}`;
+}
+
+function toDateParam(d: Date): string {
+  const m = `${d.getMonth() + 1}`.padStart(2, "0");
+  const day = `${d.getDate()}`.padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}

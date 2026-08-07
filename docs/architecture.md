@@ -156,7 +156,7 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 | `product_image` | product(자식) | 이미지 갤러리 | FK→product · sort_order |
 | `cart`/`cart_item` | cart | 회원(member_id) 또는 게스트(cart_token) 장바구니(#7) | member_id UNIQUE(nullable) · `cart_token` UNIQUE(게스트·nullable) · option_id |
 | `orders` | order(루트) | 주문 헤더: 상태머신·배송 스냅샷·쿠폰 스냅샷 | status(PENDING/PAID/SHIPPING/DELIVERED/CANCELLED) · 배송 컬럼 · discount/coupon 스냅샷 · `shipping_fee`(#4, 플랫폼 수익) |
-| `order_item` | order(자식) | 라인: 가격·이름·사이즈 + brand/seller **스냅샷** | FK→orders · status(ACTIVE/CANCELLED/**RETURNED**, 부분환불·반품축) · `cancel_reason`(#8, 취소 사유 taxonomy·nullable·기록집계용) |
+| `order_item` | order(자식) | 라인: 가격·이름·사이즈 + brand/seller **스냅샷** | FK→orders · status(ACTIVE/CANCELLED/**RETURNED**, 부분환불·반품축) · `cancel_reason`(#8, 취소 사유 taxonomy·nullable·기록집계용) · `cancelled_at`(취소 시각·사유 집계의 기간 축) |
 | `shipment` / `shipment_status_history` | order(자식, #1·#3) | **셀러별 배송 단위**(상태·송장) + 전이 이력 | order_id · seller_id(null=플랫폼) · status(PAID/SHIPPING/DELIVERED/CANCELLED) · `version` · courier/tracking · `delivered_at`(반품 기한 기산) · `kind`(ORIGINAL/**EXCHANGE**, EXCHANGE는 rollup 제외). `orders.status`는 ORIGINAL rollup 파생 |
 | `return_request` / `return_status_history` | returns(루트, #3) | **반품/교환 워크플로**(역방향 상태머신) + 전이 이력 | order_id·order_item_id·shipment_id·seller_id·member_id(ID참조) · type(RETURN/EXCHANGE) · status(REQUESTED→APPROVED→PICKED_UP→INSPECTED→REFUNDED/COMPLETED, REJECTED) · refund_amount·restock·exchange_option_id·exchange_shipment_id · `reason_code`(#8, 반품 사유 taxonomy·nullable·기록집계용) · `version` |
 | `address` | member | 저장 배송지 | member_id · is_default |
@@ -174,7 +174,7 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 | `recommendation` | personalization | 멤버별 "나를위한" 사전계산 | member_id+product_id UNIQUE · score |
 | `product_cooccurrence` | personalization | "함께 산 상품" 사전계산 | reference_product_id+product_id UNIQUE · co_buy_count · score |
 
-### 5.3 스키마 진화 (Flyway 53개, 에포크별)
+### 5.3 스키마 진화 (Flyway 54개, 에포크별)
 
 | 에포크 | 마이그레이션 | 내용 |
 |---|---|---|
@@ -197,6 +197,7 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 | Q 게스트 카트(#7) | V51 | cart.member_id NULL 허용 + cart_token UNIQUE(게스트 토큰 카트·로그인 병합) |
 | R 취소·환불 사유(#8) | V52 | order_item.cancel_reason·return_request.reason_code(구조화 사유 taxonomy·add-only·nullable·기록집계 전용) |
 | S 알림 인박스(#6) | V53 | notification_log에 수신자(recipient_type/id)·읽음(read_at)·성격(category)·딥링크 + **멱등키를 event_id 단독 → (event_id, recipient_type, recipient_id) 복합 UNIQUE로 교체**(1 이벤트→N 셀러 팬아웃 차단 해제) |
+| T 취소 시각(#8 후속) | V54 | order_item.cancelled_at(사유 집계의 기간 축·add-only·nullable + 기존 취소는 updated_at으로 1회 근사 백필) — updated_at은 교환 스왑·반품 flip에도 갱신되고 order_status_history는 주문 단위라 항목 부분취소를 못 잡는다 |
 
 ---
 
@@ -316,7 +317,11 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 
 **동시성**: 모든 상태/원장/재고 변경은 **부모 주문 비관락**(#1 P7 교훈, `findByIdForUpdate`) 아래서. 락 순서는 항상 **ORDER→RETURN**(데드락 회피, `findOrderIdById` 스칼라로 부모를 먼저 잡음). 요청 생성도 부모 락으로 구매자 더블클릭 중복요청을 직렬화. 교환의 두 옵션 행은 **id 오름차순 선(先)비관락**으로 미러 교환 간 데드락 예방(§7).
 
-**엔드포인트**: 구매자 `POST /api/orders/{id}/returns`·`GET /api/returns/me` / 셀러 콘솔 `PATCH /api/seller/me/returns/{id}/status`(자기 셀러만·`belongsToSeller`) / ADMIN `PATCH /api/orders/{id}/returns/{rid}/status`(대행·주문 매칭 404 가드).
+**교환 신청 게이트 — 신청·확정 두 지점**(08-07): 처음에는 대체 옵션을 **확정(COMPLETE) 시점에만** 검증해, 품절이나 다른 상품 옵션으로 신청해도 승인→수거→검수를 다 거친 뒤에야 막혔다(구매자·셀러 양쪽의 헛수고). `requireExchangeOption`으로 **형태 검증(존재·같은 상품·현재와 다른 옵션)을 한 곳에 모아** 신청·확정이 같은 규칙을 쓰게 하고, `create`에서 가용재고(`available()`)까지 본다. 다만 **재고 게이트의 성격은 둘이 다르다**: 신청은 스냅샷 검사(예약하지 않는다), 확정은 원자적 조건부 UPDATE. 그래서 "신청 때는 있었는데 확정 때 품절"인 레이스는 여전히 확정에서 409로 막히며, 그게 진짜 방어선이다.
+
+**구매자 신청 UI**(FE `/orders/[id]` 모달, 반품/교환 2탭): 대체 옵션 목록은 **전용 엔드포인트 없이 상품 상세 API 재사용** — `GET /api/products/{id}`의 `options`가 이미 `available`(=stock−reserved)·`soldOut`을 담고, 주문 항목 응답에 `productId`·`optionId`가 있어 클라이언트만으로 성립한다(교환 탭을 처음 열 때만 지연 조회).
+
+**엔드포인트**: 구매자 `POST /api/orders/{id}/returns`·`GET /api/returns/me` / 셀러 콘솔 `PATCH /api/seller/me/returns/{id}/status`(자기 셀러만·`belongsToSeller`) / ADMIN `PATCH /api/orders/{id}/returns/{rid}/status`(대행·주문 매칭 404 가드) · `GET /api/returns/admin`(전체 검색·경로 인가가 유일 방어선).
 
 > 구현: 7-phase(토대 V47 → 애그리거트/상태머신 V48 → 워크플로/라우트/인가 → 환불 → 정산 무손상 → 교환 → 리뷰자격+적대적리뷰). **적대적 리뷰(6차원 find → 회의론 3인 verify)가 확정한 3종 교정**: ①교환 후 원배송 기준 재-반품으로 교환품+환불 이중지급(MED) → `create`에 "교환 완료 항목 재-반품 차단" 가드 ②ADMIN 대행 생성 시 소유자가 caller로 귀속(LOW) → `order.getMemberId()` 귀속 ③미러 교환 `product_option` 데드락(LOW) → 두 옵션 id 오름차순 선락. 검증: `ReturnRequestTest`(상태머신)·`ReturnWorkflowTest`(자격·IDOR·ADMIN 귀속)·`ReturnRefundTest`(실효가·flip 순서)·`ReturnSettlementReversalTest`(클로백)·`ReturnExchangeTest`(스왑·양방향 재고·품절 롤백·재-반품 차단)·`ReviewEligibilityQueryTest`. **v1 유예**(결정 필요): 하자 반품 write-off·교환품 반품·수량 단위 부분반품.
 
@@ -374,6 +379,10 @@ Payment ──orderId──> Order   SettlementEntry ──paymentId/sellerId─
 - **취소**: `order_item.cancel_reason`. 컨트롤러 → `PaymentService.cancelOrder/cancelOrderItem` → `OrderService` → `Order` → `OrderItem`로 사유 전달. `OrderCancelRequest(reason)`를 `@RequestBody(required = false)`로 받아 **본문 없거나 사유 null이면 사유 없이 취소**(기존 API 완전 호환). 시스템 취소(만료 등)는 NULL.
 - **반품/교환**: `return_request.reason_code`. `ReturnCreateRequest`에 기존 자유텍스트 `reason`과 **병행**하는 `reasonCode`(선택) 추가 → `create` 시 저장.
 - **응답 노출**: `OrderItemResponse.cancelReason`·`ReturnResponse.reasonCode`.
+
+**집계와 기간 축** (`GET /api/dashboard/cancel-reasons?from=&to=`): 취소(`order_item`)와 반품(`return_request`)의 사유를 **한 축으로 합쳐** 사유별·귀책별로 센다(group-by 두 번). 사유가 nullable이라 **미기록 건수는 따로** 준다 — 안 그러면 "사유별 합계 < 전체"가 오류로 보인다.
+
+기간 필터가 뒤늦게(V54) 붙은 이유는 **"언제 취소됐나"를 아무도 안 들고 있었기 때문**이다: `order_item.updated_at`은 교환 옵션 스왑·반품 flip에도 갱신되고, `order_status_history`는 **주문 단위**라 항목 부분취소는 전이 자체가 없다. → **`order_item.cancelled_at` 신설**(V54·add-only·기존 취소는 `updated_at`으로 1회 근사 백필). 모든 취소 경로가 지나는 `OrderItem.cancel()` 한 곳에서 기록하며, **사유와 달리 시스템 취소(만료 등)에도 시각은 남긴다** — 사유는 몰라도 시각은 항상 알고, 그래야 기간 합계가 전체 건수와 어긋나지 않는다. 반품 축은 `return_request.created_at`(요청 시각)이라 추가 컬럼이 필요 없고, 결과적으로 **두 축이 모두 "이탈이 발생한 시각"**으로 통일된다. 필터는 대사 윈도우와 같은 nullable 바인딩(null이면 경계 무시)이고 상한은 배타(`to+1일 00:00`)라 to 당일을 포함한다.
 
 > **왜 "기록 전용"부터인가**: 사유를 정산 귀책/배송비 부담에 곧바로 연동하면 #3 반품·#4 배송비의 돈 흐름 불변식과 얽혀 회귀 위험이 크다. 먼저 구조화해 쌓으면(집계·필터 가능) 정책은 데이터가 모인 뒤 근거를 갖고 얹을 수 있다. add-only·nullable이라 기존 행/돈 경로 불변식은 무영향.
 

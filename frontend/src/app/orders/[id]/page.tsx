@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { apiGet, apiPost } from "@/lib/api";
-import { Order } from "@/lib/types";
+import { Order, OrderItem, Product, ProductOption } from "@/lib/types";
 import { ORDER_STATUS_LABEL, ORDER_STATUS_BADGE } from "@/lib/orderStatus";
 import { useAuth } from "@/lib/auth";
 import { loginHref } from "@/lib/useRequireAuth";
@@ -28,6 +28,14 @@ const RETURN_REASONS = [
   { code: "OTHER", label: "기타" },
 ];
 
+/** 교환 사유 선택지 — 같은 CancelReason enum이지만 교환 맥락의 라벨을 쓴다(사이즈 교환이 대부분). */
+const EXCHANGE_REASONS = [
+  { code: "CHANGE_OF_MIND", label: "사이즈·옵션이 안 맞아요" },
+  { code: "DEFECTIVE", label: "상품 불량" },
+  { code: "WRONG_DELIVERY", label: "오배송" },
+  { code: "OTHER", label: "기타" },
+];
+
 /** 주문 상세 (/orders/[id]). 본인 주문만(서버가 403으로 차단). PENDING=결제/취소, PAID=취소(환불). */
 export default function OrderDetailPage() {
   const params = useParams();
@@ -40,11 +48,17 @@ export default function OrderDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [cancelReason, setCancelReason] = useState("CHANGE_OF_MIND"); // 취소 사유(#8, 기록·집계)
-  // 반품 신청(#3) — 대상 항목 id가 있으면 모달을 띄운다. 교환은 대체 옵션 선택 UI가 필요해 v1은 반품만.
-  const [returnTarget, setReturnTarget] = useState<number | null>(null);
+  // 반품·교환 신청(#3) — 대상 항목이 있으면 모달을 띄운다. 항목 객체를 그대로 들고 있는 이유는
+  // 교환 탭이 productId(대체 옵션 조회)·optionId(현재 사이즈 제외)·quantity(재고 비교)를 모두 쓰기 때문.
+  const [returnTarget, setReturnTarget] = useState<OrderItem | null>(null);
+  const [returnType, setReturnType] = useState<"RETURN" | "EXCHANGE">("RETURN");
   const [returnReason, setReturnReason] = useState("CHANGE_OF_MIND");
   const [returnDetail, setReturnDetail] = useState("");
   const [returning, setReturning] = useState(false);
+  // 교환 대체 옵션 — 상품 상세 API를 재사용해 가져온다(전용 엔드포인트 없이. options에 available·soldOut 포함).
+  const [exchangeOptions, setExchangeOptions] = useState<ProductOption[] | null>(null);
+  const [optionsError, setOptionsError] = useState<string | null>(null);
+  const [exchangeOptionId, setExchangeOptionId] = useState<number | null>(null);
 
   useEffect(() => {
     if (!authLoading && !user) router.replace(loginHref(window.location.pathname + window.location.search));
@@ -59,28 +73,58 @@ export default function OrderDetailPage() {
   }, [user, id]);
 
   /**
-   * 반품 신청(#3) — 자격(활성 항목·배송완료·기한 7일)의 최종 판정은 서버가 한다.
-   * 신청이 접수되면 셀러가 승인→수거→검수→환불로 진행하므로, 여기선 접수 결과만 알려주고 목록으로 안내한다.
+   * 교환 탭을 처음 열 때만 대체 옵션을 조회한다(반품만 할 사람에게 불필요한 요청을 만들지 않도록 지연 로딩).
+   * 판매중지·삭제된 상품이면 조회가 실패하는데, 그건 "교환 불가"로 안내하고 반품 탭은 그대로 쓸 수 있게 둔다.
+   */
+  useEffect(() => {
+    if (!returnTarget || returnType !== "EXCHANGE" || exchangeOptions || optionsError) return;
+    apiGet<Product>(`/api/products/${returnTarget.productId}`)
+      .then((p) => setExchangeOptions(p.options))
+      .catch(() => setOptionsError("이 상품은 현재 교환할 수 있는 옵션을 불러올 수 없습니다."));
+  }, [returnTarget, returnType, exchangeOptions, optionsError]);
+
+  /** 모달을 열 때마다 상태를 초기화 — 이전 항목의 사유·선택 옵션이 남아 다른 항목에 적용되는 것을 막는다. */
+  const openReturnModal = (item: OrderItem) => {
+    setReturnTarget(item);
+    setReturnType("RETURN");
+    setReturnReason("CHANGE_OF_MIND");
+    setReturnDetail("");
+    setExchangeOptions(null);
+    setOptionsError(null);
+    setExchangeOptionId(null);
+  };
+
+  /**
+   * 반품·교환 신청(#3) — 자격(활성 항목·배송완료·기한 7일)의 최종 판정은 서버가 한다.
+   * 신청이 접수되면 셀러가 승인→수거→검수→환불(반품)/재출고(교환)로 진행하므로, 여기선 접수 결과만 알려준다.
    */
   const requestReturn = async () => {
-    if (returnTarget == null) return;
+    if (!returnTarget) return;
+    if (returnType === "EXCHANGE" && exchangeOptionId == null) {
+      setError("교환할 사이즈를 선택해 주세요.");
+      return;
+    }
     setReturning(true);
     setError(null);
     try {
       await apiPost(`/api/orders/${id}/returns`, {
-        orderItemId: returnTarget,
-        type: "RETURN",
+        orderItemId: returnTarget.id,
+        type: returnType,
         reason: returnDetail.trim() || null,
         reasonCode: returnReason,
-        exchangeOptionId: null,
+        exchangeOptionId: returnType === "EXCHANGE" ? exchangeOptionId : null,
       });
       setReturnTarget(null);
       setReturnDetail("");
-      alert("반품 신청이 접수되었습니다. 셀러 확인 후 수거가 진행됩니다.");
+      alert(
+        returnType === "EXCHANGE"
+          ? "교환 신청이 접수되었습니다. 셀러 확인 후 수거·검수를 거쳐 새 상품이 발송됩니다."
+          : "반품 신청이 접수되었습니다. 셀러 확인 후 수거가 진행됩니다.",
+      );
       const refreshed = await apiGet<Order>(`/api/orders/${id}`);
       setOrder(refreshed);
     } catch (e) {
-      setError((e as Error).message); // 기한 초과·중복 요청(409) 등 서버 문구 그대로
+      setError((e as Error).message); // 기한 초과·중복 요청·품절(409) 등 서버 문구 그대로
     } finally {
       setReturning(false);
     }
@@ -224,13 +268,13 @@ export default function OrderDetailPage() {
                   취소
                 </button>
               )}
-              {/* 배송완료(DELIVERED) 항목만 반품 신청 — 자격(활성·배송완료·7일)의 최종 판정은 서버가 한다(#3). */}
+              {/* 배송완료(DELIVERED) 항목만 반품·교환 신청 — 자격(활성·배송완료·7일)의 최종 판정은 서버가 한다(#3). */}
               {order.status === "DELIVERED" && it.status === "ACTIVE" && (
                 <button
-                  onClick={() => setReturnTarget(it.id)}
+                  onClick={() => openReturnModal(it)}
                   className="rounded-full border border-line px-3 py-1 text-xs text-muted transition hover:border-clay hover:text-clay"
                 >
-                  반품 신청
+                  반품·교환
                 </button>
               )}
             </div>
@@ -359,24 +403,100 @@ export default function OrderDetailPage() {
         )}
       </div>
 
-      {/* 반품 신청 모달(#3) — 사유는 구조화 코드(집계용) + 상세 텍스트. 교환은 대체 옵션 선택이 필요해 후속. */}
-      {returnTarget != null && (
+      {/* 반품·교환 신청 모달(#3) — 사유는 구조화 코드(집계용) + 상세 텍스트. 교환은 같은 상품의 다른 사이즈를 고른다. */}
+      {returnTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4">
-          <div className="w-full max-w-md rounded-2xl bg-paper p-6">
-            <h2 className="font-serif text-xl text-ink">반품 신청</h2>
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-paper p-6">
+            <h2 className="font-serif text-xl text-ink">반품·교환 신청</h2>
             <p className="mt-1 text-sm text-muted">
-              접수 후 셀러가 확인하면 수거가 진행됩니다. 검수가 끝나면 환불됩니다.
+              {returnTarget.productName} · 사이즈 {returnTarget.size} · {returnTarget.quantity}개
             </p>
 
+            {/* 반품/교환 선택 — 접수 후 흐름이 갈린다(반품=환불, 교환=대체품 재출고). */}
+            <div className="mt-4 flex gap-2">
+              {(
+                [
+                  { value: "RETURN", label: "반품 (환불)" },
+                  { value: "EXCHANGE", label: "교환 (사이즈 변경)" },
+                ] as const
+              ).map((t) => (
+                <button
+                  key={t.value}
+                  onClick={() => {
+                    setReturnType(t.value);
+                    setReturnReason("CHANGE_OF_MIND");
+                    setError(null);
+                  }}
+                  disabled={returning}
+                  className={`flex-1 rounded-full border px-3 py-2 text-sm transition disabled:opacity-50 ${
+                    returnType === t.value
+                      ? "border-clay bg-clay/10 font-medium text-clay"
+                      : "border-line text-muted hover:text-ink"
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            <p className="mt-3 text-sm text-muted">
+              {returnType === "EXCHANGE"
+                ? "접수 후 셀러가 확인하면 수거가 진행됩니다. 검수가 끝나면 선택한 사이즈로 재발송됩니다(추가 결제 없음)."
+                : "접수 후 셀러가 확인하면 수거가 진행됩니다. 검수가 끝나면 환불됩니다."}
+            </p>
+
+            {/* 교환 대체 옵션 — 현재 사이즈는 제외, 재고 부족은 비활성(서버도 신청 시점에 다시 검증한다). */}
+            {returnType === "EXCHANGE" && (
+              <div className="mt-5">
+                <p className="text-sm text-ink">변경할 사이즈</p>
+                {optionsError ? (
+                  <p className="mt-2 text-sm text-danger">{optionsError}</p>
+                ) : !exchangeOptions ? (
+                  <Skeleton className="mt-2 h-10 w-full" />
+                ) : (
+                  (() => {
+                    const candidates = exchangeOptions.filter((o) => o.id !== returnTarget.optionId);
+                    if (candidates.length === 0) {
+                      return <p className="mt-2 text-sm text-muted">교환 가능한 다른 사이즈가 없습니다.</p>;
+                    }
+                    return (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {candidates.map((o) => {
+                          const short = o.available < returnTarget.quantity;
+                          return (
+                            <button
+                              key={o.id}
+                              onClick={() => setExchangeOptionId(o.id)}
+                              disabled={short || returning}
+                              className={`rounded-lg border px-3 py-2 text-sm transition ${
+                                exchangeOptionId === o.id
+                                  ? "border-clay bg-clay/10 font-medium text-clay"
+                                  : "border-line text-ink hover:border-clay"
+                              } ${short ? "cursor-not-allowed opacity-40" : ""}`}
+                            >
+                              {o.size}
+                              <span className="ml-1.5 text-xs text-muted">
+                                {short ? "품절" : `재고 ${o.available}`}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()
+                )}
+              </div>
+            )}
+
             <label className="mt-5 block text-sm text-ink">
-              반품 사유
+              {returnType === "EXCHANGE" ? "교환" : "반품"} 사유
               <select
                 value={returnReason}
                 onChange={(e) => setReturnReason(e.target.value)}
                 disabled={returning}
                 className="mt-1 w-full rounded-lg border border-line bg-cream px-3 py-2 text-sm text-ink"
               >
-                {RETURN_REASONS.map((r) => (
+                {(returnType === "EXCHANGE" ? EXCHANGE_REASONS : RETURN_REASONS).map((r) => (
                   <option key={r.code} value={r.code}>{r.label}</option>
                 ))}
               </select>
@@ -395,6 +515,11 @@ export default function OrderDetailPage() {
               />
             </label>
 
+            {/* 모달이 화면을 덮으므로 서버 문구(기한 초과·중복 요청·품절 409)를 모달 안에서도 보여준다. */}
+            {error && (
+              <p className="mt-4 rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>
+            )}
+
             <div className="mt-6 flex justify-end gap-2">
               <button
                 onClick={() => setReturnTarget(null)}
@@ -405,10 +530,10 @@ export default function OrderDetailPage() {
               </button>
               <button
                 onClick={requestReturn}
-                disabled={returning}
+                disabled={returning || (returnType === "EXCHANGE" && exchangeOptionId == null)}
                 className={buttonClass()}
               >
-                {returning ? "접수 중…" : "반품 신청"}
+                {returning ? "접수 중…" : returnType === "EXCHANGE" ? "교환 신청" : "반품 신청"}
               </button>
             </div>
           </div>

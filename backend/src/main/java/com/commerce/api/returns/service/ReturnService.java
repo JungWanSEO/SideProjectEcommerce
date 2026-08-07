@@ -73,6 +73,18 @@ public class ReturnService {
                 req.orderItemId(), com.commerce.api.returns.entity.ReturnType.EXCHANGE, ReturnStatus.COMPLETED)) {
             throw new BusinessException(HttpStatus.CONFLICT, "이미 교환 완료된 항목입니다. 교환품 반품은 고객센터로 문의해 주세요.");
         }
+        // 교환이면 대체 옵션을 신청 시점에 검증(오너 결정) — 같은 상품·다른 옵션·가용재고. 예전엔 확정(COMPLETE)
+        // 시점에만 봤기 때문에, 구매자가 품절 사이즈로 신청 → 수거·검수까지 다 끝난 뒤에야 409로 막히는 헛수고가
+        // 났다. 여기서 막으면 신청 화면에서 즉시 알 수 있다. (재고를 잡아두지는 않는다 — 확정 시점의 원자적
+        // consumeForExchange가 여전히 진짜 게이트다. 여기 검사는 "명백한 품절 조기 차단"이지 예약이 아니다.)
+        if (req.type() == com.commerce.api.returns.entity.ReturnType.EXCHANGE && req.exchangeOptionId() != null) {
+            OrderItem target = order.requireItem(req.orderItemId());
+            ProductOption option = requireExchangeOption(target, req.exchangeOptionId());
+            if (option.available() < target.getQuantity()) {
+                throw new BusinessException(HttpStatus.CONFLICT,
+                        "선택한 사이즈의 재고가 부족합니다. (가용 " + Math.max(option.available(), 0) + "개)");
+            }
+        }
         // 소유권은 실제 구매자(order.memberId)로 귀속 — ADMIN 대행(admin=true) 생성 시에도 구매자가 자기 반품을
         // /returns/me로 조회·추적할 수 있게 한다(적대적리뷰 LOW: caller(admin) id로 귀속되던 문제 교정).
         ReturnRequest r = ReturnRequest.create(orderId, req.orderItemId(), ctx.shipmentId(), ctx.sellerId(),
@@ -181,14 +193,7 @@ public class ReturnService {
         OrderItem item = order.requireItem(r.getOrderItemId());
         Long oldOptionId = item.getOptionId();
         Long newOptionId = r.getExchangeOptionId();
-        ProductOption newOption = productOptionRepository.findById(newOptionId)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "교환 대상 옵션을 찾을 수 없습니다."));
-        if (!newOption.getProduct().getId().equals(item.getProductId())) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "같은 상품의 다른 옵션으로만 교환할 수 있습니다.");
-        }
-        if (newOptionId.equals(oldOptionId)) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "같은 옵션으로는 교환할 수 없습니다.");
-        }
+        ProductOption newOption = requireExchangeOption(item, newOptionId);
         // 두 옵션 행을 id 오름차순으로 먼저 비관락 → 미러 교환(다른 주문이 같은 두 옵션을 반대 방향) 간 데드락 예방
         // (적대적리뷰 LOW). 부모 주문 락은 '같은 주문'만 직렬화하므로 공유 product_option 락 순서를 여기서 통일한다.
         productOptionRepository.findByIdForUpdate(Math.min(oldOptionId, newOptionId));
@@ -201,6 +206,23 @@ public class ReturnService {
         Shipment exchangeShipment = order.addExchangeShipment(item.getSellerId());
         orderRepository.saveAndFlush(order);   // cascade로 교환 shipment id 부여
         r.markExchanged(exchangeShipment.getId(), changedBy);
+    }
+
+    /**
+     * 교환 대체 옵션의 <b>형태</b> 검증 — 존재·같은 상품·현재와 다른 옵션. 신청(create)과 확정(exchange)이 같은
+     * 규칙을 쓰도록 한 곳에 모은다(둘이 갈리면 "신청은 됐는데 확정이 안 되는" 요청이 생긴다).
+     * 재고는 여기서 보지 않는다 — 신청은 스냅샷 검사(available), 확정은 원자적 소진이라 게이트가 다르다.
+     */
+    private ProductOption requireExchangeOption(OrderItem item, Long newOptionId) {
+        ProductOption newOption = productOptionRepository.findById(newOptionId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "교환 대상 옵션을 찾을 수 없습니다."));
+        if (!newOption.getProduct().getId().equals(item.getProductId())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "같은 상품의 다른 옵션으로만 교환할 수 있습니다.");
+        }
+        if (newOptionId.equals(item.getOptionId())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "같은 옵션으로는 교환할 수 없습니다.");
+        }
+        return newOption;
     }
 
     private record Locked(Order order, ReturnRequest returnRequest) {

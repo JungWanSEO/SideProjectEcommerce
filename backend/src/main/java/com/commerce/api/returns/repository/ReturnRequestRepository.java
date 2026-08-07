@@ -4,6 +4,7 @@ import com.commerce.api.returns.entity.ReturnRequest;
 import com.commerce.api.returns.entity.ReturnStatus;
 import com.commerce.api.returns.entity.ReturnType;
 import jakarta.persistence.LockModeType;
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -47,9 +48,16 @@ public interface ReturnRequestRepository extends JpaRepository<ReturnRequest, Lo
     /**
      * 반품/교환 요청의 <b>사유별</b> 건수 — [reasonCode, count]. 상태 무관(거부된 요청도 사유 통계엔 의미가 있다)이며
      * reasonCode는 nullable이라 미기록 건은 null 행으로 나온다. 취소 사유 집계(OrderRepository)와 짝이다(#8 후속).
+     *
+     * <p>기간 축은 <b>요청 시각(created_at)</b> — 반품은 취소와 달리 "언제"가 이미 명확해 새 컬럼이 필요 없다.
+     * 취소 쪽 {@code cancelled_at}과 같은 의미(이탈이 발생한 시각)라 두 축을 한 기간으로 합칠 수 있다.
+     * 필터는 nullable 바인딩(null이면 경계 무시)이고 to는 배타다.
      */
-    @Query("select r.reasonCode, count(r) from ReturnRequest r group by r.reasonCode")
-    List<Object[]> countByReasonCode();
+    @Query("select r.reasonCode, count(r) from ReturnRequest r where "
+            + "(:from is null or r.createdAt >= :from) and "
+            + "(:to is null or r.createdAt < :to) "
+            + "group by r.reasonCode")
+    List<Object[]> countByReasonCode(@Param("from") LocalDateTime from, @Param("to") LocalDateTime to);
 
     /**
      * 어드민 반품/교환 검색 — 전체 스코프(구매자/셀러 목록과 달리 소유 제한이 없다).

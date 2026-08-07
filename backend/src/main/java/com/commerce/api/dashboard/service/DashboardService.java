@@ -10,6 +10,7 @@ import com.commerce.api.dashboard.dto.DashboardResponse.OrderStatusCount;
 import com.commerce.api.dashboard.dto.LowStockResponse;
 import com.commerce.api.global.common.CancelReason;
 import com.commerce.api.global.config.CacheConfig;
+import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.member.repository.MemberRepository;
 import com.commerce.api.order.entity.OrderStatus;
 import com.commerce.api.order.repository.OrderRepository;
@@ -31,6 +32,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -109,13 +111,20 @@ public class DashboardService {
      * 사유가 들고 있는 메타를 접어 만들고, <b>사유 미기록</b> 건수는 따로 노출해 "사유별 합계 &lt; 전체"가
      * 오류로 보이지 않게 한다(사유는 add-only·nullable로 도입됐다).
      *
-     * <p>기간 필터는 두지 않았다 — 취소 시각을 별도로 보관하지 않아(항목 updatedAt은 교환 스왑 등에도 갱신됨)
-     * "언제 취소됐는지"의 기준을 새로 정해야 하고, 그건 별도 결정이라 전체 기간 집계로 시작한다.
-     * 캐시도 하지 않는다(호출 빈도가 낮고 운영 판단에 최신값이 낫다).
+     * <p><b>기간(from~to, 선택)</b>의 축은 오너 결정에 따라 "이탈이 발생한 시각"이다 — 취소는
+     * {@code order_item.cancelled_at}(V54 신설), 반품은 {@code return_request.created_at}(요청 시각).
+     * 주문일 기준이 아닌 이유: 운영이 보고 싶은 건 "이번 달에 발생한 취소"지 "이번 달 주문 중 나중에 취소된 것"이
+     * 아니기 때문이다. 둘 다 null이면 전체 기간. 경계는 [from 00:00, to+1일 00:00)으로 <b>to 당일을 포함</b>한다.
+     * 캐시하지 않는다(호출 빈도가 낮고 운영 판단에 최신값이 낫다).
      */
-    public CancelReasonStatsResponse getCancelReasonStats() {
-        Map<CancelReason, Long> cancels = toReasonMap(orderRepository.countCancelledItemsByReason());
-        Map<CancelReason, Long> returns = toReasonMap(returnRequestRepository.countByReasonCode());
+    public CancelReasonStatsResponse getCancelReasonStats(LocalDate from, LocalDate to) {
+        LocalDateTime fromAt = from == null ? null : from.atStartOfDay();
+        LocalDateTime toAt = to == null ? null : to.plusDays(1).atStartOfDay();   // 배타 상한 → to 당일 포함
+        if (fromAt != null && toAt != null && toAt.isBefore(fromAt)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "조회 종료일이 시작일보다 빠릅니다.");
+        }
+        Map<CancelReason, Long> cancels = toReasonMap(orderRepository.countCancelledItemsByReason(fromAt, toAt));
+        Map<CancelReason, Long> returns = toReasonMap(returnRequestRepository.countByReasonCode(fromAt, toAt));
 
         long unrecordedCancels = cancels.getOrDefault(null, 0L);
         long unrecordedReturns = returns.getOrDefault(null, 0L);

@@ -72,6 +72,16 @@ public class OrderItem extends BaseEntity {
     @Column(name = "cancel_reason", length = 30)
     private com.commerce.api.global.common.CancelReason cancelReason;
 
+    /**
+     * 취소 시각(#8 후속, 사유 집계의 기간 축). 취소된 항목만 값이 있다.
+     *
+     * <p>updated_at을 쓰지 않는 이유 — 교환 스왑({@link #swapOption})·반품 flip 등 취소와 무관한 변경에도 갱신되므로
+     * "언제 취소됐나"의 기준이 될 수 없다. 사유(cancelReason)와 달리 <b>시스템 취소(만료 등)에도 기록</b>한다:
+     * 사유는 몰라도 시각은 항상 알기 때문이고, 그래야 기간 합계가 전체 취소 건수와 어긋나지 않는다.
+     */
+    @Column(name = "cancelled_at")
+    private java.time.LocalDateTime cancelledAt;
+
     @Builder
     private OrderItem(Long productId, Long optionId, Long brandId, Long sellerId, String productName,
                       String size, long orderPrice, int quantity) {
@@ -98,6 +108,7 @@ public class OrderItem extends BaseEntity {
         }
         this.status = OrderItemStatus.CANCELLED;
         this.cancelReason = reason;
+        this.cancelledAt = java.time.LocalDateTime.now();   // 모든 취소 경로가 이 메서드를 지나므로 여기 한 곳이면 충분
     }
 
     /** 항목 반품 확정(#3). ACTIVE에서만 RETURNED로 — 취소된 항목 반품·이중 반품을 구조적으로 차단. */

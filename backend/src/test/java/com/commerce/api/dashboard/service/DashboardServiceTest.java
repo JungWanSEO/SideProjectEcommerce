@@ -1,6 +1,7 @@
 package com.commerce.api.dashboard.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.commerce.api.dashboard.dto.CancelReasonStatsResponse;
 import com.commerce.api.dashboard.dto.CancelReasonStatsResponse.FaultCount;
@@ -12,6 +13,7 @@ import com.commerce.api.dashboard.dto.LowStockResponse;
 import com.commerce.api.product.dto.LowStockOption;
 import com.commerce.api.product.entity.ProductOption;
 import com.commerce.api.global.common.CancelReason;
+import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.member.entity.Member;
 import com.commerce.api.member.entity.Role;
 import com.commerce.api.member.repository.MemberRepository;
@@ -195,7 +197,7 @@ class DashboardServiceTest {
     @Test
     @DisplayName("getCancelReasonStats - 취소·반품 사유를 한 축으로 합치고 귀책으로 접는다(미기록은 분리)")
     void getCancelReasonStats_mergesCancelAndReturnByReason() {
-        CancelReasonStatsResponse before = dashboardService.getCancelReasonStats();
+        CancelReasonStatsResponse before = dashboardService.getCancelReasonStats(null, null);
 
         // 취소 2건: 변심(고객 귀책) + 불량(셀러 귀책) / 사유 미기록 1건
         orderRepository.save(cancelledOrder(CancelReason.CHANGE_OF_MIND));
@@ -204,7 +206,7 @@ class DashboardServiceTest {
         // 반품 1건: 같은 변심 사유 → 사유 축에서 취소분과 합산돼야 한다
         returnRequestRepository.save(returnRequest(CancelReason.CHANGE_OF_MIND));
 
-        CancelReasonStatsResponse after = dashboardService.getCancelReasonStats();
+        CancelReasonStatsResponse after = dashboardService.getCancelReasonStats(null, null);
 
         assertThat(after.totalCancelledItems()).isEqualTo(before.totalCancelledItems() + 3);
         assertThat(after.totalReturns()).isEqualTo(before.totalReturns() + 1);
@@ -225,6 +227,34 @@ class DashboardServiceTest {
         long reasonSum = after.byReason().stream().mapToLong(ReasonCount::total).sum();
         assertThat(reasonSum + after.unrecordedCancels() + after.unrecordedReturns())
                 .isEqualTo(after.totalCancelledItems() + after.totalReturns());
+    }
+
+    @Test
+    @DisplayName("getCancelReasonStats - 기간을 주면 그 기간에 '발생한' 취소·반품만 센다(to 당일 포함)")
+    void getCancelReasonStats_filtersByPeriod() {
+        LocalDate today = LocalDate.now();
+        orderRepository.save(cancelledOrder(CancelReason.CHANGE_OF_MIND));    // 취소 시각 = 지금(V54)
+        returnRequestRepository.save(returnRequest(CancelReason.DEFECTIVE));  // 요청 시각 = 지금
+
+        // from=to=오늘 → 방금 만든 것이 잡혀야 한다. 상한이 배타 그대로(오늘 00:00)였다면 0이 나왔을 자리다.
+        CancelReasonStatsResponse todayWindow = dashboardService.getCancelReasonStats(today, today);
+        assertThat(todayWindow.totalCancelledItems()).isPositive();
+        assertThat(todayWindow.totalReturns()).isPositive();
+
+        // 과거 창은 같은 데이터를 하나도 세지 않는다(기간이 실제로 걸린다는 반대편 증거)
+        CancelReasonStatsResponse past =
+                dashboardService.getCancelReasonStats(LocalDate.of(2000, 1, 1), LocalDate.of(2000, 1, 2));
+        assertThat(past.totalCancelledItems()).isZero();
+        assertThat(past.totalReturns()).isZero();
+        assertThat(past.byReason()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("getCancelReasonStats - 종료일이 시작일보다 빠르면 400(빈 결과로 조용히 넘기지 않는다)")
+    void getCancelReasonStats_rejectsInvertedWindow() {
+        assertThatThrownBy(() -> dashboardService.getCancelReasonStats(
+                LocalDate.of(2026, 1, 10), LocalDate.of(2026, 1, 1)))
+                .isInstanceOf(BusinessException.class);
     }
 
     private ReasonCount reasonOf(CancelReasonStatsResponse stats, String reason) {
