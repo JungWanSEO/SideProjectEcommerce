@@ -37,7 +37,7 @@ class PayoutControllerTest {
 
     private PayoutResponse sample(PayoutStatus status) {
         return new PayoutResponse(1L, 5L, "UrbanSelect", LocalDate.now(), LocalDate.now().plusDays(7),
-                30000, 750, 3000, 26250, 2, status, status == PayoutStatus.PAID ? LocalDateTime.now() : null,
+                30000, 750, 3000, 26250, 0, 0, 2, status, status == PayoutStatus.PAID ? LocalDateTime.now() : null,
                 LocalDateTime.now());
     }
 

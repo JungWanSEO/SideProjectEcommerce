@@ -1,9 +1,7 @@
 package com.commerce.api.returns;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.commerce.api.global.exception.BusinessException;
 import com.commerce.api.order.entity.Order;
 import com.commerce.api.order.entity.OrderItem;
 import com.commerce.api.order.entity.OrderStatus;
@@ -28,11 +26,10 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 반품 정산 무손상(#3 P5) 통합 테스트 — 전액환불 클로백 누수 fix + Payout 음수 가드.
+ * 반품 정산 무손상(#3 P5) 통합 테스트 — 전액환불 클로백 누수 fix + 음수 정산 이월(#8 후속 P6).
  */
 @SpringBootTest
 @Transactional
@@ -87,8 +84,8 @@ class ReturnSettlementReversalTest {
     }
 
     @Test
-    @DisplayName("Payout 음수 가드 - 이 기간 net이 음수면 400(다음 기간 이월 상계)")
-    void payoutNegativeNetRejected() {
+    @DisplayName("음수 정산 - 지급은 0원이지만 묶음은 만들고 부족분을 다음 기간으로 이월한다(#8 후속)")
+    void negativeNetCarriesOver() {
         Seller seller = sellerRepository.save(Seller.create("셀러B", 0.10, null, null));
         Long sellerId = seller.getId();
         LocalDate today = LocalDate.now();
@@ -97,8 +94,37 @@ class ReturnSettlementReversalTest {
                 1L, 11L, "tx-neg", "TOSS", sellerId,
                 -10000L, -250L, 0.025, -1000L, 0.10, 0L, null, today));
 
-        assertThatThrownBy(() -> payoutService.create(new PayoutCreateRequest(sellerId, today, today)))
-                .isInstanceOf(BusinessException.class).extracting("status").isEqualTo(HttpStatus.BAD_REQUEST);
+        var payout = payoutService.create(new PayoutCreateRequest(sellerId, today, today));
+
+        // 예전엔 여기서 400을 던져 지급 묶음 자체를 안 만들었다 → 정상 매출까지 통째로 미지급.
+        // 이제는 "0원 지급 + 부족분 이월"로 남는다(음수 송금은 여전히 만들지 않는다).
+        assertThat(payout.totalNet()).isZero();
+        assertThat(payout.carriedOver()).isEqualTo(-8750L);   // -10000 + 250 + 1000
+        assertThat(payout.entryCount()).isEqualTo(1);         // 항목은 이 묶음에 소비됐다(다음에 또 안 잡힌다)
+    }
+
+    @Test
+    @DisplayName("이월 상계 - 다음 기간 매출에서 직전 이월을 선차감하고 남은 만큼만 지급")
+    void carriedOverIsDeductedNextPeriod() {
+        Seller seller = sellerRepository.save(Seller.create("셀러C", 0.10, null, null));
+        Long sellerId = seller.getId();
+        LocalDate today = LocalDate.now();
+
+        // 1기: 음수 → 0원 지급 + -8750 이월
+        settlementRepository.save(SettlementEntry.scheduled(
+                1L, 11L, "tx-c1", "TOSS", sellerId, -10000L, -250L, 0.025, -1000L, 0.10, 0L, null, today));
+        var first = payoutService.create(new PayoutCreateRequest(sellerId, today, today));
+        assertThat(first.carriedOver()).isEqualTo(-8750L);
+
+        // 2기: 매출 20000(net 17500) → 직전 이월 -8750을 선차감해 8750만 지급, 이월은 0으로 해소
+        settlementRepository.save(SettlementEntry.scheduled(
+                2L, 12L, "tx-c2", "TOSS", sellerId, 20000L, 500L, 0.025, 2000L, 0.10, 0L, null, today.plusDays(1)));
+        var second = payoutService.create(
+                new PayoutCreateRequest(sellerId, today.plusDays(1), today.plusDays(1)));
+
+        assertThat(second.carriedIn()).isEqualTo(-8750L);
+        assertThat(second.totalNet()).isEqualTo(8750L);   // 17500 - 8750
+        assertThat(second.carriedOver()).isZero();        // 잔액 해소
     }
 
     private long sellerNet(Long sellerId) {

@@ -95,7 +95,7 @@ class SellerConsoleControllerTest {
         given(sellerConsoleService.getMyPayouts(eq(1L), any(), any())).willReturn(
                 new PageResponse<>(
                         List.of(new PayoutResponse(1L, 5L, "UrbanSelect", LocalDate.now(), LocalDate.now(),
-                                30000, 750, 3000, 26250, 2, PayoutStatus.PENDING, null, LocalDateTime.now())),
+                                30000, 750, 3000, 26250, 0, 0, 2, PayoutStatus.PENDING, null, LocalDateTime.now())),
                         0, 20, 1, 1, false));
 
         mockMvc.perform(get("/api/seller/me/payouts"))

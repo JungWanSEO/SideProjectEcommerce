@@ -123,6 +123,7 @@ export default function AdminPayoutsPage() {
               <th className="px-4 py-3 text-right">건수</th>
               <th className="px-4 py-3 text-right">매출</th>
               <th className="px-4 py-3 text-right">수수료합</th>
+              <th className="px-4 py-3 text-right">이월</th>
               <th className="px-4 py-3 text-right">실지급액</th>
               <th className="px-4 py-3">상태</th>
               <th className="px-4 py-3 text-right">액션</th>
@@ -131,13 +132,13 @@ export default function AdminPayoutsPage() {
           <tbody className="divide-y divide-gray-100">
             {loading ? (
               <tr>
-                <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={10} className="px-4 py-8 text-center text-gray-400">
                   불러오는 중…
                 </td>
               </tr>
             ) : payouts.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={10} className="px-4 py-8 text-center text-gray-400">
                   지급 묶음이 없습니다. 위에서 셀러+기간으로 생성하세요.
                 </td>
               </tr>
@@ -153,6 +154,20 @@ export default function AdminPayoutsPage() {
                   <td className="px-4 py-3 text-right">{p.totalGross.toLocaleString()}</td>
                   <td className="px-4 py-3 text-right text-amber-600">
                     −{(p.totalFee + p.totalPlatformFee).toLocaleString()}
+                  </td>
+                  {/*
+                    이월(#8 후속) — 반품 역분개·셀러 귀책 과금이 그 기간 매출을 넘으면 지급은 0원이 되고
+                    부족분이 다음 기간으로 넘어간다. 예전엔 지급 묶음 자체를 안 만들어(400) 정상 매출까지
+                    통째로 막혔고, 셀러는 "왜 안 나왔는지"를 알 방법이 없었다.
+                  */}
+                  <td className="px-4 py-3 text-right text-xs">
+                    {p.carriedIn !== 0 && (
+                      <div className="text-amber-700">전월 {p.carriedIn.toLocaleString()}</div>
+                    )}
+                    {p.carriedOver !== 0 && (
+                      <div className="text-red-600">차월 {p.carriedOver.toLocaleString()}</div>
+                    )}
+                    {p.carriedIn === 0 && p.carriedOver === 0 && <span className="text-gray-300">—</span>}
                   </td>
                   <td className="px-4 py-3 text-right font-medium text-green-700">{p.totalNet.toLocaleString()}</td>
                   <td className="px-4 py-3">
