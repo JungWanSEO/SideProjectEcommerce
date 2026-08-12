@@ -42,6 +42,15 @@ const ACTION_LABEL: Record<ReturnAction, string> = {
   INSPECT: "검수 완료",
   REFUND: "환불 확정",
   COMPLETE: "교환 확정",
+  SET_FAULT: "귀책 재정",
+};
+
+/** 귀책 주체 라벨(#8 후속) — 어드민은 종료 전이면 셀러 판정을 뒤집을 수 있다. */
+const FAULT_LABEL: Record<string, string> = {
+  CUSTOMER: "고객 귀책",
+  SELLER: "셀러 귀책",
+  PLATFORM: "플랫폼 귀책",
+  NONE: "귀책 없음",
 };
 
 const REASON_LABEL: Record<string, string> = {
@@ -108,8 +117,10 @@ export default function AdminReturnsPage() {
     load();
   }, [load]);
 
-  const advance = async (r: ReturnRequest, action: ReturnAction) => {
-    if (!confirm(`[대행] ${ACTION_LABEL[action]} 처리하시겠어요? 되돌릴 수 없습니다.`)) return;
+  const advance = async (r: ReturnRequest, action: ReturnAction, faultParty?: string) => {
+    // 귀책 재정(SET_FAULT)은 상태를 바꾸지 않으므로 "되돌릴 수 없습니다" 경고가 맞지 않는다.
+    if (action !== "SET_FAULT"
+        && !confirm(`[대행] ${ACTION_LABEL[action]} 처리하시겠어요? 되돌릴 수 없습니다.`)) return;
     const memo = action === "REJECT" ? prompt("거부 사유(선택)") ?? undefined : undefined;
     setBusyId(r.id);
     setError(null);
@@ -117,7 +128,7 @@ export default function AdminReturnsPage() {
       // 대행 전이는 주문 경로 — 반품이 그 주문 소속인지 서버가 검증한다(경로 불일치면 404).
       const updated = await apiPatch<ReturnRequest>(
         `/api/orders/${r.orderId}/returns/${r.id}/status`,
-        { action, memo }
+        { action, memo, faultParty }
       );
       setItems((prev) => prev.map((it) => (it.id === updated.id ? updated : it)));
     } catch (e) {
@@ -209,9 +220,39 @@ export default function AdminReturnsPage() {
                       </span>
                     )}
                     <span className="text-gray-500">{r.reason}</span>
+                    {/*
+                      귀책 재정(#8 후속) — 셀러가 검수에서 확정하지만 자기 이익 방향으로 판정할 수 있어
+                      어드민이 종료 전까지 뒤집을 수 있다. 모든 재정은 이력에 남는다.
+                    */}
+                    <div className="mt-1 flex items-center gap-1">
+                      <span className="text-xs text-gray-400">
+                        {FAULT_LABEL[r.effectiveFault] ?? r.effectiveFault}
+                        {r.faultParty == null && " (신고 기준)"}
+                      </span>
+                      {actionsFor(r).length > 0 && (
+                        <select
+                          value=""
+                          onChange={(e) => e.target.value && advance(r, "SET_FAULT", e.target.value)}
+                          disabled={busyId === r.id}
+                          className="rounded border border-gray-200 px-1 py-0.5 text-xs disabled:opacity-50"
+                          aria-label="귀책 재정"
+                        >
+                          <option value="">재정…</option>
+                          <option value="CUSTOMER">고객 귀책</option>
+                          <option value="SELLER">셀러 귀책</option>
+                          <option value="PLATFORM">플랫폼 귀책</option>
+                          <option value="NONE">귀책 없음</option>
+                        </select>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-right text-gray-700">
                     {r.refundAmount != null ? `${r.refundAmount.toLocaleString()}원` : "—"}
+                    {r.returnShippingCharged != null && r.returnShippingCharged > 0 && (
+                      <div className="text-xs text-amber-700">
+                        회수비 −{r.returnShippingCharged.toLocaleString()}
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-xs text-gray-500">
                     {new Date(r.createdAt).toLocaleDateString("ko-KR")}
@@ -221,7 +262,7 @@ export default function AdminReturnsPage() {
                       {actionsFor(r).length === 0 ? (
                         <span className="text-xs text-gray-400">완료</span>
                       ) : (
-                        actionsFor(r).map((a) => (
+                        actionsFor(r).filter((a) => a !== "SET_FAULT").map((a) => (
                           <button
                             key={a}
                             onClick={() => advance(r, a)}

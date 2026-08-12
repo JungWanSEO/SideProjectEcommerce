@@ -47,6 +47,15 @@ const ACTION_LABEL: Record<ReturnAction, string> = {
   INSPECT: "검수 완료",
   REFUND: "환불 확정",
   COMPLETE: "교환 확정",
+  SET_FAULT: "귀책 재정",   // 셀러에겐 노출되지 않는다(ADMIN 전용)
+};
+
+/** 귀책 주체 라벨(#8 후속) — 검수에서 확정한다. 회수비를 누가 무는지가 여기서 갈린다. */
+const FAULT_LABEL: Record<string, string> = {
+  CUSTOMER: "고객 귀책",
+  SELLER: "셀러 귀책",
+  PLATFORM: "플랫폼 귀책",
+  NONE: "귀책 없음",
 };
 
 /** 사유 코드 → 한글(백엔드 CancelReason과 1:1). 자유텍스트 reason과 별개인 구조화 사유(#8). */
@@ -85,6 +94,8 @@ export default function SellerReturnsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
+  // 검수 시 고를 귀책(반품별). 비워 두면 구매자 신고 사유에서 파생된다(#8 후속).
+  const [faultChoice, setFaultChoice] = useState<Record<number, string | undefined>>({});
   const [page, setPage] = useState(0);
   const [hasNext, setHasNext] = useState(false);
   const [totalElements, setTotalElements] = useState(0);
@@ -112,12 +123,16 @@ export default function SellerReturnsPage() {
       return;
     }
     const memo = action === "REJECT" ? prompt("거부 사유(선택)") ?? undefined : undefined;
+    // 검수에서 귀책을 확정한다(#8 후속). 비워 두면 구매자가 신고한 사유에서 파생되므로,
+    // 이견이 있을 때만 고르면 된다. 이 판정이 회수비를 누가 무는지를 결정한다.
+    const faultParty = action === "INSPECT" ? faultChoice[r.id] : undefined;
     setBusyId(r.id);
     setError(null);
     try {
       const updated = await apiPatch<ReturnRequest>(`/api/seller/me/returns/${r.id}/status`, {
         action,
         memo,
+        faultParty,
       });
       setItems((prev) => prev.map((it) => (it.id === updated.id ? updated : it)));
     } catch (e) {
@@ -174,14 +189,39 @@ export default function SellerReturnsPage() {
                     </p>
                     <p className="mt-1 text-xs text-gray-400">
                       요청 {new Date(r.createdAt).toLocaleString("ko-KR")}
+                      {r.faultParty != null && <> · {FAULT_LABEL[r.faultParty] ?? r.faultParty}</>}
                       {r.refundAmount != null && (
                         <> · 환불 확정 {r.refundAmount.toLocaleString()}원</>
+                      )}
+                      {r.returnShippingCharged != null && r.returnShippingCharged > 0 && (
+                        <> · 회수비 {r.returnShippingCharged.toLocaleString()}원 차감</>
                       )}
                       {r.exchangeShipmentId != null && <> · 교환 재출고 #{r.exchangeShipmentId}</>}
                     </p>
                   </div>
 
-                  <div className="flex shrink-0 flex-wrap gap-2">
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    {/*
+                      검수 시 귀책 판정(#8 후속). 비워 두면 구매자 신고 사유에서 파생된다 —
+                      "열어보니 하자가 아니더라"를 표현할 자리가 이 셀렉트다. 이 판정이 회수비를
+                      누가 무는지를 결정하고, 모든 판정은 이력에 남는다(어드민이 뒤집을 수 있다).
+                    */}
+                    {actions.includes("INSPECT") && (
+                      <select
+                        value={faultChoice[r.id] ?? ""}
+                        onChange={(e) =>
+                          setFaultChoice((prev) => ({ ...prev, [r.id]: e.target.value || undefined }))
+                        }
+                        disabled={busyId === r.id}
+                        className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm disabled:opacity-50"
+                        aria-label="귀책 판정"
+                      >
+                        <option value="">신고대로 ({FAULT_LABEL[r.effectiveFault] ?? r.effectiveFault})</option>
+                        <option value="CUSTOMER">고객 귀책</option>
+                        <option value="SELLER">셀러 귀책</option>
+                        <option value="NONE">귀책 없음</option>
+                      </select>
+                    )}
                     {actions.length === 0 ? (
                       <span className="text-xs text-gray-400">처리 완료</span>
                     ) : (

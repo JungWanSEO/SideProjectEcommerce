@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { apiGet, apiPost } from "@/lib/api";
-import { Order, OrderItem, Product, ProductOption } from "@/lib/types";
+import { Order, OrderItem, Product, ProductOption, ShippingPolicy } from "@/lib/types";
 import { ORDER_STATUS_LABEL, ORDER_STATUS_BADGE } from "@/lib/orderStatus";
 import { useAuth } from "@/lib/auth";
 import { loginHref } from "@/lib/useRequireAuth";
@@ -58,6 +58,9 @@ export default function OrderDetailPage() {
   // 교환 대체 옵션 — 상품 상세 API를 재사용해 가져온다(전용 엔드포인트 없이. options에 available·soldOut 포함).
   const [exchangeOptions, setExchangeOptions] = useState<ProductOption[] | null>(null);
   const [optionsError, setOptionsError] = useState<string | null>(null);
+  // 회수비 사전 고지(#8 후속) — 정책값만 읽는다. 실제 부담 여부는 검수에서 확정되는 귀책에 달려 있으므로
+  // 여기 표시는 "확정 금액"이 아니라 "그럴 수 있다"는 예고다(모르고 차감당하는 게 가장 흔한 CS 발화점).
+  const [shippingPolicy, setShippingPolicy] = useState<ShippingPolicy | null>(null);
   const [exchangeOptionId, setExchangeOptionId] = useState<number | null>(null);
 
   useEffect(() => {
@@ -71,6 +74,12 @@ export default function OrderDetailPage() {
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
   }, [user, id]);
+
+  /** 회수비 고지용 정책값 — 반품 모달을 처음 열 때만 가져온다(주문 상세만 볼 사람에겐 요청하지 않는다). */
+  useEffect(() => {
+    if (!returnTarget || shippingPolicy) return;
+    apiGet<ShippingPolicy>("/api/orders/shipping-policy").then(setShippingPolicy).catch(() => {});
+  }, [returnTarget, shippingPolicy]);
 
   /**
    * 교환 탭을 처음 열 때만 대체 옵션을 조회한다(반품만 할 사람에게 불필요한 요청을 만들지 않도록 지연 로딩).
@@ -444,6 +453,19 @@ export default function OrderDetailPage() {
                 ? "접수 후 셀러가 확인하면 수거가 진행됩니다. 검수가 끝나면 선택한 사이즈로 재발송됩니다(추가 결제 없음)."
                 : "접수 후 셀러가 확인하면 수거가 진행됩니다. 검수가 끝나면 환불됩니다."}
             </p>
+
+            {/*
+              회수비 사전 고지(#8 후속) — 반품에만 해당(교환은 부과 대상 아님).
+              "확정 금액"이 아니라 "그럴 수 있다"는 예고인 이유: 실제 부담 여부는 수거·검수에서 확정되는
+              귀책에 달려 있다. 상품 하자로 판정되면 차감되지 않는다.
+            */}
+            {returnType === "RETURN" && shippingPolicy && shippingPolicy.returnFee > 0 && (
+              <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                단순 변심 등 <b>고객 사유</b>로 확인되면 회수비{" "}
+                <b>{shippingPolicy.returnFee.toLocaleString()}원</b>이 환불액에서 차감됩니다. 상품 불량·오배송으로
+                확인되면 차감되지 않습니다. (무료배송 주문도 회수비는 동일하게 발생합니다.)
+              </p>
+            )}
 
             {/* 교환 대체 옵션 — 현재 사이즈는 제외, 재고 부족은 비활성(서버도 신청 시점에 다시 검증한다). */}
             {returnType === "EXCHANGE" && (

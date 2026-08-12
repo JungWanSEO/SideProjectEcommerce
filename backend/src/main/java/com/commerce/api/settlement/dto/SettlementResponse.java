@@ -20,7 +20,9 @@ public record SettlementResponse(
         double platformFeeRate,  // 적용한 플랫폼 수수료율 스냅샷 (예: 0.10)
         long discountAmount,     // 이 항목에 안분된 쿠폰 할인액 (없으면 0)
         String discountFundedBy, // 할인 부담 주체 ("PLATFORM"/"SELLER", 없으면 null)
-        long netAmount,          // 셀러 실수령 (= grossAmount - fee - platformFee + 플랫폼부담 할인 환원)
+        long netAmount,          // 셀러 실수령 (= grossAmount - fee - platformFee + 플랫폼부담 할인 환원 - 귀책 과금)
+        com.commerce.api.settlement.entity.SettlementEntryKind entryKind,  // 항목 종류(#8 후속) — 매출/배송비/회수비/귀책과금
+        long chargeAmount,       // 셀러 귀책 과금(원, #8 후속). FAULT_CHARGE 외엔 0
         SettlementStatus status,
         LocalDate settledDate,
         LocalDateTime createdAt
@@ -41,6 +43,8 @@ public record SettlementResponse(
                 entry.getDiscountAmount(),
                 entry.getDiscountFundedBy(),
                 entry.getNetAmount(),
+                entry.getEntryKind(),
+                entry.getChargeAmount(),
                 entry.getStatus(),
                 entry.getSettledDate(),
                 entry.getCreatedAt()
