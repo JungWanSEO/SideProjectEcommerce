@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -110,7 +111,7 @@ class SettlementServiceTest {
     @DisplayName("정산 - 단일 셀러: 매출에서 PG수수료(2.5%)+플랫폼수수료(10%)를 떼고 실수령 계산")
     void run_singleSeller() {
         given(paymentService.getPaidPayments()).willReturn(List.of(paidPayment(1L, 11L, 10000L, "TOSS")));
-        given(settlementRepository.existsByPaymentId(anyLong())).willReturn(false);
+        given(settlementRepository.existsByPaymentIdAndEntryKindIn(anyLong(), any())).willReturn(false);
         given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
         given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);
         given(orderService.getOrderItems(11L)).willReturn(List.of(item(1L, 10000L)));
@@ -145,7 +146,7 @@ class SettlementServiceTest {
     @DisplayName("정산 - 멀티 셀러 주문: 매출 비례로 PG수수료 안분, 셀러별 요율로 플랫폼수수료")
     void run_multiSeller() {
         given(paymentService.getPaidPayments()).willReturn(List.of(paidPayment(1L, 11L, 10000L, "TOSS")));
-        given(settlementRepository.existsByPaymentId(anyLong())).willReturn(false);
+        given(settlementRepository.existsByPaymentIdAndEntryKindIn(anyLong(), any())).willReturn(false);
         given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
         given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);   // pgFee 총 250
         given(orderService.getOrderItems(11L)).willReturn(List.of(item(1L, 6000L), item(2L, 4000L)));
@@ -178,7 +179,7 @@ class SettlementServiceTest {
     @DisplayName("정산 - PG수수료 안분 반올림 잔차는 매출 최대 셀러에 몰아 합을 보존(Σfee=pgFeeTotal)")
     void run_pgFeeResidualToLargestSeller() {
         given(paymentService.getPaidPayments()).willReturn(List.of(paidPayment(1L, 11L, 10000L, "TOSS")));
-        given(settlementRepository.existsByPaymentId(anyLong())).willReturn(false);
+        given(settlementRepository.existsByPaymentIdAndEntryKindIn(anyLong(), any())).willReturn(false);
         given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
         given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);   // pgFee 총 250
         // 3333/3333/3334 → 비례 안분 시 83/83/83=249, 잔차 1을 매출 최대(3334)인 셀러3에 → 84
@@ -200,7 +201,7 @@ class SettlementServiceTest {
     @DisplayName("정산 - 미귀속(sellerId=null) 항목: 플랫폼수수료 0, 셀러 조회 안 함")
     void run_nullSellerNoPlatformFee() {
         given(paymentService.getPaidPayments()).willReturn(List.of(paidPayment(1L, 11L, 10000L, "TOSS")));
-        given(settlementRepository.existsByPaymentId(anyLong())).willReturn(false);
+        given(settlementRepository.existsByPaymentIdAndEntryKindIn(anyLong(), any())).willReturn(false);
         given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
         given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);
         given(orderService.getOrderItems(11L)).willReturn(List.of(item(null, 10000L)));
@@ -219,7 +220,7 @@ class SettlementServiceTest {
     @DisplayName("정산 - 이미 정산된 결제는 건너뜀(멱등)")
     void run_idempotentSkip() {
         given(paymentService.getPaidPayments()).willReturn(List.of(paidPayment(1L, 11L, 10000L, "TOSS")));
-        given(settlementRepository.existsByPaymentId(1L)).willReturn(true);
+        given(settlementRepository.existsByPaymentIdAndEntryKindIn(eq(1L), any())).willReturn(true);
 
         SettlementRunResponse summary = settlementService.run();
 
@@ -231,7 +232,7 @@ class SettlementServiceTest {
     @DisplayName("정산 - 취소(부분환불)된 항목은 제외하고 활성 항목만 정산")
     void run_excludesCancelledItems() {
         given(paymentService.getPaidPayments()).willReturn(List.of(paidPayment(1L, 11L, 30000L, "TOSS")));
-        given(settlementRepository.existsByPaymentId(anyLong())).willReturn(false);
+        given(settlementRepository.existsByPaymentIdAndEntryKindIn(anyLong(), any())).willReturn(false);
         given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
         given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);
         // 같은 셀러 두 항목: 하나는 취소(부분환불)
@@ -250,7 +251,7 @@ class SettlementServiceTest {
     @DisplayName("정산 - 플랫폼 와이드·플랫폼 부담 쿠폰: 할인을 매출 비례로 안분, gross=할인 후 몫, net에 할인 환원(셀러 무손실)")
     void run_platformWidePlatformFundedDiscount() {
         given(paymentService.getPaidPayments()).willReturn(List.of(paidPayment(1L, 11L, 9000L, "TOSS")));
-        given(settlementRepository.existsByPaymentId(anyLong())).willReturn(false);
+        given(settlementRepository.existsByPaymentIdAndEntryKindIn(anyLong(), any())).willReturn(false);
         given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
         given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);
         // 주문이 할인을 항목별로 안분(매출 비례): 600(s1)·400(s2). 정산은 활성 항목의 share를 합산. 플랫폼 부담.
@@ -285,7 +286,7 @@ class SettlementServiceTest {
     @DisplayName("정산 - 셀러 한정·셀러 부담 쿠폰: 할인은 그 셀러에 전액, 그 셀러 net이 줄어 셀러가 부담(다른 셀러 불변)")
     void run_sellerScopedSellerFundedDiscount() {
         given(paymentService.getPaidPayments()).willReturn(List.of(paidPayment(1L, 11L, 9000L, "TOSS")));
-        given(settlementRepository.existsByPaymentId(anyLong())).willReturn(false);
+        given(settlementRepository.existsByPaymentIdAndEntryKindIn(anyLong(), any())).willReturn(false);
         given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
         given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);
         // 셀러1 한정: 셀러1 항목에 전액 안분(1000), 셀러2는 0. 셀러 부담.
@@ -380,7 +381,7 @@ class SettlementServiceTest {
     @DisplayName("정산(배송비) - sellerId=null·shipping=true 엔트리로 Σgross=결제액 복원, net=배송비−PG수수료(플랫폼 부담)")
     void run_createsShippingEntry() {
         given(paymentService.getPaidPayments()).willReturn(List.of(paidPayment(1L, 11L, 23000L, "TOSS")));  // 20000 + 배송비 3000
-        given(settlementRepository.existsByPaymentId(anyLong())).willReturn(false);
+        given(settlementRepository.existsByPaymentIdAndEntryKindIn(anyLong(), any())).willReturn(false);
         given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
         given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);
         given(orderService.getOrderItems(11L)).willReturn(List.of(item(1L, 20000L)));
@@ -424,7 +425,7 @@ class SettlementServiceTest {
     @DisplayName("정산(배송비) - 전량반품(RETURNED)이면 활성 0이어도 배송비 엔트리 유지(플랫폼 배송매출 기록·HIGH 교정)")
     void run_fullyReturned_keepsShippingEntry() {
         given(paymentService.getPaidPayments()).willReturn(List.of(paidPayment(1L, 11L, 23000L, "TOSS")));
-        given(settlementRepository.existsByPaymentId(anyLong())).willReturn(false);
+        given(settlementRepository.existsByPaymentIdAndEntryKindIn(anyLong(), any())).willReturn(false);
         given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
         given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);
         given(orderService.getOrderItems(11L)).willReturn(List.of(item(1L, 20000L, OrderItemStatus.RETURNED)));

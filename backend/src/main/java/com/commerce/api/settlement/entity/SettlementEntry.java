@@ -87,6 +87,22 @@ public class SettlementEntry extends BaseEntity {
     @Column(nullable = false)
     private boolean shipping;
 
+    /**
+     * 항목 종류(#8 후속) — {@code shipping} boolean을 대체하는 축. 이행 기간 동안 두 컬럼을 함께 쓰되
+     * <b>판단은 항상 이 값</b>이 하고, shipping은 kind에서 파생해 채운다(이중 출처가 갈리지 않게).
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "entry_kind", nullable = false, length = 20)
+    private SettlementEntryKind entryKind;
+
+    /**
+     * 셀러 귀책 과금(원, #8 후속 P4) — net에서 차감된다. FAULT_CHARGE 외 종류는 0.
+     * gross가 아니라 별도 컬럼인 이유: 셀러↔플랫폼 내부 조정액이라 PG 원장에 대응 금액이 없다.
+     * gross에 실으면 대사(Σgross = PG 승인액)가 즉시 AMOUNT_MISMATCH로 튄다.
+     */
+    @Column(name = "charge_amount", nullable = false)
+    private long chargeAmount;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private SettlementStatus status;
@@ -103,7 +119,8 @@ public class SettlementEntry extends BaseEntity {
     private SettlementEntry(Long paymentId, Long orderId, String pgTransactionId, String provider,
                             Long sellerId, long grossAmount, long fee, double feeRate,
                             long platformFee, double platformFeeRate,
-                            long discountAmount, String discountFundedBy, boolean shipping, LocalDate settledDate) {
+                            long discountAmount, String discountFundedBy,
+                            SettlementEntryKind entryKind, long chargeAmount, LocalDate settledDate) {
         this.paymentId = paymentId;
         this.orderId = orderId;
         this.pgTransactionId = pgTransactionId;
@@ -116,12 +133,15 @@ public class SettlementEntry extends BaseEntity {
         this.platformFeeRate = platformFeeRate;
         this.discountAmount = discountAmount;
         this.discountFundedBy = discountFundedBy;
-        this.shipping = shipping;
+        this.entryKind = entryKind;
+        this.chargeAmount = chargeAmount;
+        this.shipping = entryKind == SettlementEntryKind.SHIPPING;   // kind에서 파생(이행 기간 이중 출처가 갈리지 않게)
         // 셀러 실수령은 파생값(엔티티가 스스로 계산). gross(할인 후 몫)에서 PG·플랫폼 수수료를 떼되,
         // 플랫폼 부담 할인이면 그만큼 셀러에게 환원(subsidy) — 셀러는 할인 없이 받은 것과 같아지고 플랫폼이 부담.
         // 셀러 부담 할인이면 환원 없음(gross가 이미 줄어 셀러가 부담). 배송비 엔트리는 할인 없음(net = 배송비 − PG수수료).
+        // 귀책 과금(FAULT_CHARGE)은 gross 없이 chargeAmount만 있어 net = −과금액이 된다.
         long subsidy = FUNDED_BY_PLATFORM.equals(discountFundedBy) ? discountAmount : 0L;
-        this.netAmount = grossAmount - fee - platformFee + subsidy;
+        this.netAmount = grossAmount - fee - platformFee + subsidy - chargeAmount;
         this.settledDate = settledDate;
         this.status = SettlementStatus.SCHEDULED;    // 생성 시점 = 입금 전(예정)
     }
@@ -141,7 +161,7 @@ public class SettlementEntry extends BaseEntity {
                                             long discountAmount, String discountFundedBy, LocalDate settledDate) {
         return new SettlementEntry(paymentId, orderId, pgTransactionId, provider, sellerId,
                 grossAmount, fee, feeRate, platformFee, platformFeeRate,
-                discountAmount, discountFundedBy, false, settledDate);
+                discountAmount, discountFundedBy, SettlementEntryKind.SALE, 0L, settledDate);
     }
 
     /**
@@ -153,7 +173,32 @@ public class SettlementEntry extends BaseEntity {
                                                     String provider, long grossAmount, long fee, double feeRate,
                                                     LocalDate settledDate) {
         return new SettlementEntry(paymentId, orderId, pgTransactionId, provider, null,
-                grossAmount, fee, feeRate, 0L, 0.0, 0L, null, true, settledDate);
+                grossAmount, fee, feeRate, 0L, 0.0, 0L, null, SettlementEntryKind.SHIPPING, 0L, settledDate);
+    }
+
+    /**
+     * 플랫폼 <b>반품 회수비</b> 수익 엔트리(#8 후속 P3) — sellerId=null·platformFee=0·kind=RETURN_SHIPPING.
+     *
+     * <p>고객 귀책 반품에서 환불을 줄여 플랫폼이 실제로 보유한 금액이다. 배송비 엔트리와 같은 이유로 gross에
+     * 실어 원장 총액을 복원한다(PG 잔여에 실재하는 돈이므로). 역분개 시 음수가 올 수 있다.
+     */
+    public static SettlementEntry returnShippingScheduled(Long paymentId, Long orderId, String pgTransactionId,
+                                                          String provider, long grossAmount, long fee, double feeRate,
+                                                          LocalDate settledDate) {
+        return new SettlementEntry(paymentId, orderId, pgTransactionId, provider, null,
+                grossAmount, fee, feeRate, 0L, 0.0, 0L, null, SettlementEntryKind.RETURN_SHIPPING, 0L, settledDate);
+    }
+
+    /**
+     * <b>셀러 귀책 과금</b> 엔트리(#8 후속 P4) — sellerId=셀러·gross=0·chargeAmount=금액 → net = −금액.
+     *
+     * <p>gross를 0으로 두는 것이 핵심이다: 이건 셀러↔플랫폼 내부 정산 조정액이라 PG 원장에 대응 금액이 없다.
+     * gross에 실으면 대사가 즉시 AMOUNT_MISMATCH로 튄다. 역분개 시 chargeAmount에 음수가 올 수 있다.
+     */
+    public static SettlementEntry faultCharge(Long paymentId, Long orderId, String pgTransactionId, String provider,
+                                              Long sellerId, long chargeAmount, LocalDate settledDate) {
+        return new SettlementEntry(paymentId, orderId, pgTransactionId, provider, sellerId,
+                0L, 0L, 0.0, 0L, 0.0, 0L, null, SettlementEntryKind.FAULT_CHARGE, chargeAmount, settledDate);
     }
 
     /** 지급 묶음(Payout)에 편입. */

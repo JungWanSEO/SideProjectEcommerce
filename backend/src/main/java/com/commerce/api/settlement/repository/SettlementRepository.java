@@ -19,6 +19,16 @@ public interface SettlementRepository extends JpaRepository<SettlementEntry, Lon
      */
     boolean existsByPaymentId(Long paymentId);
 
+    /**
+     * 정방향 정산의 멱등 게이트(#8 후속) — <b>매출 원장(SALE/SHIPPING) 엔트리</b>가 이미 있는지.
+     *
+     * <p>왜 {@code existsByPaymentId}로는 안 되는가: 회수비·귀책 과금 엔트리는 반품 확정 시점에 생기므로
+     * <b>정방향 정산보다 먼저</b> 존재할 수 있다. 결제 단위로만 보면 그런 결제는 "이미 정산됨"으로 오판돼
+     * <b>영원히 정방향 미정산 → 셀러 매출 전액 소실</b>이 된다. 종류를 좁혀 봐야 한다.
+     */
+    boolean existsByPaymentIdAndEntryKindIn(Long paymentId,
+                                            java.util.Collection<com.commerce.api.settlement.entity.SettlementEntryKind> kinds);
+
     /** 지급 묶음 생성 대상 — 셀러의 SCHEDULED·미지급(payoutId null) 항목 중 정산일이 기간 안인 것. */
     List<SettlementEntry> findBySellerIdAndStatusAndPayoutIdIsNullAndSettledDateBetween(
             Long sellerId, SettlementStatus status, LocalDate from, LocalDate to);

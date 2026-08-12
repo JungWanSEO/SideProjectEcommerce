@@ -55,6 +55,14 @@ public class SettlementService {
     private final SellerRepository sellerRepository;           // 셀러 플랫폼 수수료율(commissionRate) 조회
 
     /**
+     * 정방향 정산이 만드는 <b>매출 원장</b> 종류(#8 후속). 멱등 게이트가 이 둘만 본다 —
+     * 회수비·귀책 과금은 반품 확정 시점에 생겨 정방향보다 먼저 존재할 수 있기 때문이다.
+     */
+    private static final java.util.List<com.commerce.api.settlement.entity.SettlementEntryKind> SALE_LEDGER_KINDS =
+            java.util.List.of(com.commerce.api.settlement.entity.SettlementEntryKind.SALE,
+                    com.commerce.api.settlement.entity.SettlementEntryKind.SHIPPING);
+
+    /**
      * 정산 배치 — PAID 결제 중 아직 정산되지 않은 건을 셀러별로 분해해 SettlementEntry(SCHEDULED)를 만든다.
      *
      * <p>한 결제 → 주문 항목을 셀러별로 묶어 매출(gross)을 합산하고, 셀러마다 항목 1개를 만든다:
@@ -79,7 +87,10 @@ public class SettlementService {
         Map<Long, Double> platformRateCache = new HashMap<>();   // 같은 셀러 반복 조회 방지
 
         for (PaymentResponse payment : paymentService.getPaidPayments()) {
-            if (settlementRepository.existsByPaymentId(payment.id())) {
+            // 멱등 게이트는 <b>매출 원장(SALE/SHIPPING)</b>만 본다(#8 후속). 회수비·귀책 과금 엔트리는 반품
+            // 확정 시점에 생겨 정방향 정산보다 먼저 존재할 수 있는데, 결제 단위로만 보면 그런 결제가
+            // "이미 정산됨"으로 오판돼 영원히 미정산(=셀러 매출 전액 소실)이 된다.
+            if (settlementRepository.existsByPaymentIdAndEntryKindIn(payment.id(), SALE_LEDGER_KINDS)) {
                 continue;   // 이미 정산된 결제 → 건너뜀(멱등)
             }
             String provider = payment.provider();
@@ -156,6 +167,24 @@ public class SettlementService {
                 byProvider.computeIfAbsent(provider, p -> new ProviderAccumulator(p, feeRate)).add(shipEntry);
                 bySeller.computeIfAbsent(null, SellerAccumulator::new).add(shipEntry);
             }
+
+            // 7) 반품 회수비(플랫폼 수익) 엔트리(#8 후속): 고객 귀책 반품에서 환불을 줄여 플랫폼이 보유한 금액.
+            //    PG 잔여에 실재하는 돈이라 배송비와 같은 이유로 gross에 실어 원장 총액을 복원한다.
+            //    (정방향 run 시점엔 보통 0이고, 반품이 먼저 일어난 결제에서만 값이 있다.)
+            long returnCharge = discount.returnShippingCharge();
+            if (returnCharge > 0) {
+                long returnPgFee = SettlementPolicy.calculateFee(feeRate, returnCharge);
+                SettlementEntry returnEntry = SettlementEntry.returnShippingScheduled(
+                        payment.id(), payment.orderId(), payment.pgTransactionId(), provider,
+                        returnCharge, returnPgFee, feeRate, settledDate);
+                settlementRepository.save(returnEntry);
+                created++;
+                totalGross += returnEntry.getGrossAmount();
+                totalFee += returnEntry.getFee();
+                totalNet += returnEntry.getNetAmount();
+                byProvider.computeIfAbsent(provider, p -> new ProviderAccumulator(p, feeRate)).add(returnEntry);
+                bySeller.computeIfAbsent(null, SellerAccumulator::new).add(returnEntry);
+            }
         }
 
         List<ProviderBreakdown> providerBreakdown = new ArrayList<>();
@@ -188,7 +217,10 @@ public class SettlementService {
         //   역분개가 누락되지 않는다(#3 P5 클로백 누수 fix). 정방향 run()은 계속 PAID만.
         for (PaymentResponse payment : paymentService.getSettlementReversalCandidates()) {
             List<SettlementEntry> existing = settlementRepository.findByPaymentId(payment.id());
-            if (existing.isEmpty()) {
+            // 진입 게이트도 <b>매출 원장</b> 기준이어야 한다(#8 후속). 회수비/귀책 과금 엔트리만 있고 정방향
+            // 정산이 아직 없는 결제에서 이 게이트가 통과되면, 셀러 target − 0 의 <b>양수</b> diff가 생겨
+            // 역분개 경로가 정방향 정산을 만들어 버린다(= 이중 지급). run()의 몫으로 넘긴다.
+            if (existing.stream().noneMatch(e -> e.getEntryKind().isSaleLedger())) {
                 continue;   // 아직 정산 안 된 결제는 run()의 몫
             }
             String provider = payment.provider();
@@ -222,7 +254,12 @@ public class SettlementService {
             Map<Long, long[]> settledBySeller = new LinkedHashMap<>();
             Map<Long, Double> platformRateBySeller = new HashMap<>();
             for (SettlementEntry e : existing) {
-                if (e.isShipping()) {
+                // 셀러 매출(SALE) 외 종류는 전부 셀러 루프에서 배제한다(#8 후속). 배제하지 않으면
+                //   (a) sellerId=null 버킷에 섞여 매 실행 역분개되거나(플랫폼 엔트리)
+                //   (b) platformRateBySeller.putIfAbsent가 그 엔트리의 요율 0.0을 먼저 집어
+                //       그 셀러의 dPlatformFee가 0으로 계산되는 리스트 순서 의존 버그가 생긴다(귀책 과금).
+                // 각 종류는 아래에서 자기 target과만 비교된다.
+                if (e.getEntryKind() != com.commerce.api.settlement.entity.SettlementEntryKind.SALE) {
                     continue;
                 }
                 long[] agg = settledBySeller.computeIfAbsent(e.getSellerId(), k -> new long[4]);
@@ -263,7 +300,7 @@ public class SettlementService {
             //   상계 후 Σ배송비 엔트리=0=target이라 재실행에도 멱등.
             long settledShipGross = 0, settledShipFee = 0;
             for (SettlementEntry e : existing) {
-                if (e.isShipping()) {
+                if (e.getEntryKind() == com.commerce.api.settlement.entity.SettlementEntryKind.SHIPPING) {
                     settledShipGross += e.getGrossAmount();
                     settledShipFee += e.getFee();
                 }
@@ -279,6 +316,29 @@ public class SettlementService {
                 settlementRepository.save(shipRev);
                 reversed++;
                 totalReversedNet += shipRev.getNetAmount();
+            }
+
+            // 반품 회수비 상계(#8 후속): 자기 target = 주문의 회수비 누계. 누계는 단조 증가라 반품이 새로 생길
+            //   때마다 그 차액만 추가되고, 변화가 없으면 diff 0이라 재실행에도 멱등이다.
+            //   (이 버킷이 없으면 회수비 엔트리가 어느 target에도 안 걸려 매 실행 통째로 역분개돼 사라진다.)
+            long settledReturnGross = 0, settledReturnFee = 0;
+            for (SettlementEntry e : existing) {
+                if (e.getEntryKind() == com.commerce.api.settlement.entity.SettlementEntryKind.RETURN_SHIPPING) {
+                    settledReturnGross += e.getGrossAmount();
+                    settledReturnFee += e.getFee();
+                }
+            }
+            long targetReturnGross = discount.returnShippingCharge();
+            long targetReturnFee = SettlementPolicy.calculateFee(feeRate, targetReturnGross);
+            long dReturnGross = targetReturnGross - settledReturnGross;
+            long dReturnFee = targetReturnFee - settledReturnFee;
+            if (dReturnGross != 0 || dReturnFee != 0) {
+                SettlementEntry returnRev = SettlementEntry.returnShippingScheduled(
+                        payment.id(), payment.orderId(), payment.pgTransactionId(), provider,
+                        dReturnGross, dReturnFee, feeRate, settledDate);
+                settlementRepository.save(returnRev);
+                reversed++;
+                totalReversedNet += returnRev.getNetAmount();
             }
         }
         return new SettlementReverseResponse(reversed, totalReversedNet);
