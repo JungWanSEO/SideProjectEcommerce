@@ -309,7 +309,9 @@ export interface Settlement {
   platformFeeRate: number; // 적용 플랫폼 수수료율 스냅샷 (예: 0.10)
   discountAmount: number; // 이 항목에 안분된 쿠폰 할인액 (없으면 0) — 쿠폰 Step 2
   discountFundedBy: string | null; // 할인 부담 주체 ("PLATFORM"/"SELLER", 없으면 null)
-  netAmount: number; // 셀러 실수령 (= gross - fee - platformFee + 플랫폼부담 할인 환원)
+  netAmount: number; // 셀러 실수령 (= gross - fee - platformFee + 플랫폼부담 할인 환원 - 귀책 과금)
+  entryKind: "SALE" | "SHIPPING" | "RETURN_SHIPPING" | "FAULT_CHARGE"; // 항목 종류(#8 후속)
+  chargeAmount: number; // 셀러 귀책 과금(원). FAULT_CHARGE 외엔 0
   status: SettlementStatus;
   settledDate: string; // 입금 예정/완료일 (LocalDate "YYYY-MM-DD")
   createdAt: string;
@@ -533,6 +535,7 @@ export interface CouponPreview {
 export interface ShippingPolicy {
   flatFee: number; // 정액 배송비(원)
   freeThreshold: number; // 무료배송 임계액(원, 할인 후 상품금액 기준)
+  returnFee: number; // 반품 회수비(원, #8 후속) — 고객 귀책 반품에서 환불액에서 차감될 수 있는 금액
 }
 
 // ─── 어드민 대시보드 (DashboardResponse) ───────────────────────────────
@@ -639,7 +642,17 @@ export type ReturnStatus =
   | "REJECTED";
 
 /** 셀러/어드민이 취할 수 있는 전이 액션 — 서버가 상태머신으로 검증한다(잘못된 순서면 409). */
-export type ReturnAction = "APPROVE" | "REJECT" | "PICK_UP" | "INSPECT" | "REFUND" | "COMPLETE";
+export type ReturnAction =
+  | "APPROVE"
+  | "REJECT"
+  | "PICK_UP"
+  | "INSPECT"
+  | "REFUND"
+  | "COMPLETE"
+  | "SET_FAULT"; // 상태 전이 없음 — ADMIN 귀책 재정 전용(#8 후속)
+
+/** 귀책 주체(CancelReason.Fault) — 회수비를 누가 무는지 결정한다. */
+export type Fault = "CUSTOMER" | "SELLER" | "PLATFORM" | "NONE";
 
 /** 반품 상태 전이 이력 1건 (ReturnResponse.StatusHistoryResponse) */
 export interface ReturnStatusHistory {
@@ -660,9 +673,13 @@ export interface ReturnRequest {
   type: ReturnType;
   status: ReturnStatus;
   reason: string | null;
-  reasonCode: string | null; // 구조화된 사유(#8) — 없으면 null
+  reasonCode: string | null; // 구조화된 사유(#8) — 구매자 신고값(참고). 없으면 null
+  faultParty: Fault | null; // 확정 귀책(검수에서 확정) — 그 전엔 null
+  effectiveFault: Fault; // 돈 계산이 읽는 실효 귀책 — 미확정이면 신고 사유에서 파생
   quantity: number;
-  refundAmount: number | null; // 검수 확정 후 확정(RETURN), 그 전엔 null
+  refundAmount: number | null; // 실지급액(= 실효가 − 회수비 차감분). 검수 확정 후, 그 전엔 null
+  returnShippingFee: number | null; // 신청 시점 회수비 요율 스냅샷(예상 차감액 고지용)
+  returnShippingCharged: number | null; // 실제 차감된 회수비. 검수 확정 후, 그 전엔 null
   restock: boolean;
   exchangeOptionId: number | null;
   exchangeShipmentId: number | null;

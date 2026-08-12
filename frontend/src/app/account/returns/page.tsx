@@ -123,8 +123,17 @@ export default function MyReturnsPage() {
                   </Link>
                 </div>
                 {r.refundAmount != null && (
-                  <span className="text-sm font-medium text-ink">
+                  <span className="text-right text-sm font-medium text-ink">
                     환불 {r.refundAmount.toLocaleString()}원
+                    {/*
+                      회수비가 차감됐다면 "왜 덜 받았는지"를 반드시 보여준다(#8 후속).
+                      금액만 줄어 있고 이유가 없으면 그대로 CS 문의가 된다.
+                    */}
+                    {r.returnShippingCharged != null && r.returnShippingCharged > 0 && (
+                      <span className="mt-0.5 block text-xs font-normal text-muted">
+                        회수비 {r.returnShippingCharged.toLocaleString()}원 차감 후 금액입니다
+                      </span>
+                    )}
                   </span>
                 )}
               </div>

@@ -84,7 +84,8 @@ public class OrderService {
 
     /** 배송비 정책(#4) — FE 장바구니·체크아웃의 배송비·무료배송 진행바 표시용(정액·무료임계). */
     public ShippingPolicyResponse getShippingPolicy() {
-        return new ShippingPolicyResponse(shippingPolicy.getFlatFee(), shippingPolicy.getFreeThreshold());
+        return new ShippingPolicyResponse(shippingPolicy.getFlatFee(), shippingPolicy.getFreeThreshold(),
+                shippingPolicy.getReturnFee());
     }
 
     /**

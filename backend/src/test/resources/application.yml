@@ -48,6 +48,9 @@ app:
     #   배송비 동작은 ShippingFeeTest에서 @SpringBootTest(properties=...)로 값을 켜서만 검증한다.
     shipping-fee: 0
     free-shipping-threshold: 0
+    # 반품 회수비도 기본 OFF(0원) — 기존 반품/환불/정산 테스트의 기대값이 회수비로 흔들리지 않게.
+    #   회수비 동작은 ReturnShippingChargeTest에서 @SpringBootTest(properties=...)로 켜서만 검증한다.
+    return-shipping-fee: 0
     expiry:
       enabled: false
   # 게스트 카트 정리 배치 OFF — 만료 배치와 같은 이유(테스트가 만든 게스트 카트를 배치가 지워 flaky).

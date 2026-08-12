@@ -20,6 +20,22 @@ public class ReturnQueryService {
 
     private final ReturnRequestRepository returnRequestRepository;
 
+    /**
+     * 주문의 <b>셀러 귀책 회수비</b>를 셀러별로 합산해 돌려준다(#8 후속 P4) — 정산이 읽는 경계 메서드.
+     *
+     * <p>settlement → returns 의존을 <b>서비스 + 원시 Map</b>으로만 노출한다(엔티티·리포지토리를 직접 넘기지
+     * 않음). settlement이 이미 payment·order를 같은 방식으로 읽고 있어 방향과 형태가 일관된다.
+     *
+     * @return 셀러ID → 그 셀러가 부담할 회수비 합. 없으면 빈 맵.
+     */
+    public java.util.Map<Long, Long> getSellerFaultCharges(Long orderId) {
+        java.util.Map<Long, Long> result = new java.util.LinkedHashMap<>();
+        for (Object[] row : returnRequestRepository.sumSellerFaultChargesByOrderId(orderId)) {
+            result.put((Long) row[0], ((Number) row[1]).longValue());
+        }
+        return result;
+    }
+
     /** 구매자 본인의 반품/교환 목록. */
     public PageResponse<ReturnResponse> getMyReturns(Long memberId, Pageable pageable) {
         return PageResponse.from(returnRequestRepository.findByMemberId(memberId, pageable).map(ReturnResponse::from));

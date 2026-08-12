@@ -52,6 +52,7 @@ class SettlementControllerTest {
     private SettlementResponse entry(Long id, SettlementStatus status) {
         return new SettlementResponse(id, 10L, 20L, "tx-1", "TOSS", 5L,
                 10_000L, 250L, 0.025, 1_000L, 0.10, 0L, null, 8_750L,
+                com.commerce.api.settlement.entity.SettlementEntryKind.SALE, 0L,
                 status, LocalDate.now(), LocalDateTime.now());
     }
 

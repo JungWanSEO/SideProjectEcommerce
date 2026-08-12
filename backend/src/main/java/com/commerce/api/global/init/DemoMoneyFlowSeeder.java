@@ -197,7 +197,7 @@ class DemoMoneyFlowSeeder {
             for (ReturnAction action : List.of(ReturnAction.APPROVE, ReturnAction.PICK_UP,
                     ReturnAction.INSPECT, ReturnAction.REFUND)) {
                 returnService.advanceForSeller(request.id(), item.sellerId(),
-                        new ReturnStatusUpdateRequest(action, null), null);
+                        new ReturnStatusUpdateRequest(action, null, null), null);   // 귀책 미지정 → 신고 사유(변심)에서 파생
             }
         } catch (RuntimeException e) {
             log.warn("[demo-seed] 데모 반품 시나리오 스킵 — {}", e.getMessage());

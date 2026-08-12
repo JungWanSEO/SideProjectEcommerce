@@ -12,5 +12,6 @@ public enum ReturnAction {
     PICK_UP,    // APPROVED → PICKED_UP
     INSPECT,    // PICKED_UP → INSPECTED
     REFUND,     // INSPECTED → REFUNDED (RETURN, P4)
-    COMPLETE    // INSPECTED → COMPLETED (EXCHANGE 재출고, P6)
+    COMPLETE,   // INSPECTED → COMPLETED (EXCHANGE 재출고, P6)
+    SET_FAULT   // 상태 전이 없음 — ADMIN 귀책 재정 전용(#8 후속). 종료 전에만.
 }
