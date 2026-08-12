@@ -80,16 +80,12 @@ public class SettlementEntry extends BaseEntity {
     private long netAmount;          // 셀러 실수령(원). "매출 ≠ 실수령"
 
     /**
-     * 배송비(플랫폼 수익) 엔트리 표시(#4). true면 sellerId=null·gross=배송비·platformFee=0인 <b>플랫폼 배송비</b> 항목이다.
-     * 대사는 Σgross에 이걸 포함해 PG 금액과 맞추고(MATCHED), reverseRefunds는 이걸 셀러 집계에서 분리해
-     * 전체취소 때만 역분개한다(부분취소·반품은 배송비 유지). 셀러 net에는 절대 섞이지 않는다.
-     */
-    @Column(nullable = false)
-    private boolean shipping;
-
-    /**
-     * 항목 종류(#8 후속) — {@code shipping} boolean을 대체하는 축. 이행 기간 동안 두 컬럼을 함께 쓰되
-     * <b>판단은 항상 이 값</b>이 하고, shipping은 kind에서 파생해 채운다(이중 출처가 갈리지 않게).
+     * 항목 종류(#8 후속) — 엔트리 종류의 <b>단일 축</b>. 예전엔 {@code shipping} boolean 하나였고
+     * V57~V59의 expand/contract로 이 enum이 대체했다.
+     *
+     * <p>이 축은 {@code reverseRefunds}의 버킷 분기에 직접 쓰인다 — 역분개는 "지금의 target − 이미 정산된 합"만
+     * 남기므로, <b>어느 버킷에도 속하지 않은 엔트리는 매 실행마다 통째로 역분개돼 조용히 사라진다</b>.
+     * 새 종류를 추가할 땐 (a) 셀러 루프 배제 (b) 자기 target 계산 (c) 재실행 diff 0 을 모두 갖춰야 한다.
      */
     @Enumerated(EnumType.STRING)
     @Column(name = "entry_kind", nullable = false, length = 20)
@@ -135,7 +131,6 @@ public class SettlementEntry extends BaseEntity {
         this.discountFundedBy = discountFundedBy;
         this.entryKind = entryKind;
         this.chargeAmount = chargeAmount;
-        this.shipping = entryKind == SettlementEntryKind.SHIPPING;   // kind에서 파생(이행 기간 이중 출처가 갈리지 않게)
         // 셀러 실수령은 파생값(엔티티가 스스로 계산). gross(할인 후 몫)에서 PG·플랫폼 수수료를 떼되,
         // 플랫폼 부담 할인이면 그만큼 셀러에게 환원(subsidy) — 셀러는 할인 없이 받은 것과 같아지고 플랫폼이 부담.
         // 셀러 부담 할인이면 환원 없음(gross가 이미 줄어 셀러가 부담). 배송비 엔트리는 할인 없음(net = 배송비 − PG수수료).
@@ -165,7 +160,7 @@ public class SettlementEntry extends BaseEntity {
     }
 
     /**
-     * 배송비(플랫폼 수익) 정산 항목 생성(#4) — sellerId=null·platformFee=0·할인 0·shipping=true.
+     * 배송비(플랫폼 수익) 정산 항목 생성(#4) — sellerId=null·platformFee=0·할인 0·kind=SHIPPING.
      * gross=배송비, fee=배송비에 붙는 PG수수료(플랫폼 부담) → net = 배송비 − PG수수료. 대사 Σgross 복원용이자
      * 플랫폼 배송 매출 원장. 역분개 시 grossAmount·fee에 음수가 올 수 있다(전체취소 상계).
      */

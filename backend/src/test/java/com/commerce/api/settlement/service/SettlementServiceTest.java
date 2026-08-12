@@ -25,6 +25,7 @@ import com.commerce.api.settlement.dto.SettlementResponse;
 import com.commerce.api.settlement.dto.SettlementReverseResponse;
 import com.commerce.api.settlement.dto.SettlementRunResponse;
 import com.commerce.api.settlement.entity.SettlementEntry;
+import com.commerce.api.settlement.entity.SettlementEntryKind;
 import com.commerce.api.settlement.entity.SettlementStatus;
 import com.commerce.api.settlement.repository.SettlementRepository;
 import java.time.LocalDate;
@@ -395,7 +396,7 @@ class SettlementServiceTest {
         assertThat(summary.createdCount()).isEqualTo(2);              // 셀러1 + 배송비
         assertThat(summary.totalGrossAmount()).isEqualTo(23000L);     // Σgross = 결제액 → 대사 MATCHED
         SettlementEntry ship = captureSaved(2).stream()
-                .filter(SettlementEntry::isShipping).findFirst().orElseThrow();
+                .filter(e -> e.getEntryKind() == SettlementEntryKind.SHIPPING).findFirst().orElseThrow();
         assertThat(ship.getSellerId()).isNull();
         assertThat(ship.getGrossAmount()).isEqualTo(3000L);
         assertThat(ship.getFee()).isEqualTo(75L);                    // 3000 × 2.5%(플랫폼 부담)
@@ -417,7 +418,7 @@ class SettlementServiceTest {
         settlementService.reverseRefunds();
 
         SettlementEntry shipRev = captureSaved(2).stream()   // 셀러1 상계 + 배송비 상계
-                .filter(SettlementEntry::isShipping).findFirst().orElseThrow();
+                .filter(e -> e.getEntryKind() == SettlementEntryKind.SHIPPING).findFirst().orElseThrow();
         assertThat(shipRev.getGrossAmount()).isEqualTo(-3000L);
         assertThat(shipRev.getFee()).isEqualTo(-75L);
         assertThat(shipRev.getNetAmount()).isEqualTo(-2925L);
@@ -437,7 +438,7 @@ class SettlementServiceTest {
 
         assertThat(summary.createdCount()).isEqualTo(1);   // 셀러 엔트리 없음(활성 0), 배송비 엔트리만
         SettlementEntry ship = captureSaved(1).get(0);
-        assertThat(ship.isShipping()).isTrue();
+        assertThat(ship.getEntryKind()).isEqualTo(SettlementEntryKind.SHIPPING);
         assertThat(ship.getGrossAmount()).isEqualTo(3000L);   // 플랫폼 배송매출 유지(소실 방지)
         assertThat(ship.getNetAmount()).isEqualTo(2925L);
     }
@@ -457,7 +458,7 @@ class SettlementServiceTest {
 
         // 반품된 셀러 항목은 -20000 상계되지만 배송비 엔트리는 유지(역분개 없음)
         List<SettlementEntry> saved = captureSaved(1);
-        assertThat(saved).noneMatch(SettlementEntry::isShipping);
+        assertThat(saved).noneMatch(e -> e.getEntryKind() == SettlementEntryKind.SHIPPING);
         assertThat(saved.get(0).getSellerId()).isEqualTo(1L);
         assertThat(saved.get(0).getGrossAmount()).isEqualTo(-20000L);
     }
@@ -477,7 +478,7 @@ class SettlementServiceTest {
         settlementService.reverseRefunds();
 
         List<SettlementEntry> saved = captureSaved(1);   // 셀러2만 상계, 배송비는 그대로
-        assertThat(saved).noneMatch(SettlementEntry::isShipping);
+        assertThat(saved).noneMatch(e -> e.getEntryKind() == SettlementEntryKind.SHIPPING);
         assertThat(saved.get(0).getSellerId()).isEqualTo(2L);
     }
 
