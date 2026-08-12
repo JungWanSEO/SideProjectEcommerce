@@ -79,6 +79,18 @@ public class ReturnRequest extends BaseEntity {
     @Column(nullable = false)
     private int quantity;      // v1=라인 전량(OrderItem.quantity 스냅샷). 부분수량 반품은 후속(컬럼 선확보).
 
+    /**
+     * 확정 귀책(#8 후속) — 검수(INSPECT)에서 확정되는 부담 주체 <b>스냅샷</b>. 확정 전엔 null.
+     *
+     * <p>왜 {@code reasonCode.getFault()}를 그때그때 읽지 않는가: fault는 enum 생성자에서 파생되는 값이라,
+     * 매핑을 한 줄만 바꿔도 <b>이미 환불·정산이 끝난 과거 건의 귀책까지 소급 재분류</b>된다. 돈이 확정되기
+     * 직전에 스냅샷해 두면 과거는 과거의 규칙으로 남는다. 구매자 신고(reasonCode)는 어디까지나 참고값이고,
+     * "수거해서 열어보니 불량이 아니더라"를 표현하는 자리가 이 컬럼이다.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "fault_party", length = 20)
+    private com.commerce.api.global.common.CancelReason.Fault faultParty;
+
     /** 확정 환불액(검수확정 시 실효가로 확정, RETURN). 그 전엔 null. */
     private Long refundAmount;
 
@@ -154,7 +166,61 @@ public class ReturnRequest extends BaseEntity {
 
     /** 검수 통과(셀러/ADMIN): PICKED_UP → INSPECTED. 이후 RETURN=환불, EXCHANGE=재출고. */
     public void inspect(Long changedBy) {
-        transition(ReturnStatus.PICKED_UP, ReturnStatus.INSPECTED, changedBy, null);
+        inspect(changedBy, null);
+    }
+
+    /**
+     * 검수 통과 + <b>귀책 확정</b>(#8 후속): PICKED_UP → INSPECTED.
+     *
+     * <p>{@code faultParty}가 null이면 구매자 신고 사유에서 파생한다(사유도 없으면 NONE = 플랫폼 흡수).
+     * 즉 셀러가 아무것도 안 하면 "신고대로" 확정되고, 이견이 있을 때만 값을 실어 보내면 된다.
+     * 판정은 히스토리에 memo로 남겨 나중에 누가 무엇으로 정했는지 추적할 수 있게 한다.
+     */
+    public void inspect(Long changedBy, com.commerce.api.global.common.CancelReason.Fault faultParty) {
+        com.commerce.api.global.common.CancelReason.Fault resolved = resolveFault(faultParty);
+        transition(ReturnStatus.PICKED_UP, ReturnStatus.INSPECTED, changedBy,
+                "귀책 확정: " + resolved + (faultParty == null ? " (신고 사유에서 파생)" : " (검수 판정)"));
+        this.faultParty = resolved;
+    }
+
+    /**
+     * 귀책 재정(ADMIN 전용) — <b>돈이 확정되기 전</b>(미종료 상태)에만 허용한다.
+     *
+     * <p>셀러가 검수에서 자기 이익 방향으로 판정할 수 있으므로(소유권 검증만 있고 판정 감시는 없다) 어드민이
+     * 뒤집을 수 있어야 한다. 반대로 REFUNDED 이후엔 막는다 — OrderItem 상태는 forward-only라 되돌릴 수 없고,
+     * 이미 나간 환불·정산을 뒤집으려면 '되돌리기'가 아니라 상계 엔트리가 필요하기 때문이다(v1 범위 밖).
+     */
+    public void overrideFault(com.commerce.api.global.common.CancelReason.Fault faultParty, Long changedBy) {
+        if (faultParty == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "재정할 귀책 주체가 필요합니다.");
+        }
+        if (isTerminal()) {
+            throw new BusinessException(HttpStatus.CONFLICT,
+                    "이미 종료된 반품(" + status + ")의 귀책은 변경할 수 없습니다.");
+        }
+        com.commerce.api.global.common.CancelReason.Fault before = this.faultParty;
+        this.faultParty = faultParty;
+        recordHistory(status, status, changedBy, "귀책 재정: " + before + " → " + faultParty);
+    }
+
+    /**
+     * 돈 계산이 읽는 <b>실효 귀책</b>. 확정 스냅샷이 있으면 그것을, 없으면 신고 사유에서 파생한다.
+     * 사유조차 없는 경로(레거시·시스템 취소)는 NONE으로 떨어져 플랫폼이 흡수한다 — 고객에게도 셀러에게도
+     * 청구하지 않는 것이 "모르면 우리가 문다"는 안전한 기본값이다.
+     */
+    public com.commerce.api.global.common.CancelReason.Fault effectiveFault() {
+        return resolveFault(this.faultParty);
+    }
+
+    private com.commerce.api.global.common.CancelReason.Fault resolveFault(
+            com.commerce.api.global.common.CancelReason.Fault explicit) {
+        if (explicit != null) {
+            return explicit;
+        }
+        if (this.faultParty != null) {
+            return this.faultParty;
+        }
+        return reasonCode != null ? reasonCode.getFault() : com.commerce.api.global.common.CancelReason.Fault.NONE;
     }
 
     /** 반품 확정: INSPECTED → REFUNDED (RETURN 전용). 환불액·재입고여부 확정. */

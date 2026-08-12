@@ -101,7 +101,7 @@ public class ReturnService {
         if (!locked.returnRequest().belongsToSeller(sellerId)) {
             throw new BusinessException(HttpStatus.FORBIDDEN, "본인 셀러의 반품만 처리할 수 있습니다.");
         }
-        applyAction(locked, req.action(), changedBy, req.memo());
+        applyAction(locked, req, changedBy, false);   // 셀러는 검수(INSPECT)에서만 귀책을 정한다 — 재정은 ADMIN 몫
         return ReturnResponse.from(locked.returnRequest());
     }
 
@@ -112,7 +112,7 @@ public class ReturnService {
         if (!locked.returnRequest().getOrderId().equals(orderId)) {
             throw new BusinessException(HttpStatus.NOT_FOUND, "해당 주문의 반품이 아닙니다.");
         }
-        applyAction(locked, req.action(), changedBy, req.memo());
+        applyAction(locked, req, changedBy, true);   // ADMIN은 종료 전이면 귀책 재정 가능
         return ReturnResponse.from(locked.returnRequest());
     }
 
@@ -127,18 +127,40 @@ public class ReturnService {
         return new Locked(order, r);
     }
 
-    private void applyAction(Locked locked, ReturnAction action, Long changedBy, String memo) {
+    /**
+     * 액션 적용. {@code canOverrideFault}(ADMIN)이면 귀책 재정을 <b>액션보다 먼저</b> 반영한다 — 같은 요청에
+     * REFUND가 함께 실려 와도 새 귀책으로 돈이 계산되어야 하기 때문이다(순서가 뒤바뀌면 옛 귀책으로 환불된다).
+     */
+    private void applyAction(Locked locked, ReturnStatusUpdateRequest req, Long changedBy, boolean canOverrideFault) {
         ReturnRequest r = locked.returnRequest();
+        ReturnAction action = req.action();
+        String memo = req.memo();
+        if (action == ReturnAction.SET_FAULT && !canOverrideFault) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "귀책 재정은 관리자만 할 수 있습니다.");
+        }
+        if (canOverrideFault && req.faultParty() != null && action != ReturnAction.INSPECT) {
+            r.overrideFault(req.faultParty(), changedBy);
+        }
         switch (action) {
             case APPROVE -> r.approve(changedBy);
             case REJECT -> r.reject(changedBy, memo);
             case PICK_UP -> r.pickUp(changedBy);
-            case INSPECT -> r.inspect(changedBy);
+            case INSPECT -> r.inspect(changedBy, req.faultParty());
             case REFUND -> refund(locked.order(), r, changedBy);
             case COMPLETE -> exchange(locked.order(), r, changedBy);
+            case SET_FAULT -> requireFaultGiven(req);   // 재정은 위에서 이미 적용됨 — 여기선 누락만 막는다
         }
         // 전이 성공 후 구매자 알림 이벤트(#6 P2c) — 같은 트랜잭션이라 상태 변경과 원자적. 전이가 예외로 막히면 발행도 롤백.
-        returnEventEmitter.emitStatusChanged(r);
+        // SET_FAULT는 상태가 그대로라 제외한다 — 안 그러면 구매자에게 직전 상태 알림이 한 번 더 가는 중복이 된다.
+        if (action != ReturnAction.SET_FAULT) {
+            returnEventEmitter.emitStatusChanged(r);
+        }
+    }
+
+    private void requireFaultGiven(ReturnStatusUpdateRequest req) {
+        if (req.faultParty() == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "재정할 귀책 주체(faultParty)가 필요합니다.");
+        }
     }
 
     /**

@@ -20,6 +20,8 @@ public record ReturnResponse(
         ReturnStatus status,
         String reason,
         com.commerce.api.global.common.CancelReason reasonCode,   // 구조화된 사유(#8, 없으면 null)
+        com.commerce.api.global.common.CancelReason.Fault faultParty,   // 확정 귀책(검수에서 확정, 그 전 null)
+        com.commerce.api.global.common.CancelReason.Fault effectiveFault,  // 돈 계산이 읽는 실효 귀책(미확정이면 사유에서 파생)
         int quantity,
         Long refundAmount,        // 검수확정 후 확정(RETURN), 그 전 null
         boolean restock,
@@ -34,7 +36,8 @@ public record ReturnResponse(
                 .toList();
         return new ReturnResponse(
                 r.getId(), r.getOrderId(), r.getOrderItemId(), r.getSellerId(), r.getMemberId(),
-                r.getType(), r.getStatus(), r.getReason(), r.getReasonCode(), r.getQuantity(),
+                r.getType(), r.getStatus(), r.getReason(), r.getReasonCode(),
+                r.getFaultParty(), r.effectiveFault(), r.getQuantity(),
                 r.getRefundAmount(), r.isRestock(), r.getExchangeOptionId(), r.getExchangeShipmentId(),
                 history, r.getCreatedAt());
     }

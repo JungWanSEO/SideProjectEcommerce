@@ -1,0 +1,13 @@
+-- #8 후속 P1: 반품/교환의 **확정 귀책**(fault_party) 스냅샷.
+--  · return_request.fault_party: 검수(INSPECT) 시점에 확정된 귀책 주체. 확정 전에는 NULL.
+--    값 = CancelReason.Fault (CUSTOMER / NONE / PLATFORM / SELLER).
+--
+-- 왜 컬럼인가 — 지금 귀책은 CancelReason enum 생성자에서 **읽기 시점에 파생**되는 값이다.
+--   이 파생값을 그대로 돈에 연결하면, 매핑을 한 줄만 바꿔도(예: DELIVERY_DELAY를 SELLER→PLATFORM으로)
+--   **이미 환불·정산·지급이 끝난 과거 건의 귀책까지 소급 재분류**되어 감사 추적이 무너진다.
+--   그래서 돈이 확정되는 시점(INSPECTED→REFUNDED) 직전에 확정값을 스냅샷하고, 이후 계산은 이 컬럼만 읽는다.
+--   (discount_funded_by가 이미 "부담 주체를 스냅샷한다"는 선례를 만들어 둔 것과 같은 패턴.)
+--
+-- 왜 nullable인가 — 검수 전 요청과 V55 이전 레거시 행은 확정 귀책이 없다. 그 경우의 해석은
+--   애플리케이션이 정한다(reasonCode에서 파생, 사유도 없으면 NONE=플랫폼 흡수). add-only라 기존 행 무영향.
+ALTER TABLE return_request ADD COLUMN fault_party varchar(20) NULL;
