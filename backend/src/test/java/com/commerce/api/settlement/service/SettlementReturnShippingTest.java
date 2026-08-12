@@ -234,14 +234,26 @@ class SettlementReturnShippingTest {
         verify(settlementRepository, org.mockito.Mockito.never()).save(any(SettlementEntry.class));
     }
 
+    /**
+     * 종류 축이 배타적이어야 하는 이유: 역분개는 종류별 버킷으로 target을 비교한다. 두 종류가 같은 술어에
+     * 걸리면(예전 {@code shipping} boolean처럼) 회수비가 배송비 target에 수렴해 <b>조용히 사라진다</b>.
+     */
     @Test
-    @DisplayName("엔트리 종류는 배타적이다 - shipping 플래그는 kind에서 파생(이중 출처가 갈리지 않게)")
-    void shippingFlagDerivedFromKind() {
-        assertThat(SettlementEntry.shippingScheduled(1L, 11L, "tx", "TOSS", 3000L, 75L, 0.025, SETTLED).isShipping())
-                .isTrue();
-        assertThat(SettlementEntry.returnShippingScheduled(1L, 11L, "tx", "TOSS", 3000L, 75L, 0.025, SETTLED).isShipping())
-                .isFalse();   // 회수비는 배송비가 아니다 — 섞이면 배송비 target에 수렴돼 사라진다
-        assertThat(SettlementEntry.scheduled(1L, 11L, "tx", "TOSS", 1L, 100L, 0L, 0.0, 0L, 0.0, SETTLED).isShipping())
-                .isFalse();
+    @DisplayName("엔트리 종류는 배타적이다 - 각 팩토리가 정확히 하나의 kind를 만든다")
+    void entryKindIsExclusive() {
+        assertThat(SettlementEntry.shippingScheduled(1L, 11L, "tx", "TOSS", 3000L, 75L, 0.025, SETTLED).getEntryKind())
+                .isEqualTo(SettlementEntryKind.SHIPPING);
+        assertThat(SettlementEntry.returnShippingScheduled(1L, 11L, "tx", "TOSS", 3000L, 75L, 0.025, SETTLED)
+                .getEntryKind()).isEqualTo(SettlementEntryKind.RETURN_SHIPPING);   // 회수비는 배송비가 아니다
+        assertThat(SettlementEntry.scheduled(1L, 11L, "tx", "TOSS", 1L, 100L, 0L, 0.0, 0L, 0.0, SETTLED).getEntryKind())
+                .isEqualTo(SettlementEntryKind.SALE);
+        assertThat(SettlementEntry.faultCharge(1L, 11L, "tx", "TOSS", 1L, 3000L, SETTLED).getEntryKind())
+                .isEqualTo(SettlementEntryKind.FAULT_CHARGE);
+
+        // 매출 원장(정방향 정산이 만드는 것) 판정도 종류로만 갈린다 — 멱등 게이트가 이걸 본다
+        assertThat(SettlementEntryKind.SALE.isSaleLedger()).isTrue();
+        assertThat(SettlementEntryKind.SHIPPING.isSaleLedger()).isTrue();
+        assertThat(SettlementEntryKind.RETURN_SHIPPING.isSaleLedger()).isFalse();
+        assertThat(SettlementEntryKind.FAULT_CHARGE.isSaleLedger()).isFalse();
     }
 }

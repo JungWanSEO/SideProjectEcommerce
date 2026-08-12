@@ -1,0 +1,15 @@
+-- V59: settlement_entry.shipping 컬럼 제거 — 항목 종류 축의 expand/contract 마무리(#8 후속).
+--
+-- 배경: 엔트리 종류는 이제 boolean 하나가 아니라 entry_kind enum(SALE/SHIPPING/RETURN_SHIPPING/
+--   FAULT_CHARGE)이 표현한다(V57). V57에서 shipping=1 행을 'SHIPPING'으로 백필했고, 코드는 판정·버킷
+--   분기를 전부 entry_kind로 컷오버했다(SettlementService.run·reverseRefunds·대사). 잉여가 된 컬럼을 제거한다.
+--
+-- 컷오버·정합 검증(2026-08-12 MySQL 스모크):
+--   · 백필 불일치 0건 — (shipping=1 AND entry_kind<>'SHIPPING') OR (shipping=0 AND entry_kind='SHIPPING') = 0
+--   · 반품 완주 2건(고객 귀책·셀러 귀책)에서 RETURN_SHIPPING·FAULT_CHARGE 엔트리가 각자 target으로 수렴
+--   · 역분개 재실행 2회 diff 0(멱등) · 대사 amountMismatch 0
+--
+-- ⚠️ 파괴적 스키마 변경(컬럼 DROP) — 되돌리기 어렵다. 다만 이 컬럼의 정보량은 entry_kind에 완전히
+--   포함되므로(shipping=1 ⇔ entry_kind='SHIPPING') 실질적 데이터 소실은 없다. V46(orders.courier/
+--   tracking_number DROP)과 같은 프로토콜: 백필 → 코드 컷오버 → 스모크로 정합 확인 → 다음 마이그레이션에서 제거.
+ALTER TABLE settlement_entry DROP COLUMN shipping;
