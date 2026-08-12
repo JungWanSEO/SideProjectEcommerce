@@ -9,10 +9,10 @@
   <img alt="Spring Boot" src="https://img.shields.io/badge/Spring%20Boot-3.5.14-6DB33F?logo=springboot&logoColor=white">
   <img alt="MySQL" src="https://img.shields.io/badge/MySQL-8-4479A1?logo=mysql&logoColor=white">
   <img alt="QueryDSL" src="https://img.shields.io/badge/QueryDSL-5.1.0-0769AD">
-  <img alt="Flyway" src="https://img.shields.io/badge/Flyway-53%20migrations-CC0200?logo=flyway&logoColor=white">
+  <img alt="Flyway" src="https://img.shields.io/badge/Flyway-54%20migrations-CC0200?logo=flyway&logoColor=white">
   <img alt="JWT" src="https://img.shields.io/badge/Auth-JWT%20httpOnly-000000?logo=jsonwebtokens&logoColor=white">
   <img alt="Next.js" src="https://img.shields.io/badge/Next.js%2015-React%2019%20TS-000000?logo=nextdotjs&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-724%20passing-success">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-740%20passing-success">
 </p>
 
 ---
@@ -24,9 +24,9 @@ C# / ASP.NET Core 실무 경험을 바탕으로 **Spring Boot 백엔드 설계�
 *결제 → 셀러별 정산 → PG 대사 → 정산금 지급* 까지 **돈이 흐르는 백오피스**를 끝까지 구현한 것이 핵심 차별점입니다.
 
 - 🎯 **컨셉** — 브랜드 입점형 셀렉트샵. "매출 ≠ 셀러 정산금"을 1급 시민으로 모델링.
-- 🧩 **방식** — 도메인형 패키지 · 테스트 주도(**724개**) · 모든 의사결정을 [개발 일지](docs/dev-log.md)와 ADR로 기록.
+- 🧩 **방식** — 도메인형 패키지 · 테스트 주도(**740개**) · 모든 의사결정을 [개발 일지](docs/dev-log.md)와 ADR로 기록.
 - 🏗 **구조** — `backend`(Spring Boot) + `frontend`(Next.js) **모노레포**.
-- 📐 **규모** — **22개 도메인**(20개 REST + 이벤트 전용 notification·outbox) · **53개 Flyway 마이그레이션** · **724개 테스트**(instruction 커버리지 91.3%).
+- 📐 **규모** — **22개 도메인**(21개 REST + 공통 `global` — 아웃박스·시큐리티·레이트리밋 등 횡단 관심사) · **54개 Flyway 마이그레이션** · **740개 테스트**(instruction 커버리지 91.5%).
 
 > 깊은 설계 근거·다이어그램은 **[docs/architecture.md](docs/architecture.md)** 한 문서에 정리되어 있습니다.
 
@@ -38,13 +38,12 @@ C# / ASP.NET Core 실무 경험을 바탕으로 **Spring Boot 백엔드 설계�
 
 | 문제 | 어떻게 풀었나 | 검증 |
 |------|--------------|------|
-| **재고 초과판매(oversell)** — 같은 SKU에 동시 주문이 몰릴 때 | `ProductOption`(SKU) 단위 **낙관적 락(@Version)** + *실패 트랜잭션 밖* 새 트랜잭션 재시도(`@Retryable`) | `OrderConcurrencyTest` — 재고 10에 20스레드 결제 → 초과판매 0 |
+| **재고 초과판매(oversell)** — 같은 SKU에 동시 주문이 몰릴 때 (주문~결제 사이 구간 포함) | `stock_reservation` + `product_option.reserved` 카운터에 대한 **원자적 조건부 UPDATE** — `stock − reserved >= q`일 때만 예약하고 영향 행 수(0/1)로 품절 판정(DB 행 락이 직렬화 · 선착순 쿠폰과 동형). 주문=예약 · 결제=소진(`reserved >= q and stock >= q`) · 만료/취소=해제. 락 충돌은 *실패 트랜잭션 밖* 새 트랜잭션 재시도(`@Retryable`)로 흡수하고, `@Version`은 관리자 옵션 수정 등 **엔티티 경로의 보조 방어** | `OrderConcurrencyTest` — 재고 10에 30스레드 동시 주문 → 정확히 10건 예약(나머지 20은 품절 409), 초과판매 0 |
 | **선착순 한정 쿠폰 폭주** — 수천 명이 동시에 100장 쿠폰을 집을 때 | **원자적 조건부 UPDATE**(한도 내에서만 +1, DB 행 잠금) + `member_coupon` UNIQUE. 앱 락 없이 정합 | `CouponClaimConcurrencyTest` — 30명 동시 → 정확히 10장 발급 |
 | **이중 쓰기(dual-write)** — DB 커밋과 이벤트 발행 사이 크래시 | **트랜잭셔널 아웃박스** — 결제완료와 `outbox_event`를 한 트랜잭션에 기록, 폴러가 발행(at-least-once) + 지수 백오프 + dead-letter | `OutboxProcessorTest` — 백오프 2→4→8초, 최대 재시도 후 FAILED |
-| **매출 ≠ 셀러 정산금** — 한 주문에 여러 셀러 상품이 섞일 때 | 결제를 **(결제 × 셀러)로 분해** — 셀러별 gross 합산, PG 수수료·플랫폼 수수료·쿠폰 할인을 비례 배분(잔액은 최대 셀러에) | `SettlementServiceTest`(14) |
-| **PG 정산 내역 대사** — 우리 장부와 PG 장부가 어긋날 때 | `pgTransactionId`로 조인 → 정상(MATCHED) + **4종 불일치 분류**(금액/상태/한쪽 누락) + OPEN→RESOLVED/IGNORED 예외 큐 | `ReconciliationServiceTest`(20) |
+| **매출 ≠ 셀러 정산금** — 한 주문에 여러 셀러 상품이 섞일 때 | 결제를 **(결제 × 셀러)로 분해** — 쿠폰 할인은 주문이 항목별로 안분해 둔 몫을 승계해 **셀러별 매출(할인 후)** 을 합산, **PG 수수료만 셀러 몫 비례로 안분**(반올림 잔차는 매출 최대 셀러에), **플랫폼 수수료는 셀러별 요율**(`Seller.commissionRate`)로 개별 산정 | `SettlementServiceTest`(19) |
+| **PG 정산 내역 대사** — 우리 장부와 PG 장부가 어긋날 때 | `pgTransactionId`로 조인 → 정상(MATCHED) + **4종 불일치 분류**(금액/상태/한쪽 누락) + OPEN→RESOLVED/IGNORED 예외 큐 | `ReconciliationServiceTest`(21) |
 | **PG 장애·수수료 최적화** | `PaymentGateway` 포트 + 라우터 — 클라이언트 지정 / 비용 오름차순 **페일오버** / **비용기반 AUTO** 3전략 | `PaymentGatewayRouterTest`(13) |
-| **주문~결제 사이의 오버셀 구간** — 낙관적 락은 "결제 순간"만 지켜 그 전에 판 재고가 겹칠 때 | `stock_reservation` + `product_option.reserved` 카운터를 **원자적 조건부 UPDATE**(`stock-reserved >= q`일 때만 예약). 결제=소진 · 만료/취소=해제 | `StockReservationConcurrencyTest` — 재고 10에 30스레드 주문 → 정확히 10건 |
 | **파생 상태의 lost update** — 멀티셀러 주문에서 배송 전진과 취소가 동시에 일어날 때 | `Order.status`가 shipment rollup 파생이라 조건부 write가 서로를 stale로 읽는다 → **상태·원장 변경 모든 경로가 부모 주문 비관락**으로 직렬화(예외 0) | `ShipmentConcurrencyTest`·`PaymentCancelConcurrencyTest` |
 | **정산금 이중 지급** — 같은 셀러·기간의 지급 묶음을 동시에 만들 때 | 비잠금 조회 + setter를 **원자적 조건부 UPDATE**(`payout_id IS NULL`인 항목만 편입)로 교체 + 편입 수 검증(경합 시 409·롤백) | `PayoutConcurrencyTest` — 8스레드 → 정확히 1건, 이중지급 0 |
 | **환불 정합** — 쿠폰 할인·배송비·부분취소·반품이 겹칠 때 과다환불 | 항목 **실효가**(소계−안분할인)를 환불·정산의 단일 출처로, 환불액 = `잔여 결제액 − 취소 후 남은 payable`. 배송비는 활성 항목이 남아 있으면 유지 | `ShippingFeeTest`·`ReturnRefundTest`·`OrderTest` |
@@ -59,10 +58,11 @@ C# / ASP.NET Core 실무 경험을 바탕으로 **Spring Boot 백엔드 설계�
 | Framework | **Spring Boot 3.5.14** (의도적으로 3.5 고정 · 4.0 미사용) |
 | Persistence | Spring Data JPA · Hibernate · **QueryDSL 5.1.0**(타입 안전 동적 쿼리) |
 | Database | **MySQL 8**(Docker) · 테스트는 **H2** 인메모리(격리) |
-| Migration | **Flyway**(V1~V53, `ddl-auto: validate`) |
+| Migration | **Flyway**(V1~V54, `ddl-auto: validate`) |
 | Security | Spring Security · **JWT**(jjwt 0.12.6) · **httpOnly 쿠키** · access/refresh 회전 |
 | Messaging | 트랜잭셔널 아웃박스 · **RabbitMQ**(opt-in, 기본은 in-process) |
 | Caching | Spring Cache — **Caffeine**(기본) / **Redis**(opt-in) / NoOp 토글 |
+| Rate limit | `@RateLimit` AOP 포트 — **Caffeine 고정 윈도우**(기본) / **Redis 슬라이딩 윈도우**(Lua) / **Redisson 토큰 버킷** / NoOp 토글 |
 | Observability | Actuator · Micrometer → **Prometheus + Grafana**(opt-in 프로파일) |
 | Load test | **k6**(캐시 처리량 · 쿠폰 동시성 시나리오) |
 | Docs / Ops | springdoc-openapi(Swagger) · Lombok · Validation · GitHub Actions(CI) |
@@ -86,7 +86,7 @@ C# / ASP.NET Core 실무 경험을 바탕으로 **Spring Boot 백엔드 설계�
 ├ recommendation 추천    인증/공통                     이벤트/관측
 └ activity 행동 로그      ├ auth   JWT·소셜 로그인       ├ notification  인박스(이벤트 소비)
                         ├ member 회원                  └ monitoring   캐시 KPI
-역할(Role): USER · SELLER · ADMIN   └ global 설정/예외/시큐리티·아웃박스
+역할(Role): USER · SELLER · ADMIN   └ global 설정/예외/시큐리티·아웃박스·레이트리밋
 ```
 
 각 도메인은 `controller · service · repository · entity · dto`로 일관 분리하고,
@@ -99,17 +99,18 @@ C# / ASP.NET Core 실무 경험을 바탕으로 **Spring Boot 백엔드 설계�
 
 - **카탈로그 / 검색** — QueryDSL 동적 필터(키워드·가격대·카테고리·브랜드·사이즈·세일) + 정렬(최신/가격/평점/찜/할인율), 커서 기반 무한 스크롤 피드
 - **상품 옵션(SKU)** — 사이즈 단위 옵션으로 재고 관리(같은 상품 다른 사이즈 = 별개 항목), 색상은 별도 상품(셀렉트샵 모델). 정가/판매가로 %OFF 노출
-- **장바구니** — 비로그인도 담기는 **게스트 카트**(httpOnly 토큰 쿠키) → 로그인 시 회원 카트로 **수량 합산 병합**
+- **장바구니** — 비로그인도 담기는 **게스트 카트**(httpOnly 토큰 쿠키) → 로그인 시 회원 카트로 **수량 합산 병합**, 방치된 게스트 카트는 **TTL 정리 배치**(마지막 활동 후 기본 30일)로 회수
 - **주문 / 체크아웃** — 배송지 스냅샷, 쿠폰 미리보기·적용, **재고 예약(TTL)로 오버셀 구간 제거**(주문=예약 → 결제=소진 → 만료=해제), 배송비(정액+무료임계), 체크아웃 멱등키
 - **멀티셀러 배송** — 한 주문에 셀러가 섞이면 결제 시점에 **셀러별 shipment로 팬아웃**, 주문 상태는 shipment rollup 파생. 셀러는 자기 건만 출고 전진(IDOR 차단)
 - **결제** — 모의 PG **포트-어댑터** + 다중 PG 라우팅(페일오버·비용기반) + 멱등키(중복 결제 방지) + 부분 취소/환불 + 취소·환불 사유 taxonomy
-- **반품 / 교환** — DELIVERED 이후의 역방향 워크플로(요청→승인→수거→검수→환불/교환). 환불은 **검수 확정 후 실효가**, 교환은 옵션 스왑(revenue-neutral)
+- **반품 / 교환** — DELIVERED 이후의 역방향 워크플로(요청→승인→수거→검수→환불/교환). 환불은 **검수 확정 후 실효가**, 교환은 옵션 스왑(revenue-neutral). 구매자는 주문 상세에서 반품·교환을 신청하고(교환은 **재고 있는 다른 사이즈를 직접 선택** — 현재 사이즈 제외·품절 비활성) `내 반품·교환`에서 진행 단계를 확인
 - **셀러 정산** — (결제 × 셀러) 분해, 수수료·할인 비례 배분, 정산금 지급 배치(payout), PG 대사·예외 처리, 환불 역분개
 - **쿠폰 / 프로모션** — 정액/정률, 플랫폼/셀러 부담(funded-by) 회계, 공개/발급형, **선착순 한정수량(동시성 제어)**
 - **알림 인박스** — 아웃박스 이벤트를 구매자·셀러 인박스로(**1 이벤트 → N 수신자 fan-out**, 복합 멱등키), 헤더 벨·안읽음 뱃지
 - **개인화 추천** — 행동 로그 기반 "나를 위한 추천" + co-occurrence "함께 산 상품" + 최근 본 상품
 - **인증** — JWT httpOnly 쿠키(access/refresh 회전) + **구글·카카오 소셜 로그인**(provider별 opt-in)
-- **운영 콘솔(FE)** — 상품/카테고리/브랜드 CRUD, 주문/배송, 정산/지급/대사, 쿠폰, 회원·권한, **감사 로그(CSV)**, 재고 임박 리포트, 대시보드(순매출 추이·캐시 히트율)
+- **레이트 리밋** — `@RateLimit` AOP 포트-어댑터 4종(Caffeine 고정 윈도우(기본) / Redis 슬라이딩 윈도우(Lua) / Redisson 토큰 버킷 / NoOp). 로그인 **이메일당 5회/분**(무차별 대입 방지)·쿠폰 claim **회원당 20회/분**·상품 피드 **IP당 60회/분**(스크래핑 억제), 초과 시 **429 + Retry-After**
+- **운영 콘솔(FE)** — 상품/카테고리/브랜드 CRUD, 주문/배송, **반품·교환 대행 처리**(셀러 경계 없이 전체), 정산/지급/대사, 쿠폰, 회원·권한, **감사 로그(CSV)**, 재고 임박 리포트, 대시보드(순매출 추이·캐시 히트율)
 - **셀러 콘솔(FE)** — 내 주문·출고 전진·반품 처리·정산/지급·알림 인박스(모두 자기 셀러 스코프)
 - **API 문서** — Swagger UI 자동 생성
 
@@ -124,7 +125,7 @@ C# / ASP.NET Core 실무 경험을 바탕으로 **Spring Boot 백엔드 설계�
 
 1. **Spring Boot 3.5 고정 (4.0 회피)** — 전환 학습 단계에선 신규 메이저의 깨짐·빈약한 레퍼런스보다 **자료가 풍부한 3.5 라인**이 합리적.
 2. **도메인형 패키지 + 애그리거트 간 ID 참조** — 계층형 대신 도메인형, 애그리거트 경계를 넘는 `@ManyToOne` 금지 → 결합도↓·경계 명확·모듈러 모놀리스.
-3. **재고 동시성 = 3단 방어** — ①주문 시 **예약**(원자적 조건부 UPDATE로 `stock-reserved` 확인, 오버셀 구간 제거) ②결제 시 차감은 `@Version` 낙관적 락 + *트랜잭션 밖* 재시도(셀프 인보케이션 회피) ③TTL 만료 배치가 미결제 예약 회수. "언제 파느냐"를 결제 순간에서 **주문 순간**으로 앞당긴 것이 핵심.
+3. **재고 동시성 = 3단 방어** — ①주문 시 **예약**(원자적 조건부 UPDATE로 `stock-reserved` 확인, 오버셀 구간 제거) ②결제 시 **소진**도 예약분을 실재고로 바꾸는 원자적 조건부 UPDATE(`reserved >= q and stock >= q`) — 0행이면 409로 결제 트랜잭션 롤백(조용한 오버셀 차단). 상태 전이의 경합은 `@Version` 낙관락 + *트랜잭션 밖* 재시도(셀프 인보케이션 회피)로 흡수 ③TTL 만료 배치가 미결제 예약 회수. "언제 파느냐"를 결제 순간에서 **주문 순간**으로 앞당긴 것이 핵심.
 4. **상품 옵션 = SKU** — 사이즈×색상 매트릭스의 복잡도 폭발 대신 단일 축(사이즈)으로 단순화. 재고·버전을 `ProductOption`으로 이전.
 5. **JWT httpOnly 쿠키 + 회전** — localStorage(XSS 노출) 대신 httpOnly 쿠키, access/refresh 분리 + jti로 재사용 탐지.
 6. **시크릿 12-factor + Flyway validate** — 운영 중 외부 노출 MySQL 침해를 겪고, 시크릿을 OS 환경변수로, 스키마를 마이그레이션으로 통제(`validate`).
@@ -137,7 +138,7 @@ C# / ASP.NET Core 실무 경험을 바탕으로 **Spring Boot 백엔드 설계�
 13. **비정규화 카운터** — 매 조회 COUNT/AVG 대신 평점·위시수를 `Product`에 비정규화, 원자적 `@Modifying` UPDATE로 갱신.
 14. **캐싱 토글 (Caffeine/Redis)** — 부하 테스트로 효과 측정(p95 43→3.3ms, RPS 591→3,148). 단일 인스턴스엔 Caffeine, 스케일아웃엔 Redis.
 15. **분산 락 포트 + DB 백스톱** — 쿠폰 발급의 정합은 DB 원자 UPDATE가 보장. 분산 락(Redis/Redisson)은 멀티 인스턴스 직렬화를 위한 **opt-in 토글**.
-16. **관측성 = Prometheus + Grafana** — 인앱 차트 대신 표준 스택(opt-in 프로파일). 13패널 3계층(골든 시그널/포화도/도메인) 대시보드.
+16. **관측성 = Prometheus + Grafana** — 인앱 차트 대신 표준 스택(opt-in 프로파일). **3계층(골든 시그널/포화도/도메인) 10패널** 대시보드.
 17. **멀티셀러 상태 단위 = shipment** — "주문 하나에 상태 하나"로는 셀러별 출고를 표현할 수 없다 → 셀러별 배송 단위를 만들고 `Order.status`는 **rollup 파생값으로 저장**(기존 PURCHASED 리더·인덱스 무변경 생존). 파생 상태 + 외부 부작용(환불) 조합이라 동시성은 **부모 주문 비관락으로 통일**(낙관락 재시도 = 이중 환불).
 18. **반품/교환 = 별도 애그리거트 + 상태머신** — 주문에 플래그를 더하는 대신 `ReturnRequest`가 전이를 엔티티로 강제. 환불은 **검수 확정 후**(flip-before-PG로 실패 시 전체 롤백), 교환은 옵션 스왑이라 매출 중립.
 19. **알림 = 아웃박스 재사용 + 복합 멱등키** — 새 인프라 없이 기존 이벤트를 인박스로 소비. **1 이벤트 → N 수신자**(멀티셀러 fan-out)를 위해 멱등키를 `(event_id, recipient_type, recipient_id)` 복합으로 설계 — event_id 단독이면 둘째 셀러 알림이 막힌다.
@@ -147,7 +148,9 @@ C# / ASP.NET Core 실무 경험을 바탕으로 **Spring Boot 백엔드 설계�
 
 ## 🚀 실행 방법
 
-> 모든 백엔드 명령은 `backend/`에서 실행합니다.
+> 백엔드와 프론트엔드를 각각 기동합니다. 백엔드 명령은 `backend/`, 프론트엔드 명령은 `frontend/`에서 실행합니다.
+
+**1) 백엔드 (API 서버)**
 
 ```bash
 cd backend
@@ -159,11 +162,34 @@ cp .env.example .env            # Windows: copy .env.example .env
 docker compose up -d
 
 # 3) 애플리케이션 실행
-./gradlew bootRun               # Windows(.env 자동 로드): ./run.ps1
+./run.ps1                       # Windows(PowerShell) — .env를 환경변수로 로드 + dev 프로파일로 기동
+
+# 그 외 OS — .env를 환경변수로 내보낸 뒤 dev 프로파일로 실행
+set -a && . ./.env && set +a
+SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun
 ```
+
+> ⚠️ `.env`는 Gradle·Spring이 자동으로 읽지 않습니다(`docker compose`만 자동으로 읽습니다). 값이 주입되지 않으면
+> `spring.datasource.username`이 해석되지 않아 **의도적으로 기동에 실패**합니다(시크릿 누락 fail-fast).
+> 데모 데이터도 **dev 프로파일에서만** 켜지므로(`app.demo-seed.enabled` 기본 false), 위 두 조건을 모두 만족해야
+> 아래 "데모 데이터 · 체험 계정"이 채워집니다.
+
+**2) 프론트엔드 (스토어프론트 · 운영/셀러 콘솔)**
+
+```bash
+cd frontend
+
+npm install                     # 최초 1회
+npm run dev                     # http://localhost:3000
+```
+
+> API 주소는 기본값 `http://localhost:8080`을 씁니다. 다른 주소를 쓸 때만 `cp .env.example .env.local`
+> (Windows: `copy .env.example .env.local`) 후 `NEXT_PUBLIC_API_BASE_URL`을 바꾸세요. 백엔드의 CORS 허용 origin과
+> 소셜 로그인 리다이렉트가 `http://localhost:3000` 기준이므로 FE는 3000 포트로 띄웁니다.
 
 | 항목 | 주소 |
 |------|------|
+| 프론트엔드 | http://localhost:3000 |
 | API 서버 | http://localhost:8080 |
 | Swagger UI | http://localhost:8080/swagger-ui.html |
 | MySQL (Docker) | localhost:**3307** / db `commerce` |
@@ -176,8 +202,11 @@ docker compose --profile redis up -d           # Redis(캐시·분산락) 켜기
 docker compose --profile observability up -d    # Prometheus(:9090) + Grafana(:3001)
 ```
 
-> 기본 실행에는 외부 의존이 필요 없습니다. Redis·RabbitMQ·Prometheus는 `app.cache.provider` /
-> `app.lock.provider` / `outbox.publisher` 토글과 compose 프로파일로 켭니다.
+> 기본 실행에는 외부 의존이 필요 없습니다. 앱 기본값이 `app.cache.provider=caffeine` / `app.lock.provider=none` /
+> `app.ratelimit.provider=memory` / `outbox.publisher=in-process`라 Redis·RabbitMQ에 **연결하지 않습니다**
+> (`spring.rabbitmq.dynamic=false`로 부팅 시 연결 시도까지 막습니다). Redis·Prometheus 컨테이너는 위 compose
+> 프로파일로만 뜨고, RabbitMQ 컨테이너는 기본 `docker compose up -d`에 포함되지만 `outbox.publisher=rabbit`으로
+> 바꿀 때만 실제로 쓰입니다.
 
 **데모 데이터 · 체험 계정**
 
@@ -205,7 +234,7 @@ cd backend
 ./gradlew test
 ```
 
-- **724개** — 단위(서비스/엔티티) · 웹 슬라이스(`@WebMvcTest`) · 리포지토리(`@DataJpaTest`) · 통합(`@SpringBootTest`) · **동시성** 테스트
+- **740개** — 단위(서비스/엔티티) · 웹 슬라이스(`@WebMvcTest`) · 리포지토리(`@DataJpaTest`) · 통합(`@SpringBootTest`) · **동시성** 테스트
 - 테스트 DB는 **H2 인메모리**(운영 MySQL과 독립, Flyway 미사용)
 - 동시성·멱등성·페일오버·대사 분류 등 **핵심 로직은 명시적 테스트로 증명** (위 "진짜 문제" 표 참고)
 - CI: GitHub Actions — push/PR(`dev`·`main`) 시 백엔드 `gradlew test`(H2) + 프론트 `tsc`/lint
