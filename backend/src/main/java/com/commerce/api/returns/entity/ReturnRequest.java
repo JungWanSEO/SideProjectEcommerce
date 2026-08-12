@@ -91,7 +91,21 @@ public class ReturnRequest extends BaseEntity {
     @Column(name = "fault_party", length = 20)
     private com.commerce.api.global.common.CancelReason.Fault faultParty;
 
-    /** 확정 환불액(검수확정 시 실효가로 확정, RETURN). 그 전엔 null. */
+    /**
+     * 반품 신청 시점의 회수비 <b>요율 스냅샷</b>(#8 후속) — 귀책과 무관하게 항상 기록한다.
+     * 정책값이 올라도 진행 중인 반품의 부담액이 바뀌지 않게 하려는 것(고객이 신청 화면에서 본 금액 = 실제 차감액).
+     */
+    @Column(name = "return_shipping_fee")
+    private Long returnShippingFee;
+
+    /**
+     * 검수확정 시 <b>실제로 차감된</b> 회수비(귀책·클램프 적용 후). 확정 전엔 null, 부과 안 했으면 0.
+     * {@code refundAmount}(실지급액)와 분리해 둬야 "총액 = 실지급액 + 차감액"이 원장에 남는다.
+     */
+    @Column(name = "return_shipping_charged")
+    private Long returnShippingCharged;
+
+    /** 확정 환불액(검수확정 시 <b>실지급액</b>으로 확정 = 실효가 − 회수비 차감분, RETURN). 그 전엔 null. */
     private Long refundAmount;
 
     /** 재입고 여부(검수확정 시 결정 — 하자품은 write-off로 false). */
@@ -223,12 +237,29 @@ public class ReturnRequest extends BaseEntity {
         return reasonCode != null ? reasonCode.getFault() : com.commerce.api.global.common.CancelReason.Fault.NONE;
     }
 
-    /** 반품 확정: INSPECTED → REFUNDED (RETURN 전용). 환불액·재입고여부 확정. */
+    /** 반품 확정: INSPECTED → REFUNDED (RETURN 전용). 회수비 부과 없는 경로(하위 호환). */
     public void markRefunded(long refundAmount, boolean restock, Long changedBy) {
+        markRefunded(refundAmount, 0L, restock, changedBy);
+    }
+
+    /**
+     * 반품 확정: INSPECTED → REFUNDED (RETURN 전용). 실지급액·회수비 차감액·재입고여부 확정.
+     *
+     * @param refundAmount 실제 PG로 나갈 금액 (= 실효가 − charge)
+     * @param charge       고객에게 차감한 회수비 (부과 안 했으면 0)
+     */
+    public void markRefunded(long refundAmount, long charge, boolean restock, Long changedBy) {
         requireType(ReturnType.RETURN);
         this.refundAmount = refundAmount;
+        this.returnShippingCharged = charge;
         this.restock = restock;
-        transition(ReturnStatus.INSPECTED, ReturnStatus.REFUNDED, changedBy, null);
+        transition(ReturnStatus.INSPECTED, ReturnStatus.REFUNDED, changedBy,
+                charge > 0 ? "회수비 " + charge + "원 차감(고객 귀책)" : null);
+    }
+
+    /** 신청 시점 회수비 요율 스냅샷을 남긴다(생성 직후 1회). */
+    public void snapshotReturnShippingFee(long rate) {
+        this.returnShippingFee = rate;
     }
 
     /** 교환 확정: INSPECTED → COMPLETED (EXCHANGE 전용). 재출고 shipment 연결. */

@@ -23,7 +23,9 @@ public record ReturnResponse(
         com.commerce.api.global.common.CancelReason.Fault faultParty,   // 확정 귀책(검수에서 확정, 그 전 null)
         com.commerce.api.global.common.CancelReason.Fault effectiveFault,  // 돈 계산이 읽는 실효 귀책(미확정이면 사유에서 파생)
         int quantity,
-        Long refundAmount,        // 검수확정 후 확정(RETURN), 그 전 null
+        Long refundAmount,             // 실지급액(= 실효가 − 회수비 차감분). 검수확정 후 확정(RETURN), 그 전 null
+        Long returnShippingFee,        // 신청 시점 회수비 요율 스냅샷(예상 차감액 고지용)
+        Long returnShippingCharged,    // 실제 차감된 회수비. 검수확정 후 확정, 그 전 null
         boolean restock,
         Long exchangeOptionId,    // 교환 대상 옵션(EXCHANGE)
         Long exchangeShipmentId,  // 교환 재출고 shipment(교환 완료 후)
@@ -38,7 +40,8 @@ public record ReturnResponse(
                 r.getId(), r.getOrderId(), r.getOrderItemId(), r.getSellerId(), r.getMemberId(),
                 r.getType(), r.getStatus(), r.getReason(), r.getReasonCode(),
                 r.getFaultParty(), r.effectiveFault(), r.getQuantity(),
-                r.getRefundAmount(), r.isRestock(), r.getExchangeOptionId(), r.getExchangeShipmentId(),
+                r.getRefundAmount(), r.getReturnShippingFee(), r.getReturnShippingCharged(),
+                r.isRestock(), r.getExchangeOptionId(), r.getExchangeShipmentId(),
                 history, r.getCreatedAt());
     }
 

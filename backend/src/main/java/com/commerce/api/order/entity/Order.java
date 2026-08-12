@@ -88,6 +88,17 @@ public class Order extends BaseEntity {
     @Column(name = "shipping_fee", nullable = false)
     private long shippingFee;
 
+    /**
+     * 반품 회수비 누계(#8 후속) — 이 주문에서 <b>고객이 부담해 환불액에서 차감된</b> 금액의 합.
+     *
+     * <p>왜 주문이 이걸 들고 있어야 하는가: 취소 환불 공식이 {@code (결제액 − 환불누계) − payable} 한 줄이고
+     * "결제액 − 환불누계 == payable" 항등식을 전제한다. 회수비를 차감해 환불을 덜 하면 잔여가 payable보다
+     * 그만큼 크게 남고, <b>같은 주문의 다른 항목을 취소하는 순간 그 차액이 자동 환불</b>된다(고객이 회수비를
+     * 되돌려받는 무음 누수). 차감액을 payable에 되더해 항등식을 유지하는 것이 이 필드의 존재 이유다.
+     */
+    @Column(name = "return_shipping_charge", nullable = false)
+    private long returnShippingCharge;
+
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<OrderItem> orderItems = new ArrayList<>();
 
@@ -209,6 +220,12 @@ public class Order extends BaseEntity {
      * 전량취소 → payable 0 → 배송비까지 전액 환불 / 부분취소 → 배송비가 남은 payable에 남아 유지 / 전량반품 →
      * payable=배송비 → 반품 환불(실효가)에 배송비 미포함이라 유지(과거 '활성 0'만 보던 판정은 전량반품을 전량취소로
      * 오인해 배송비를 잘못 환불·정산 상계했다 — 적대적리뷰 HIGH 교정).
+     *
+     * <p><b>회수비 가산(#8 후속)</b>: 고객 귀책 반품에서 환불액을 회수비만큼 줄였다면 그 금액을 여기에 되더한다.
+     * 배송비 접기와 같은 트릭이며 이유도 같다 — 아래 항등식을 깨지 않기 위해서다.
+     * <pre>payment.amount − payment.refundedAmount == getPayableAmount()</pre>
+     * 이 항등식이 깨지면 이후 취소가 {@code refundNow = (amount − refunded) − payable}로 차액을 자동 환불해
+     * 회수비가 고객에게 되돌아간다. 가산하면 전량 이탈 후에도 payable에 회수비가 남아 유지된다.
      */
     public long getPayableAmount() {
         Map<OrderItem, Long> shares = discountShares();
@@ -218,7 +235,18 @@ public class Order extends BaseEntity {
                 .sum();
         boolean shippingRetained = orderItems.stream()
                 .anyMatch(item -> item.getStatus() != OrderItemStatus.CANCELLED);
-        return itemsPayable + (shippingRetained ? shippingFee : 0L);
+        return itemsPayable + (shippingRetained ? shippingFee : 0L) + returnShippingCharge;
+    }
+
+    /**
+     * 고객 부담 회수비를 누계에 더한다(#8 후속) — 반품 검수확정에서 실제로 차감한 금액만.
+     * 차감액은 호출자가 실효가로 클램프한 뒤 넘긴다(실효가보다 크게 물릴 수는 없다).
+     */
+    public void addReturnShippingCharge(long charge) {
+        if (charge < 0) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "회수비는 음수일 수 없습니다.");
+        }
+        this.returnShippingCharge += charge;
     }
 
     /**

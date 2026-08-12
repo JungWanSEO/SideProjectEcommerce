@@ -51,6 +51,7 @@ public class ReturnService {
     private final ProductOptionRepository productOptionRepository;   // 교환 대체 옵션 검증(#3 P6)
     private final ReturnEventEmitter returnEventEmitter;   // 상태 전이 → 구매자 알림 이벤트(#6 P2c)
     private final MemberCouponService memberCouponService;   // 전량 이탈 시 쿠폰 복원 — returns→coupon 단방향
+    private final com.commerce.api.order.service.ShippingPolicy shippingPolicy;   // 회수비 요율·부담 매트릭스(#8 후속)
 
     /**
      * 구매자 반품/교환 요청 생성. 부모 주문 비관락으로 중복요청을 직렬화하고, 대상 항목 자격(ACTIVE·배송완료·기한)을
@@ -89,6 +90,10 @@ public class ReturnService {
         // /returns/me로 조회·추적할 수 있게 한다(적대적리뷰 LOW: caller(admin) id로 귀속되던 문제 교정).
         ReturnRequest r = ReturnRequest.create(orderId, req.orderItemId(), ctx.shipmentId(), ctx.sellerId(),
                 order.getMemberId(), req.type(), req.reason(), req.reasonCode(), ctx.quantity(), req.exchangeOptionId());
+        // 회수비 요율을 신청 시점에 스냅샷(#8 후속) — 정책값이 올라도 진행 중인 반품의 부담액은 안 바뀐다
+        // (고객이 신청 화면에서 고지받은 금액 = 실제 차감액). 교환은 환불이 없어 부과 대상이 아니므로 0.
+        r.snapshotReturnShippingFee(
+                req.type() == com.commerce.api.returns.entity.ReturnType.RETURN ? shippingPolicy.getReturnFee() : 0L);
         returnRequestRepository.save(r);
         returnEventEmitter.emitStatusChanged(r);   // REQUESTED → 셀러에게 "반품 요청 접수" 알림(#6 P3b·같은 tx라 원자적)
         return ReturnResponse.from(r);
@@ -168,20 +173,40 @@ public class ReturnService {
      *
      * <p>순서(리뷰 HIGH 교정): <b>flip·상태전이 검증을 PG 환불보다 먼저</b> — markReturned(ACTIVE 가드)·markRefunded
      * (INSPECTED·RETURN 가드)가 모두 통과한 뒤에야 PG 환불을 호출한다. 환불 실패 시 502로 전체 롤백(flip·재입고 무산).
+     * 회수비 산출·클램프도 <b>PG 이전</b>에 끝낸다(#8 후속) — 같은 이유로, 외부 부작용 뒤에 롤백 가능한 계산이
+     * 오면 안 된다.
+     *
+     * <p><b>회수비(#8 후속)</b>: 고객 귀책이면 실지급액을 회수비만큼 줄이고, 줄인 만큼을 주문 누계에 더한다.
+     * 더하지 않으면 "결제액 − 환불누계 == payable" 항등식이 깨져 이후 취소가 회수비를 자동 환급한다.
+     * 실효가보다 크게 물릴 수 없도록 <b>클램프</b>한다 — 안 하면 저가·고할인 라인에서 음수 환불이 되어
+     * {@code refundForReturn}의 {@code <=0} 조기 리턴에 걸리거나(무음 손실) Payment가 400을 던져 전체 롤백된다.
      */
     private void refund(Order order, ReturnRequest r, Long changedBy) {
         if (r.getType() != com.commerce.api.returns.entity.ReturnType.RETURN) {
             throw new BusinessException(HttpStatus.CONFLICT, "반품(RETURN) 요청만 환불할 수 있습니다.");   // flip·PG 이전 조기 차단
         }
         OrderItem item = order.requireItem(r.getOrderItemId());
-        long refundAmount = order.effectivePriceOf(item);
+        long gross = order.effectivePriceOf(item);
+        long charge = Math.min(customerCharge(r), gross);      // 클램프 — 실효가보다 크게 물리지 않는다
+        long payout = gross - charge;
         item.markReturned();                                   // flip (ACTIVE 가드) — PG 이전
-        r.markRefunded(refundAmount, r.isRestock(), changedBy);// INSPECTED→REFUNDED (RETURN·INSPECTED 가드) — PG 이전
-        paymentService.refundForReturn(order.getId(), refundAmount);   // PG 환불 (외부 부작용)
+        r.markRefunded(payout, charge, r.isRestock(), changedBy); // INSPECTED→REFUNDED (가드) — PG 이전
+        order.addReturnShippingCharge(charge);                 // payable 가산 → 항등식 유지(이후 취소가 회수비를 환급하지 않게)
+        paymentService.refundForReturn(order.getId(), payout);  // PG 환불 (외부 부작용)
         if (r.isRestock()) {
             stockReservationService.undoForOrderItem(r.getOrderItemId());   // 재입고(CONSUMED→실재고 복원). 검수확정 시점에만.
         }
         releaseCouponIfFullyWithdrawn(order);
+    }
+
+    /**
+     * 고객이 부담할 회수비 — <b>확정 귀책</b>(P1 스냅샷)과 <b>신청 시점 요율 스냅샷</b>으로만 계산한다.
+     * 둘 다 스냅샷이라 정책·매핑이 바뀌어도 진행 중이던 반품의 부담액은 흔들리지 않는다.
+     * 레거시(요율 스냅샷 없음)는 0 — 소급 부과하지 않는다.
+     */
+    private long customerCharge(ReturnRequest r) {
+        Long rate = r.getReturnShippingFee();
+        return rate == null ? 0L : shippingPolicy.customerChargeOf(rate, r.effectiveFault());
     }
 
     /**
