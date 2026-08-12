@@ -24,9 +24,11 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
@@ -53,6 +55,7 @@ public class SettlementService {
     private final PaymentGatewayRouter paymentGatewayRouter;   // PG 수수료율 단일 출처(settlement → payment 정방향)
     private final OrderService orderService;                   // 주문 항목(셀러·소계) 조회(settlement → order)
     private final SellerRepository sellerRepository;           // 셀러 플랫폼 수수료율(commissionRate) 조회
+    private final com.commerce.api.returns.service.ReturnQueryService returnQueryService;   // 셀러 귀책 회수비(settlement → returns)
 
     /**
      * 정방향 정산이 만드는 <b>매출 원장</b> 종류(#8 후속). 멱등 게이트가 이 둘만 본다 —
@@ -184,6 +187,23 @@ public class SettlementService {
                 totalNet += returnEntry.getNetAmount();
                 byProvider.computeIfAbsent(provider, p -> new ProviderAccumulator(p, feeRate)).add(returnEntry);
                 bySeller.computeIfAbsent(null, SellerAccumulator::new).add(returnEntry);
+            }
+
+            // 8) 셀러 귀책 과금 엔트리(#8 후속 P4): 셀러 귀책 반품의 회수비를 셀러 정산에서 뗀다.
+            //    gross=0·chargeAmount=금액 → net = −금액. gross를 0으로 두는 것이 핵심 — 셀러↔플랫폼 내부
+            //    조정액이라 PG 원장에 대응 금액이 없어서, gross에 실으면 대사가 즉시 AMOUNT_MISMATCH로 튄다.
+            for (Map.Entry<Long, Long> fc : returnQueryService.getSellerFaultCharges(payment.orderId()).entrySet()) {
+                if (fc.getValue() <= 0) {
+                    continue;
+                }
+                SettlementEntry chargeEntry = SettlementEntry.faultCharge(
+                        payment.id(), payment.orderId(), payment.pgTransactionId(), provider,
+                        fc.getKey(), fc.getValue(), settledDate);
+                settlementRepository.save(chargeEntry);
+                created++;
+                totalNet += chargeEntry.getNetAmount();   // gross·fee는 0이라 총계에 영향 없음(대사 불변)
+                byProvider.computeIfAbsent(provider, p -> new ProviderAccumulator(p, feeRate)).add(chargeEntry);
+                bySeller.computeIfAbsent(fc.getKey(), SellerAccumulator::new).add(chargeEntry);
             }
         }
 
@@ -339,6 +359,32 @@ public class SettlementService {
                 settlementRepository.save(returnRev);
                 reversed++;
                 totalReversedNet += returnRev.getNetAmount();
+            }
+
+            // 셀러 귀책 과금 상계(#8 후속 P4): 셀러별로 자기 target(현재 귀책 회수비 합)과 이미 정산된 합의
+            //   차이만 남긴다. 셀러 매출 버킷과 분리돼 있어 매출 역분개와 서로를 오염시키지 않는다.
+            Map<Long, Long> settledChargeBySeller = new LinkedHashMap<>();
+            for (SettlementEntry e : existing) {
+                if (e.getEntryKind() == com.commerce.api.settlement.entity.SettlementEntryKind.FAULT_CHARGE) {
+                    settledChargeBySeller.merge(e.getSellerId(), e.getChargeAmount(), Long::sum);
+                }
+            }
+            Map<Long, Long> targetChargeBySeller =
+                    new LinkedHashMap<>(returnQueryService.getSellerFaultCharges(payment.orderId()));
+            Set<Long> chargeSellers = new LinkedHashSet<>(targetChargeBySeller.keySet());
+            chargeSellers.addAll(settledChargeBySeller.keySet());
+            for (Long sellerId : chargeSellers) {
+                long dCharge = targetChargeBySeller.getOrDefault(sellerId, 0L)
+                        - settledChargeBySeller.getOrDefault(sellerId, 0L);
+                if (dCharge == 0) {
+                    continue;
+                }
+                SettlementEntry chargeRev = SettlementEntry.faultCharge(
+                        payment.id(), payment.orderId(), payment.pgTransactionId(), provider,
+                        sellerId, dCharge, settledDate);
+                settlementRepository.save(chargeRev);
+                reversed++;
+                totalReversedNet += chargeRev.getNetAmount();
             }
         }
         return new SettlementReverseResponse(reversed, totalReversedNet);

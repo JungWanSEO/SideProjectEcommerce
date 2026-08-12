@@ -56,6 +56,7 @@ class SettlementServiceTest {
     private OrderService orderService;
     @Mock
     private SellerRepository sellerRepository;
+    @Mock private com.commerce.api.returns.service.ReturnQueryService returnQueryService;
 
     @InjectMocks
     private SettlementService settlementService;
@@ -64,6 +65,7 @@ class SettlementServiceTest {
     @org.junit.jupiter.api.BeforeEach
     void defaultNoDiscount() {
         lenient().when(orderService.getOrderDiscount(anyLong())).thenReturn(OrderDiscountInfo.none());
+        lenient().when(returnQueryService.getSellerFaultCharges(anyLong())).thenReturn(java.util.Map.of());
     }
 
     private PaymentResponse paidPayment(Long id, Long orderId, long amount, String provider) {

@@ -60,6 +60,23 @@ public interface ReturnRequestRepository extends JpaRepository<ReturnRequest, Lo
     List<Object[]> countByReasonCode(@Param("from") LocalDateTime from, @Param("to") LocalDateTime to);
 
     /**
+     * 주문의 <b>셀러 귀책 회수비</b>를 셀러별로 합산(#8 후속 P4) — 정산이 귀책 과금 엔트리를 만들 때 읽는다.
+     *
+     * <p>별도 컬럼을 두지 않은 이유: 셀러 부담액은 이미 있는 두 스냅샷(확정 귀책 {@code fault_party} +
+     * 신청 시점 요율 {@code return_shipping_fee})에서 파생된다. 고객 부담분({@code return_shipping_charged})과
+     * 달리 클램프가 없다 — 셀러 과금은 환불액에서 빼는 게 아니라 정산에서 떼는 것이라 상한이 다르다.
+     *
+     * <p>조건이 REFUNDED인 이유: 부담이 확정되는 시점은 반품 완주다. 교환(COMPLETED)은 요율 스냅샷 자체가
+     * 0이라 자연히 제외된다(교환은 v1 부과 대상 아님). sellerId가 null인 플랫폼 버킷도 제외한다.
+     */
+    @Query("select r.sellerId, coalesce(sum(r.returnShippingFee), 0) from ReturnRequest r "
+            + "where r.orderId = :orderId and r.sellerId is not null "
+            + "and r.faultParty = com.commerce.api.global.common.CancelReason$Fault.SELLER "
+            + "and r.status = com.commerce.api.returns.entity.ReturnStatus.REFUNDED "
+            + "group by r.sellerId")
+    List<Object[]> sumSellerFaultChargesByOrderId(@Param("orderId") Long orderId);
+
+    /**
      * 어드민 반품/교환 검색 — 전체 스코프(구매자/셀러 목록과 달리 소유 제한이 없다).
      *
      * <p>필터는 <b>nullable 바인딩</b>: null이면 그 조건을 건너뛴다(대사 윈도우 쿼리와 같은 방식). 상태·유형·셀러로

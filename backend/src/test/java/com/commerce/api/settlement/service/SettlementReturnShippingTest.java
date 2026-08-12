@@ -52,6 +52,7 @@ class SettlementReturnShippingTest {
     @Mock private PaymentGatewayRouter paymentGatewayRouter;
     @Mock private OrderService orderService;
     @Mock private SellerRepository sellerRepository;
+    @Mock private com.commerce.api.returns.service.ReturnQueryService returnQueryService;
 
     @InjectMocks private SettlementService settlementService;
 
@@ -60,6 +61,7 @@ class SettlementReturnShippingTest {
     @org.junit.jupiter.api.BeforeEach
     void defaultNoDiscount() {
         lenient().when(orderService.getOrderDiscount(anyLong())).thenReturn(OrderDiscountInfo.none());
+        lenient().when(returnQueryService.getSellerFaultCharges(anyLong())).thenReturn(java.util.Map.of());
     }
 
     private PaymentResponse payment(Long id, Long orderId, long amount) {
@@ -186,6 +188,50 @@ class SettlementReturnShippingTest {
         List<SettlementEntry> saved = captureSaved(1);
         assertThat(saved.get(0).getEntryKind()).isEqualTo(SettlementEntryKind.RETURN_SHIPPING);
         assertThat(saved.get(0).getGrossAmount()).isEqualTo(2000L);   // 5000 − 3000, 통째로가 아니라 차액만
+    }
+
+    @Test
+    @DisplayName("★ 셀러 귀책 과금 - gross=0·net=−과금액이라 Σgross(대사)를 건드리지 않는다")
+    void run_sellerFaultCharge_doesNotTouchGross() {
+        given(paymentService.getPaidPayments()).willReturn(List.of(payment(1L, 11L, 10000L)));
+        given(settlementRepository.existsByPaymentIdAndEntryKindIn(anyLong(), any())).willReturn(false);
+        given(settlementRepository.save(any(SettlementEntry.class))).willAnswer(inv -> inv.getArgument(0));
+        given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);
+        given(orderService.getOrderItems(11L)).willReturn(List.of(item(1L, 10000L, OrderItemStatus.ACTIVE)));
+        given(sellerRepository.findById(1L)).willReturn(Optional.of(sellerWithRate(1L, 0.10)));
+        given(returnQueryService.getSellerFaultCharges(11L)).willReturn(java.util.Map.of(1L, 3000L));
+
+        settlementService.run();
+
+        List<SettlementEntry> saved = captureSaved(2);
+        SettlementEntry charge = saved.stream()
+                .filter(e -> e.getEntryKind() == SettlementEntryKind.FAULT_CHARGE).findFirst().orElseThrow();
+        assertThat(charge.getSellerId()).isEqualTo(1L);
+        assertThat(charge.getChargeAmount()).isEqualTo(3000L);
+        assertThat(charge.getNetAmount()).isEqualTo(-3000L);   // 셀러 실수령에서 차감
+        // ★ gross는 0 — 셀러↔플랫폼 내부 조정액이라 PG 원장에 대응 금액이 없다.
+        //   gross에 실으면 Σgross가 결제액과 어긋나 대사가 즉시 AMOUNT_MISMATCH로 튄다.
+        assertThat(charge.getGrossAmount()).isZero();
+        assertThat(charge.getFee()).isZero();
+        assertThat(saved.stream().mapToLong(SettlementEntry::getGrossAmount).sum()).isEqualTo(10000L);
+    }
+
+    @Test
+    @DisplayName("역분개 - 셀러 귀책 과금도 자기 target과만 비교한다(변화 없으면 멱등)")
+    void reverse_faultChargeIdempotent() {
+        given(paymentService.getSettlementReversalCandidates()).willReturn(List.of(payment(1L, 11L, 10000L)));
+        given(settlementRepository.findByPaymentId(1L)).willReturn(List.of(
+                SettlementEntry.scheduled(1L, 11L, "tx", "TOSS", 1L, 10000L, 250L, 0.025, 1000L, 0.10, SETTLED),
+                SettlementEntry.faultCharge(1L, 11L, "tx", "TOSS", 1L, 3000L, SETTLED)));
+        given(paymentGatewayRouter.feeRateOf("TOSS")).willReturn(0.025);
+        given(orderService.getOrderItems(11L)).willReturn(List.of(item(1L, 10000L, OrderItemStatus.ACTIVE)));
+        given(returnQueryService.getSellerFaultCharges(11L)).willReturn(java.util.Map.of(1L, 3000L));
+
+        settlementService.reverseRefunds();
+
+        // 매출도 과금도 변화 없음 → 역분개 0건. 과금 엔트리가 셀러 매출 버킷에 섞였다면
+        // gross 0·platformFeeRate 0.0이 집계를 오염시켜 엉뚱한 상계가 나갔을 것이다.
+        verify(settlementRepository, org.mockito.Mockito.never()).save(any(SettlementEntry.class));
     }
 
     @Test
