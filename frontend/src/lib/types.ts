@@ -378,7 +378,9 @@ export interface Payout {
   totalGross: number;
   totalFee: number;
   totalPlatformFee: number;
-  totalNet: number; // 실지급액
+  totalNet: number; // 실지급액 = max(0, 기간 net + carriedIn) — 음수 송금은 만들지 않는다
+  carriedIn: number; // 직전 기간에서 넘어온 잔액(≤0, #8 후속) — 이번 지급액에서 선차감됨
+  carriedOver: number; // 다음 기간으로 넘기는 잔액(≤0)
   entryCount: number;
   status: PayoutStatus;
   paidAt: string | null;

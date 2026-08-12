@@ -55,14 +55,20 @@ public class PayoutService {
             platformFee += e.getPlatformFee();
             net += e.getNetAmount();
         }
-        // 음수 순액 가드(#3 P5) — 반품 역분개로 이 기간 net이 음수면 "음수 송금"이 되므로 지급을 만들지 않는다.
-        //   음수 SCHEDULED 항목은 payoutId=null로 남아 다음 정산 기간(넓은 범위)에서 양수와 상계·이월된다.
-        if (net < 0) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST,
-                    "정산 순액이 음수입니다(환불이 매출을 초과). 다음 정산 기간에 이월 상계됩니다.");
-        }
+        // 이월 잔액 모델(#8 후속 P6) — 예전엔 기간 net이 음수면 400을 던져 지급 묶음 자체를 안 만들었다.
+        //   그러면 반품 역분개·셀러 귀책 과금이 그 기간 매출을 넘는 순간 <b>정상 매출까지 통째로 미지급</b>이 되고
+        //   (셀러 체감은 "정산이 안 나왔다"), 음수 항목이 payoutId=null로 남아 "다음에 더 넓은 기간으로 쓸어담기"를
+        //   기대하는 구조라 얼마나 넓혀야 하는지 아무도 알 수 없었다.
+        //   이제 부족분만 다음 기간으로 넘긴다: 지급액 = max(0, 기간 net + 직전 이월) / 이월 = min(0, 그 합).
+        //   지급액이 0이어도 묶음은 만들고 기간 항목을 전부 편입한다 — 항목이 정확히 한 번 소비되고
+        //   "이 기간은 0원 정산, N원 이월"이라는 기록이 남아 지급 이력이 끊기지 않는다.
+        long carriedIn = payoutRepository
+                .findFirstBySellerIdOrderByIdDesc(request.sellerId())
+                .map(Payout::getCarriedOver)
+                .orElse(0L);
         Payout payout = payoutRepository.save(Payout.create(
-                request.sellerId(), request.from(), request.to(), gross, fee, platformFee, net, entries.size()));
+                request.sellerId(), request.from(), request.to(), gross, fee, platformFee, net, carriedIn,
+                entries.size()));
 
         // 묶음 편입은 원자적 조건부 UPDATE로(동시성) — 조건절 없는 setter(dirty checking)는 같은 셀러·윈도우로 동시
         //   create()가 겹치면 같은 항목을 두 묶음이 각각 잡아(lost update) 동일 엔트리 net을 이중지급할 수 있었다.

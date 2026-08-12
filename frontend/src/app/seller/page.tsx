@@ -216,7 +216,22 @@ export default function SellerConsolePage() {
                       {p.periodFrom} ~ {p.periodTo}
                     </td>
                     <td className="px-4 py-3 text-right text-gray-500">{p.entryCount}</td>
-                    <td className="px-4 py-3 text-right font-medium text-green-700">{p.totalNet.toLocaleString()}</td>
+                    {/*
+                      셀러가 "왜 덜 받았는지"를 알 수 있어야 이월 모델이 의미가 있다(#8 후속).
+                      전월 이월이 있으면 이번 지급에서 선차감됐다는 뜻이고, 차월 이월이 있으면
+                      이번 기간 정산이 음수라 부족분이 다음으로 넘어갔다는 뜻이다.
+                    */}
+                    <td className="px-4 py-3 text-right">
+                      <div className="font-medium text-green-700">{p.totalNet.toLocaleString()}</div>
+                      {p.carriedIn !== 0 && (
+                        <div className="text-xs text-amber-700">전월 이월 {p.carriedIn.toLocaleString()} 차감</div>
+                      )}
+                      {p.carriedOver !== 0 && (
+                        <div className="text-xs text-red-600">
+                          차월 이월 {p.carriedOver.toLocaleString()}
+                        </div>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <span
                         className={`rounded px-2 py-0.5 text-xs ${
